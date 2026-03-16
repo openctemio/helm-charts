@@ -1,0 +1,37 @@
+name: Lint and Template
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v4.0.4
+
+      - name: Lint charts
+        run: |
+          for chart in charts/*; do
+            if [ -d "$chart" ]; then
+              echo "Linting $chart"
+              helm lint "$chart"
+            fi
+          done
+
+      - name: Render templates
+        run: |
+          for chart in charts/*; do
+            if [ -d "$chart" ]; then
+              echo "Rendering $chart"
+              helm template "$chart" > /dev/null
+            fi
+          done

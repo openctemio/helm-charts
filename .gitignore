@@ -1,0 +1,11 @@
+.DS_Store
+*.swp
+*.swo
+*.tmp
+*.bak
+*.tgz
+*.log
+dist/
+tmp/
+cr-index/
+charts/*/charts/

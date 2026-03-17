@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+{{- $dbSecretChecksumSource := include "openctem.dbSecretChecksumSource" . | trim }}
+{{- $redisSecretChecksumSource := include "openctem.redisSecretChecksumSource" . | trim }}
+metadata:
+  name: {{ include "openctem.apiFullname" . }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+spec:
+  {{- with .Values.api.deploymentStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "openctem.apiSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.api.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $dbSecretChecksumSource }}
+        checksum/db-secret: {{ $dbSecretChecksumSource | sha256sum }}
+        {{- end }}
+        {{- if $redisSecretChecksumSource }}
+        checksum/redis-secret: {{ $redisSecretChecksumSource | sha256sum }}
+        {{- end }}
+      labels:
+        {{- include "openctem.apiLabels" . | nindent 8 }}
+        {{- with .Values.api.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "openctem.apiServiceAccountName" . }}
+      {{- with .Values.api.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          {{- with .Values.api.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: SERVER_PORT
+              value: "8080"
+            - name: APP_NAME
+              value: {{ include "openctem.name" . }}
+            - name: DB_HOST
+              value: {{ include "openctem.databaseHost" . | quote }}
+            - name: DB_PORT
+              value: {{ include "openctem.databasePort" . | quote }}
+            - name: DB_NAME
+              value: {{ include "openctem.databaseName" . | quote }}
+            {{- if .Values.postgresql.enabled }}
+            - name: DB_USER
+              value: {{ include "openctem.databaseUser" . | quote }}
+            {{- else }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.dbCredentialsSecretName" . }}
+                  key: {{ .Values.database.auth.userKey }}
+            {{- end }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.dbCredentialsSecretName" . }}
+                  key: {{ include "openctem.dbPasswordSecretKey" . }}
+            - name: REDIS_HOST
+              value: {{ include "openctem.redisEffectiveHost" . | quote }}
+            - name: REDIS_PORT
+              value: {{ include "openctem.redisEffectivePort" . | quote }}
+            - name: REDIS_DB
+              value: {{ include "openctem.redisEffectiveDb" . | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.redisPasswordSecretName" . }}
+                  key: {{ include "openctem.redisPasswordSecretKey" . }}
+            # Extra environment variables
+            {{- if .Values.api.extraEnv }}
+            {{- toYaml .Values.api.extraEnv | nindent 12 }}
+            {{- end }}
+            # Extra environment variables from config maps and secrets
+          {{- if .Values.api.extraEnvFrom }}
+          envFrom:
+            {{- toYaml .Values.api.extraEnvFrom | nindent 12 }}
+          {{- end }}
+          {{- with .Values.api.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.api.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.api.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.api.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.api.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

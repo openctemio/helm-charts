@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openctem.apiFullname" . }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+  {{- with .Values.api.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.api.service.type }}
+  ports:
+    - port: {{ .Values.api.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+      {{- if .Values.api.service.nodePort }}
+      nodePort: {{ .Values.api.service.nodePort | int }}
+      {{- end }}
+  selector:
+    {{- include "openctem.apiSelectorLabels" . | nindent 4 }}

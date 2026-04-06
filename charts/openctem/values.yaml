@@ -99,6 +99,42 @@ api:
   # - secretRef:
   #     name: openctem-extra-secret
 
+  migrations:
+    # -- Enable the database migrations Job.
+    enabled: true
+
+    image:
+      repository: openctemio/migrations
+      # -- Image tag for the migrations image. Defaults to .Chart.AppVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+
+    # -- Run as a Helm hook (post-install,pre-upgrade). When false, the Job
+    # is applied as a plain resource (useful for GitOps flows).
+    hooks:
+      enabled: true
+
+    # -- Job backoffLimit (retries before Job is marked failed).
+    backoffLimit: 2
+    # -- Hard timeout for the migration Job in seconds.
+    activeDeadlineSeconds: 600
+
+    # -- Override the Postgres sslmode used in the connection URL.
+    # Blank = "disable" when postgresql.enabled, otherwise "require".
+    sslMode: ""
+
+    resources: {}
+    podSecurityContext: {}
+    securityContext: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+    # -- Extra environment variables for the migration container.
+    extraEnv: []
+    # -- Extra args appended BEFORE the "up" subcommand.
+    extraArgs: []
+
 ui:
   replicaCount: 1
 

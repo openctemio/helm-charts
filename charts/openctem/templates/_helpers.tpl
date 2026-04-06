@@ -324,6 +324,52 @@ Resolve Redis password secret key.
 {{- end }}
 
 {{/*
+Labels for the API migrations Job.
+*/}}
+{{- define "openctem.apiMigrationsLabels" -}}
+{{ include "openctem.labels" . }}
+app.kubernetes.io/component: api-migrations
+{{- end }}
+
+{{/*
+Selector labels for the API migrations Job.
+*/}}
+{{- define "openctem.apiMigrationsSelectorLabels" -}}
+{{ include "openctem.selectorLabels" . }}
+app.kubernetes.io/component: api-migrations
+{{- end }}
+
+{{/*
+Create API migrations Job workload name.
+*/}}
+{{- define "openctem.apiMigrationsFullname" -}}
+{{ include "openctem.componentFullname" (dict "context" . "component" "api-migrations") }}
+{{- end }}
+
+{{/*
+Resolve fully qualified migrations image reference.
+*/}}
+{{- define "openctem.apiMigrationsImage" -}}
+{{- $tag := .Values.api.migrations.image.tag | default .Chart.AppVersion -}}
+{{- printf "%s:%s" .Values.api.migrations.image.repository $tag -}}
+{{- end }}
+
+{{/*
+Resolve Postgres sslmode for the migrations Job.
+Explicit api.migrations.sslMode wins. Otherwise: "disable" when bundled
+Postgres is enabled, "require" for external DB.
+*/}}
+{{- define "openctem.databaseSslMode" -}}
+{{- if .Values.api.migrations.sslMode -}}
+{{- .Values.api.migrations.sslMode -}}
+{{- else if .Values.postgresql.enabled -}}
+disable
+{{- else -}}
+require
+{{- end -}}
+{{- end }}
+
+{{/*
 Build checksum source for DB-related secret refs.
 */}}
 {{- define "openctem.dbSecretChecksumSource" -}}

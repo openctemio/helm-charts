@@ -53,7 +53,7 @@ spec:
               containerPort: 3000
               protocol: TCP
           env:
-            - name: BACKEND_URL
+            - name: BACKEND_API_URL
               {{- if .Values.ui.config.backendUrl }}
               value: {{ .Values.ui.config.backendUrl | quote }}
               {{- else }}

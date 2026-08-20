@@ -32,6 +32,9 @@ spec:
         {{- if .Values.api.migrations.enabled }}
         checksum/migrations-job: {{ include (print $.Template.BasePath "/api-migrations-job.yaml") . | sha256sum }}
         {{- end }}
+        {{- if or (not .Values.api.encryption.existingSecret) (not .Values.api.auth.existingSecret) }}
+        checksum/app-secret: {{ include (print $.Template.BasePath "/api-app-secret.yaml") . | sha256sum }}
+        {{- end }}
       labels:
         {{- include "openctem.apiLabels" . | nindent 8 }}
         {{- with .Values.api.podLabels }}
@@ -66,12 +69,34 @@ spec:
               value: "8080"
             - name: APP_NAME
               value: {{ include "openctem.name" . }}
+            # -- APP_ENV=production (the default) turns validateProduction() into
+            # a hard boot gate: DB TLS, Redis TLS + >=32-char password, >=64-char
+            # JWT secret, encryption key, and secure cookies all become required.
+            - name: APP_ENV
+              value: {{ .Values.api.appEnv | quote }}
+            - name: AUTH_PROVIDER
+              value: {{ .Values.api.auth.provider | quote }}
+            - name: AUTH_COOKIE_SECURE
+              value: {{ .Values.api.auth.cookieSecure | quote }}
+            - name: APP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.apiEncryptionSecretName" . }}
+                  key: {{ include "openctem.apiEncryptionSecretKey" . }}
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.apiJwtSecretName" . }}
+                  key: {{ include "openctem.apiJwtSecretKey" . }}
             - name: DB_HOST
               value: {{ include "openctem.databaseHost" . | quote }}
             - name: DB_PORT
               value: {{ include "openctem.databasePort" . | quote }}
             - name: DB_NAME
               value: {{ include "openctem.databaseName" . | quote }}
+            # -- Keep API and the migration Job on the SAME TLS mode (BL-4).
+            - name: DB_SSLMODE
+              value: {{ include "openctem.databaseSslMode" . | quote }}
             {{- if .Values.postgresql.enabled }}
             - name: DB_USER
               value: {{ include "openctem.databaseUser" . | quote }}
@@ -93,6 +118,13 @@ spec:
               value: {{ include "openctem.redisEffectivePort" . | quote }}
             - name: REDIS_DB
               value: {{ include "openctem.redisEffectiveDb" . | quote }}
+            # -- Redis TLS. Production (APP_ENV=production) REQUIRES TLS. The
+            # bundled Bitnami Redis does not terminate TLS, so production
+            # deployments should point at an external Redis with TLS enabled.
+            - name: REDIS_TLS_ENABLED
+              value: {{ .Values.api.redis.tlsEnabled | quote }}
+            - name: REDIS_TLS_SKIP_VERIFY
+              value: {{ .Values.api.redis.tlsSkipVerify | quote }}
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -106,6 +138,10 @@ spec:
           {{- if .Values.api.extraEnvFrom }}
           envFrom:
             {{- toYaml .Values.api.extraEnvFrom | nindent 12 }}
+          {{- end }}
+          {{- with .Values.api.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with .Values.api.livenessProbe }}
           livenessProbe:

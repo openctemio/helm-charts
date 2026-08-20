@@ -165,6 +165,89 @@ Build checksum source for UI secret (for pod annotation rollout trigger).
 {{- end }}
 
 {{/*
+Name of the chart-managed API app secret holding APP_ENCRYPTION_KEY and
+AUTH_JWT_SECRET (only the keys not sourced from an existingSecret).
+*/}}
+{{- define "openctem.apiAppSecretName" -}}
+{{- printf "%s-app" (include "openctem.apiFullname" .) -}}
+{{- end }}
+
+{{/*
+Effective secret name / key for APP_ENCRYPTION_KEY.
+*/}}
+{{- define "openctem.apiEncryptionSecretName" -}}
+{{- if .Values.api.encryption.existingSecret -}}
+{{- .Values.api.encryption.existingSecret -}}
+{{- else -}}
+{{- include "openctem.apiAppSecretName" . -}}
+{{- end -}}
+{{- end }}
+{{- define "openctem.apiEncryptionSecretKey" -}}
+{{- if .Values.api.encryption.existingSecret -}}
+{{- .Values.api.encryption.keyRef -}}
+{{- else -}}
+APP_ENCRYPTION_KEY
+{{- end -}}
+{{- end }}
+
+{{/*
+Effective secret name / key for AUTH_JWT_SECRET.
+*/}}
+{{- define "openctem.apiJwtSecretName" -}}
+{{- if .Values.api.auth.existingSecret -}}
+{{- .Values.api.auth.existingSecret -}}
+{{- else -}}
+{{- include "openctem.apiAppSecretName" . -}}
+{{- end -}}
+{{- end }}
+{{- define "openctem.apiJwtSecretKey" -}}
+{{- if .Values.api.auth.existingSecret -}}
+{{- .Values.api.auth.jwtSecretKey -}}
+{{- else -}}
+AUTH_JWT_SECRET
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the APP_ENCRYPTION_KEY value. Precedence: explicit inline value >
+value already stored in the chart-managed Secret (looked up on the cluster,
+so it PERSISTS across upgrades and is never rotated) > generate a fresh
+44-char base64 key (a valid AES-256 key per api config validateEncryption).
+This mirrors the UI CSRF-secret generate-once pattern exactly.
+Call with: (dict "context" . "existingSecret" $existingSecret)
+*/}}
+{{- define "openctem.apiEncryptionKeyValue" -}}
+{{- $ctx := .context -}}
+{{- $existing := .existingSecret -}}
+{{- if $ctx.Values.api.encryption.key -}}
+{{- $ctx.Values.api.encryption.key -}}
+{{- else if and $existing (hasKey $existing.data "APP_ENCRYPTION_KEY") -}}
+{{- index $existing.data "APP_ENCRYPTION_KEY" | b64dec -}}
+{{- else -}}
+{{- randBytes 32 -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the AUTH_JWT_SECRET value. Same generate-once-and-persist precedence
+as the encryption key. Generated value is 64 base64 chars, satisfying the
+production >= 64 char requirement. Rotating it logs everyone out, so the
+cluster lookup keeps it stable across upgrades.
+Call with: (dict "context" . "existingSecret" $existingSecret)
+*/}}
+{{- define "openctem.apiJwtSecretValue" -}}
+{{- $ctx := .context -}}
+{{- $existing := .existingSecret -}}
+{{- if $ctx.Values.api.auth.jwtSecret -}}
+{{- $ctx.Values.api.auth.jwtSecret -}}
+{{- else if and $existing (hasKey $existing.data "AUTH_JWT_SECRET") -}}
+{{- index $existing.data "AUTH_JWT_SECRET" | b64dec -}}
+{{- else -}}
+{{- randBytes 48 -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Resolve PostgreSQL service name when subchart is enabled.
 */}}
 {{- define "openctem.postgresqlHost" -}}

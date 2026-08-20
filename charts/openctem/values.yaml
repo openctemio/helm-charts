@@ -10,6 +10,50 @@ imagePullSecrets: []
 api:
   replicaCount: 1
 
+  # -- Application environment. "production" (the secure default) turns
+  # validateProduction() into a HARD BOOT GATE: it requires DB TLS, Redis TLS +
+  # a >=32-char Redis password, a >=64-char JWT secret, an encryption key, and
+  # secure cookies — the API refuses to start otherwise. Set to "development"
+  # or "staging" ONLY as a conscious opt-out (e.g. to run the bundled, non-TLS
+  # Redis for a demo). See values-production.yaml for the required prod values.
+  appEnv: "production"
+
+  auth:
+    # -- AUTH_PROVIDER: "local" (built-in email/password, the product default),
+    # "oidc" (Keycloak) or "hybrid". "oidc"/"hybrid" additionally require the
+    # Keycloak block to be configured in production.
+    provider: "local"
+    # -- AUTH_COOKIE_SECURE — must be true in production (HTTPS).
+    cookieSecure: true
+    # -- JWT signing secret (AUTH_JWT_SECRET). STABLE across upgrades — rotating
+    # it logs every user out. Leave blank to auto-generate-once and persist (via
+    # cluster lookup); production should set an explicit value or existingSecret.
+    # Must be >= 64 characters in production.
+    jwtSecret: ""
+    # -- Source AUTH_JWT_SECRET from an existing Secret instead of the chart.
+    existingSecret: ""
+    jwtSecretKey: AUTH_JWT_SECRET
+
+  encryption:
+    # -- APP_ENCRYPTION_KEY (AES-256-GCM) for integration credentials at rest.
+    # Without it, non-dev deployments refuse to boot; a wrong/rotated key makes
+    # all stored credentials undecryptable. STABLE across upgrades — never
+    # rotated automatically. Leave blank to auto-generate-once and persist;
+    # production should set an explicit value or existingSecret.
+    # Accepts 32 raw / 64 hex / 44 base64 chars.
+    key: ""
+    # -- Source APP_ENCRYPTION_KEY from an existing Secret instead of the chart.
+    existingSecret: ""
+    keyRef: APP_ENCRYPTION_KEY
+
+  redis:
+    # -- REDIS_TLS_ENABLED. Production REQUIRES TLS. The bundled Bitnami Redis
+    # does not terminate TLS, so production must point at an external Redis with
+    # TLS (redis.enabled=false + redisConfig.*) and set this true.
+    tlsEnabled: false
+    # -- REDIS_TLS_SKIP_VERIFY — must stay false in production.
+    tlsSkipVerify: false
+
   image:
     repository: openctemio/api
     pullPolicy: IfNotPresent
@@ -24,8 +68,52 @@ api:
   podAnnotations: {}
   podLabels: {}
 
-  podSecurityContext: {}
-  securityContext: {}
+  # -- Pod-level security context (safe non-root defaults; API image runs as uid 1000).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container-level security context. readOnlyRootFilesystem is left OFF: the
+  # API writes local attachment storage under /app/data; enable it only with a
+  # writable volume mounted there.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    # readOnlyRootFilesystem: true
+
+  # -- Bootstrap the first PLATFORM admin (admin_users + admin API key printed
+  # to the Job log; used by the openctem-admin CLI / platform console).
+  bootstrapAdmin:
+    enabled: false
+    email: ""
+    name: ""
+    role: super_admin
+    force: false
+    backoffLimit: 2
+    activeDeadlineSeconds: 300
+
+  # -- Bootstrap the first TENANT + OWNER user (the login the UI needs on day
+  # one). Password comes from passwordExistingSecret (preferred) or the inline
+  # password value below.
+  bootstrapTenant:
+    enabled: false
+    email: ""
+    name: ""
+    teamName: ""
+    teamSlug: ""
+    password: ""
+    passwordExistingSecret: ""
+    passwordSecretKey: TENANT_PASSWORD
+    force: false
+    backoffLimit: 2
+    activeDeadlineSeconds: 300
 
   deploymentStrategy: {}
     # type: RollingUpdate
@@ -65,8 +153,23 @@ api:
               type: PathPrefix
               value: /
 
-  resources: {}
+  # -- CPU requests are REQUIRED for the CPU-target HPA to function.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
 
+  # -- Optional startupProbe (gives a slow first boot / migrations time before
+  # liveness kicks in). Empty {} disables it.
+  startupProbe: {}
+    # httpGet:
+    #   path: /health
+    #   port: http
+    # failureThreshold: 30
+    # periodSeconds: 5
   livenessProbe:
     httpGet:
       path: /health
@@ -82,6 +185,12 @@ api:
     maxReplicas: 100
     targetCPUUtilizationPercentage: 80
     # targetMemoryUtilizationPercentage: 80
+
+  # -- Optional PodDisruptionBudget. Set minAvailable OR maxUnavailable.
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+    maxUnavailable: ""
 
   volumes: []
   volumeMounts: []
@@ -153,7 +262,9 @@ ui:
     existingSecret: ""
     # -- Create UI secret when existingSecret is not set.
     createSecret: true
-    csrfTokenKey: CSRF_TOKEN
+    # -- Secret data key holding the CSRF secret. The UI reads it as the
+    # CSRF_SECRET env var (ui/src/lib/env.ts).
+    csrfTokenKey: CSRF_SECRET
     # -- Leave empty to auto-generate like `openssl rand -base64 32`.
     csrfToken: ""
 
@@ -166,8 +277,24 @@ ui:
   podAnnotations: {}
   podLabels: {}
 
-  podSecurityContext: {}
-  securityContext: {}
+  # -- Pod-level security context (UI image runs as uid 1001 "nextjs").
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container-level security context. readOnlyRootFilesystem is left OFF:
+  # Next.js writes to .next/cache at runtime.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    # readOnlyRootFilesystem: true
 
   deploymentStrategy: {}
     # type: RollingUpdate
@@ -207,8 +334,22 @@ ui:
               type: PathPrefix
               value: /
 
-  resources: {}
+  # -- CPU requests are REQUIRED for the CPU-target HPA to function.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
 
+  # -- Optional startupProbe. Empty {} disables it.
+  startupProbe: {}
+    # httpGet:
+    #   path: /
+    #   port: http
+    # failureThreshold: 30
+    # periodSeconds: 5
   livenessProbe:
     httpGet:
       path: /
@@ -224,6 +365,12 @@ ui:
     maxReplicas: 100
     targetCPUUtilizationPercentage: 80
     # targetMemoryUtilizationPercentage: 80
+
+  # -- Optional PodDisruptionBudget. Set minAvailable OR maxUnavailable.
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+    maxUnavailable: ""
 
   volumes: []
   volumeMounts: []

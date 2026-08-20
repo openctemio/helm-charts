@@ -17,3 +17,59 @@
   {{- end }}
 {{- end }}
 {{- end }}
+
+3. Deployment mode
+- APP_ENV: {{ .Values.api.appEnv }}
+{{- if eq .Values.api.appEnv "production" }}
+  Running in PRODUCTION mode — the API enforces validateProduction() at boot.
+{{- else }}
+  Running in {{ .Values.api.appEnv }} mode — production boot gates are RELAXED. Do not use for real data.
+{{- end }}
+
+{{- if eq .Values.api.appEnv "production" }}
+
+4. Production required-secrets checklist
+{{- $warn := list -}}
+{{- if and (not .Values.api.encryption.key) (not .Values.api.encryption.existingSecret) }}
+{{- $warn = append $warn "APP_ENCRYPTION_KEY is auto-generated. Set api.encryption.key or api.encryption.existingSecret for a stable, externally-managed key. (A rotated key makes stored integration credentials undecryptable.)" -}}
+{{- end }}
+{{- if and (not .Values.api.auth.jwtSecret) (not .Values.api.auth.existingSecret) }}
+{{- $warn = append $warn "AUTH_JWT_SECRET is auto-generated. Set api.auth.jwtSecret (>=64 chars) or api.auth.existingSecret. (A rotated secret logs everyone out.)" -}}
+{{- end }}
+{{- if and .Values.redis.enabled (not .Values.api.redis.tlsEnabled) }}
+{{- $warn = append $warn "Redis TLS is REQUIRED in production but redis.enabled=true (bundled Redis has no TLS). Use an external Redis (redis.enabled=false + redisConfig.*) with api.redis.tlsEnabled=true and a >=32-char password, OR set api.appEnv to a non-production value as a conscious opt-out." -}}
+{{- end }}
+{{- if not .Values.api.redis.tlsEnabled }}
+{{- $warn = append $warn "api.redis.tlsEnabled is false — the API will refuse to boot in production (redis TLS must be enabled)." -}}
+{{- end }}
+{{- if and .Values.postgresql.enabled (eq (include "openctem.databaseSslMode" .) "disable") }}
+{{- $warn = append $warn "DB_SSLMODE resolves to 'disable' — the API will refuse to boot in production. Use an external Postgres with TLS and set api.migrations.sslMode=require (or verify-full)." -}}
+{{- end }}
+{{- if not .Values.api.auth.cookieSecure }}
+{{- $warn = append $warn "api.auth.cookieSecure is false — must be true in production (serve over HTTPS)." -}}
+{{- end }}
+{{- if eq (.Values.api.auth.provider | toString) "local" }}{{- else }}
+{{- $warn = append $warn (printf "AUTH_PROVIDER=%s requires Keycloak configured over HTTPS in production." .Values.api.auth.provider) -}}
+{{- end }}
+{{- if $warn }}
+!! ACTION REQUIRED — the API may fail to boot until these are resolved:
+{{- range $i, $w := $warn }}
+  [{{ add $i 1 }}] {{ $w }}
+{{- end }}
+{{- else }}
+  All chart-checkable production requirements look satisfied. Ensure the Redis
+  password (external) is >=32 chars and TLS terminates correctly.
+{{- end }}
+{{- end }}
+
+5. First login
+{{- if .Values.api.bootstrapTenant.enabled }}
+- A first tenant + owner login was bootstrapped for {{ .Values.api.bootstrapTenant.email }} (see the bootstrap-tenant Job).
+{{- else }}
+- No UI login was bootstrapped. Enable api.bootstrapTenant (first tenant + owner) or run:
+    kubectl exec deploy/{{ include "openctem.apiFullname" . }} -- /app/bootstrap-tenant -email=you@example.com -password=... -team="Your Org" -slug=your-org
+{{- end }}
+{{- if .Values.api.bootstrapAdmin.enabled }}
+- A platform admin was bootstrapped for {{ .Values.api.bootstrapAdmin.email }}. Retrieve its API key:
+    kubectl logs job/{{ include "openctem.apiFullname" . }}-bootstrap-admin
+{{- end }}

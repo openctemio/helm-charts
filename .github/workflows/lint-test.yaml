@@ -29,18 +29,42 @@ jobs:
 
       - name: Lint charts
         run: |
+          # Lint in dev/eval mode: api.appEnv=production is a fail-closed gate
+          # that requires stable secrets, so a bare lint could error depending
+          # on the helm version. Production posture is separately linted via the
+          # values-production render/assert steps below.
           for chart in charts/*; do
             if [ -d "$chart" ]; then
               echo "Linting $chart"
-              helm lint "$chart"
+              helm lint "$chart" --set api.appEnv=development
             fi
           done
 
-      - name: Render templates
+      - name: Render templates (dev/eval mode)
         run: |
+          # The openctem chart is secure-by-default: api.appEnv=production is a
+          # fail-closed gate that REQUIRES a stable APP_ENCRYPTION_KEY /
+          # AUTH_JWT_SECRET (see values-production.yaml). A bare production
+          # render is therefore expected to fail, so smoke-render in dev/eval
+          # mode (bundled datastores, auto-generated secrets).
           for chart in charts/*; do
             if [ -d "$chart" ]; then
-              echo "Rendering $chart"
-              helm template "$chart" > /dev/null
+              echo "Rendering $chart (dev/eval mode)"
+              helm template "$chart" --set api.appEnv=development > /dev/null
             fi
           done
+
+      - name: Render templates (production values)
+        run: |
+          # Production values file provides the required secrets -> must render.
+          helm template charts/openctem -f charts/openctem/values-production.yaml > /dev/null
+
+      - name: Assert production fail-closed without secrets
+        run: |
+          # With api.appEnv=production and no encryption key / JWT secret /
+          # existingSecret, the render MUST fail (GitOps anti-rotation guard).
+          if helm template charts/openctem > /dev/null 2>&1; then
+            echo "::error::Expected production render to FAIL without secrets, but it succeeded"
+            exit 1
+          fi
+          echo "OK: production render is correctly fail-closed without secrets"

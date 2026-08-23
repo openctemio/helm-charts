@@ -15,7 +15,7 @@ type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.3.0
+version: 0.4.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to
@@ -23,12 +23,20 @@ version: 0.3.0
 # It is recommended to use it with quotes.
 appVersion: "v0.7.0"
 
+# NOTE: the bundled Bitnami Postgres/Redis subcharts below are for DEV / EVAL
+# ONLY. Production must use external managed datastores (postgresql.enabled=false,
+# redis.enabled=false) — see values-production.yaml and README. Bitnami has
+# deprecated its free Docker Hub images, so the bundled path carries a
+# supply-chain risk that external managed datastores avoid.
+#
+# Versions are PINNED to exact releases (not floating x-ranges) for reproducible
+# builds; bump deliberately and re-run `helm dependency update`.
 dependencies:
   - name: postgresql
     repository: oci://registry-1.docker.io/bitnamicharts
-    version: 18.x.x
+    version: 18.5.6
     condition: postgresql.enabled
   - name: redis
     repository: oci://registry-1.docker.io/bitnamicharts
-    version: 25.x.x
+    version: 25.3.2
     condition: redis.enabled

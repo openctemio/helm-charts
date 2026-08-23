@@ -1,0 +1,91 @@
+{{- if .Values.api.migrations.downMigration.enabled }}
+{{/*
+Manual, gated DOWN-migration Job. NOT a Helm hook — it is applied as a plain
+resource and runs `migrate ... down <steps>` exactly once. Intended for
+controlled rollbacks: `helm rollback` reverts manifests only, never the schema.
+Take a DB backup and set api.migrations.downMigration.steps deliberately before
+enabling this. See README "Rollback & down-migration".
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "openctem.apiMigrationsFullname" . }}-down
+  labels:
+    {{- include "openctem.apiMigrationsLabels" . | nindent 4 }}
+    app.kubernetes.io/operation: down-migration
+spec:
+  backoffLimit: {{ .Values.api.migrations.downMigration.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.api.migrations.downMigration.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "openctem.apiMigrationsLabels" . | nindent 8 }}
+        app.kubernetes.io/operation: down-migration
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      serviceAccountName: {{ include "openctem.apiServiceAccountName" . }}
+      {{- with .Values.api.migrations.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.migrations.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.migrations.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.migrations.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrations-down
+          image: {{ include "openctem.apiMigrationsImage" . | quote }}
+          imagePullPolicy: {{ .Values.api.migrations.image.pullPolicy }}
+          {{- with .Values.api.migrations.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: DB_HOST
+              value: {{ include "openctem.databaseHost" . | quote }}
+            - name: DB_PORT
+              value: {{ include "openctem.databasePort" . | quote }}
+            - name: DB_NAME
+              value: {{ include "openctem.databaseName" . | quote }}
+            {{- if .Values.postgresql.enabled }}
+            - name: DB_USER
+              value: {{ include "openctem.databaseUser" . | quote }}
+            {{- else }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.dbCredentialsSecretName" . }}
+                  key: {{ .Values.database.auth.userKey }}
+            {{- end }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.dbCredentialsSecretName" . }}
+                  key: {{ include "openctem.dbPasswordSecretKey" . }}
+            - name: DB_SSLMODE
+              value: {{ include "openctem.databaseSslMode" . | quote }}
+            {{- with .Values.api.migrations.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          args:
+            - "-path=/migrations"
+            - "-database=postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)"
+            - "down"
+            - {{ .Values.api.migrations.downMigration.steps | quote }}
+          {{- with .Values.api.migrations.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

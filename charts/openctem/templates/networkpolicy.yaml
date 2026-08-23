@@ -1,0 +1,181 @@
+{{- if .Values.networkPolicy.enabled }}
+{{/*
+Opt-in NetworkPolicy set. Baseline is default-DENY ingress for every pod in the
+namespace; the policies below re-open only the real OpenCTEM flows:
+  ingress-controller -> ui:3000, (ui|helm-test) -> api:8080,
+  api/migrations -> postgres:5432, api/migrations -> redis:6379,
+  api egress (DNS + HTTPS threat-intel / CT feeds).
+Recommendation: run OpenCTEM in a dedicated namespace, since the default-deny
+below selects ALL pods in the namespace.
+*/}}
+---
+# Default-deny all ingress in the namespace (egress is left open unless the API
+# egress policy below narrows it).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.fullname" . }}-default-deny-ingress
+  labels:
+    {{- include "openctem.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow inbound to the UI from the ingress controller (and, when no controller
+# selector is configured, from any source — podSelector still limits the target).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.uiFullname" . }}-allow-ingress
+  labels:
+    {{- include "openctem.uiLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "openctem.uiSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- if or .Values.networkPolicy.ingressControllerNamespaceSelector .Values.networkPolicy.ingressControllerPodSelector }}
+        - {{- if .Values.networkPolicy.ingressControllerNamespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerNamespaceSelector | nindent 14 }}
+          {{- end }}
+          {{- if .Values.networkPolicy.ingressControllerPodSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerPodSelector | nindent 14 }}
+          {{- end }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - port: 3000
+          protocol: TCP
+---
+# Allow inbound to the API from any pod in this release (UI + the helm-test pod).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.apiFullname" . }}-allow-ingress
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "openctem.apiSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 8080
+          protocol: TCP
+{{- if .Values.postgresql.enabled }}
+---
+# Allow the API + migration jobs to reach the bundled PostgreSQL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.fullname" . }}-allow-postgres
+  labels:
+    {{- include "openctem.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgresql
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 5432
+          protocol: TCP
+{{- end }}
+{{- if .Values.redis.enabled }}
+---
+# Allow the API + migration jobs to reach the bundled Redis.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.fullname" . }}-allow-redis
+  labels:
+    {{- include "openctem.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 6379
+          protocol: TCP
+{{- end }}
+---
+# API egress. threat-intel / CVE / Certificate-Transparency feeds are reached
+# over HTTPS, so egress defaults to permissive (allowAll). Set
+# networkPolicy.api.egress.allowAll=false to restrict to DNS + datastores +
+# networkPolicy.api.egress.extra (pin threat-intel CIDRs there).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.apiFullname" . }}-egress
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "openctem.apiSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicy.api.egress.allowAll }}
+    - {}
+    {{- else }}
+    # DNS
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.redis.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 6379
+          protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.api.egress.extra }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- end }}
+{{- end }}

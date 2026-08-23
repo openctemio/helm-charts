@@ -209,11 +209,22 @@ AUTH_JWT_SECRET
 {{- end }}
 
 {{/*
-Resolve the APP_ENCRYPTION_KEY value. Precedence: explicit inline value >
-value already stored in the chart-managed Secret (looked up on the cluster,
-so it PERSISTS across upgrades and is never rotated) > generate a fresh
-44-char base64 key (a valid AES-256 key per api config validateEncryption).
-This mirrors the UI CSRF-secret generate-once pattern exactly.
+Resolve the APP_ENCRYPTION_KEY value.
+
+Precedence:
+  1. explicit inline value (api.encryption.key)
+  2. value already stored in the chart-managed Secret (cluster lookup, so it
+     PERSISTS across upgrades and is never rotated)
+  3. generate a fresh 44-char base64 key (a valid AES-256 key per api config
+     validateEncryption)
+
+FAIL-CLOSED IN PRODUCTION (api.appEnv == "production"): steps 2 and 3 are
+DISALLOWED. Under GitOps (`helm template` / ArgoCD / Flux) the cluster `lookup`
+returns empty on every render, so auto-generate would mint a NEW key on each
+sync — rotating APP_ENCRYPTION_KEY and making all stored integration
+credentials permanently undecryptable. In production we therefore REQUIRE an
+explicit api.encryption.key OR api.encryption.existingSecret and fail the
+render otherwise. Auto-gen/lookup convenience is kept for dev/staging only.
 Call with: (dict "context" . "existingSecret" $existingSecret)
 */}}
 {{- define "openctem.apiEncryptionKeyValue" -}}
@@ -221,6 +232,8 @@ Call with: (dict "context" . "existingSecret" $existingSecret)
 {{- $existing := .existingSecret -}}
 {{- if $ctx.Values.api.encryption.key -}}
 {{- $ctx.Values.api.encryption.key -}}
+{{- else if eq ($ctx.Values.api.appEnv | toString) "production" -}}
+{{- fail "\n\nAPP_ENCRYPTION_KEY is required in production (api.appEnv=production).\nAuto-generation via cluster lookup is DISABLED in production because under\nGitOps (helm template/ArgoCD/Flux) the lookup returns empty and the key would\nregenerate on every sync — rotating it makes ALL stored integration\ncredentials permanently undecryptable.\nProvide ONE of:\n  - api.encryption.existingSecret  (RECOMMENDED: External Secrets Operator /\n    sealed-secrets / GitOps-friendly, key = api.encryption.keyRef), OR\n  - api.encryption.key  (explicit, STABLE value: `openssl rand -hex 32`)\nOr set api.appEnv to a non-production value for a dev/eval install.\n" -}}
 {{- else if and $existing (hasKey $existing.data "APP_ENCRYPTION_KEY") -}}
 {{- index $existing.data "APP_ENCRYPTION_KEY" | b64dec -}}
 {{- else -}}
@@ -229,10 +242,11 @@ Call with: (dict "context" . "existingSecret" $existingSecret)
 {{- end }}
 
 {{/*
-Resolve the AUTH_JWT_SECRET value. Same generate-once-and-persist precedence
-as the encryption key. Generated value is 64 base64 chars, satisfying the
-production >= 64 char requirement. Rotating it logs everyone out, so the
-cluster lookup keeps it stable across upgrades.
+Resolve the AUTH_JWT_SECRET value. Same precedence and the same FAIL-CLOSED
+production rule as the encryption key: in production an explicit
+api.auth.jwtSecret or api.auth.existingSecret is REQUIRED (a rotated JWT secret
+logs every user out; GitOps + lookup would rotate it on every sync). Generated
+value (non-prod only) is 64 base64 chars, satisfying the >= 64 char check.
 Call with: (dict "context" . "existingSecret" $existingSecret)
 */}}
 {{- define "openctem.apiJwtSecretValue" -}}
@@ -240,6 +254,8 @@ Call with: (dict "context" . "existingSecret" $existingSecret)
 {{- $existing := .existingSecret -}}
 {{- if $ctx.Values.api.auth.jwtSecret -}}
 {{- $ctx.Values.api.auth.jwtSecret -}}
+{{- else if eq ($ctx.Values.api.appEnv | toString) "production" -}}
+{{- fail "\n\nAUTH_JWT_SECRET is required in production (api.appEnv=production).\nAuto-generation via cluster lookup is DISABLED in production because under\nGitOps (helm template/ArgoCD/Flux) the lookup returns empty and the secret\nwould regenerate on every sync — rotating it logs every user out.\nProvide ONE of:\n  - api.auth.existingSecret  (RECOMMENDED: External Secrets Operator /\n    sealed-secrets / GitOps-friendly, key = api.auth.jwtSecretKey), OR\n  - api.auth.jwtSecret  (explicit, STABLE, >= 64 chars: `openssl rand -base64 48`)\nOr set api.appEnv to a non-production value for a dev/eval install.\n" -}}
 {{- else if and $existing (hasKey $existing.data "AUTH_JWT_SECRET") -}}
 {{- index $existing.data "AUTH_JWT_SECRET" | b64dec -}}
 {{- else -}}

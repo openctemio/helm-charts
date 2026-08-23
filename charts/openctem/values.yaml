@@ -8,6 +8,10 @@ fullnameOverride: ""
 imagePullSecrets: []
 
 api:
+  # -- Replica count. Default 1 for dev/eval. PRODUCTION should run >= 2 for HA
+  # (see values-production.yaml) so a node drain / rolling upgrade keeps the API
+  # serving. With >= 2 replicas also enable podDisruptionBudget and set
+  # topologySpreadConstraints (below) so the replicas don't co-locate.
   replicaCount: 1
 
   # -- Application environment. "production" (the secure default) turns
@@ -154,22 +158,27 @@ api:
               value: /
 
   # -- CPU requests are REQUIRED for the CPU-target HPA to function.
+  # Memory limit is 1Gi (not 512Mi): the Go API does ingest/enrichment and
+  # threat-intel loading that spikes memory; 512Mi OOM-kills under load. Tune
+  # down only if you have measured a smaller working set.
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
       cpu: "1"
-      memory: 512Mi
+      memory: 1Gi
 
-  # -- Optional startupProbe (gives a slow first boot / migrations time before
-  # liveness kicks in). Empty {} disables it.
-  startupProbe: {}
-    # httpGet:
-    #   path: /health
-    #   port: http
-    # failureThreshold: 30
-    # periodSeconds: 5
+  # -- startupProbe is ENABLED by default: first boot can be slow (app init +
+  # threat-intel load) and without it a slow start trips livenessProbe and the
+  # kubelet kills the pod in a crash loop. failureThreshold*periodSeconds =
+  # 30*5 = up to 150s of grace before liveness takes over. Set to {} to disable.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: http
+    failureThreshold: 30
+    periodSeconds: 5
   livenessProbe:
     httpGet:
       path: /health
@@ -197,7 +206,21 @@ api:
 
   nodeSelector: {}
   tolerations: []
+  # -- Pod affinity/anti-affinity. For HA, spread replicas across nodes. See
+  # topologySpreadConstraints below for a lighter-weight alternative; use one or
+  # the other. Example soft anti-affinity is in values-production.yaml.
   affinity: {}
+  # -- topologySpreadConstraints (values-driven, templated). Keeps the >= 2
+  # replicas off a single node/zone. Empty by default; values-production.yaml
+  # ships a soft (ScheduleAnyway) hostname spread. Supports `tpl` for dynamic
+  # label values.
+  topologySpreadConstraints: []
+  # - maxSkew: 1
+  #   topologyKey: kubernetes.io/hostname
+  #   whenUnsatisfiable: ScheduleAnyway
+  #   labelSelector:
+  #     matchLabels:
+  #       app.kubernetes.io/component: api
 
   extraEnv: []
   # - name: LOG_LEVEL
@@ -244,7 +267,24 @@ api:
     # -- Extra args appended BEFORE the "up" subcommand.
     extraArgs: []
 
+    # -- Manual, gated DOWN-migration Job for controlled rollbacks. DISABLED by
+    # default. `helm rollback` does NOT down-migrate — it only reverts the
+    # Kubernetes manifests, leaving the DB at the NEWER schema. If the older app
+    # version is not forward-compatible with that schema you must revert the
+    # schema yourself. Enabling this renders a one-shot Job that runs
+    # `migrate ... down <steps>`. Run it deliberately (never as an automatic
+    # hook), confirm the target step count, and take a DB backup first.
+    downMigration:
+      enabled: false
+      # -- Number of migrations to revert (passed to `migrate ... down N`).
+      steps: 1
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+
 ui:
+  # -- Replica count. Default 1 for dev/eval. PRODUCTION should run >= 2 for HA
+  # (see values-production.yaml). Pair with podDisruptionBudget +
+  # topologySpreadConstraints when running >= 2.
   replicaCount: 1
 
   image:
@@ -378,6 +418,14 @@ ui:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # -- topologySpreadConstraints (values-driven, templated). See api section.
+  topologySpreadConstraints: []
+  # - maxSkew: 1
+  #   topologyKey: kubernetes.io/hostname
+  #   whenUnsatisfiable: ScheduleAnyway
+  #   labelSelector:
+  #     matchLabels:
+  #       app.kubernetes.io/component: ui
 
   extraEnv:
   # - name: ENABLE_TOKEN_REFRESH
@@ -403,8 +451,15 @@ database:
     username: ""
     password: ""
 
+# =============================================================================
+# Bundled Bitnami PostgreSQL — DEV / EVAL ONLY.
+# PRODUCTION: set postgresql.enabled=false and point `database.*` at an external
+# managed Postgres with TLS (see values-production.yaml). The bundled subchart
+# is single-instance, not backed up, and Bitnami has DEPRECATED its free Docker
+# Hub images (supply-chain risk) — do not run it for real data.
+# =============================================================================
 postgresql:
-  # -- Deploy bundled Bitnami PostgreSQL subchart.
+  # -- Deploy bundled Bitnami PostgreSQL subchart. DEV/EVAL ONLY — see note above.
   enabled: true
   auth:
     username: "openctem"
@@ -424,8 +479,15 @@ redisConfig:
     passwordKey: REDIS_PASSWORD
     password: ""
 
+# =============================================================================
+# Bundled Bitnami Redis — DEV / EVAL ONLY.
+# PRODUCTION: set redis.enabled=false and point `redisConfig.*` at an external
+# managed Redis with TLS + a >= 32-char password. The bundled Redis CANNOT
+# terminate TLS, so it can never satisfy the production Redis boot gate. Same
+# Bitnami deprecated-image supply-chain caveat as Postgres above.
+# =============================================================================
 redis:
-  # -- Deploy bundled Bitnami Redis subchart.
+  # -- Deploy bundled Bitnami Redis subchart. DEV/EVAL ONLY — see note above.
   enabled: true
   architecture: standalone
   auth:
@@ -433,6 +495,52 @@ redis:
     password: ""
     existingSecret: ""
     existingSecretPasswordKey: redis-password
+
+# =============================================================================
+# NetworkPolicy — opt-in micro-segmentation (default OFF for compatibility with
+# clusters whose CNI does not enforce NetworkPolicy). When enabled the chart
+# renders a default-DENY-ingress baseline plus explicit allow rules for the real
+# flows: ingress-controller -> ui, ui -> api, api -> postgres:5432,
+# api -> redis:6379, and api egress (DNS + HTTPS for threat-intel / CT feeds).
+# =============================================================================
+networkPolicy:
+  # -- Master switch for all NetworkPolicy resources in this chart.
+  enabled: false
+
+  # -- Label selector identifying the namespace(s) your ingress controller runs
+  # in, used to allow inbound traffic to the UI. Empty {} allows from ALL
+  # namespaces (podSelector only). Example: { kubernetes.io/metadata.name: ingress-nginx }
+  ingressControllerNamespaceSelector: {}
+  # -- Pod selector for the ingress controller within the namespace above.
+  ingressControllerPodSelector: {}
+
+  # -- Egress policy for the API. The API reaches out to threat-intel / CVE /
+  # Certificate-Transparency feeds over HTTPS and needs DNS. Kept permissive by
+  # default (all egress) so those feeds are not silently broken; tighten
+  # `api.egress` to explicit CIDRs/ports if your environment allows it.
+  api:
+    egress:
+      # -- Allow all egress from the API (recommended unless you can enumerate
+      # every threat-intel endpoint). When false, only the explicit rules below
+      # (DNS + the datastore rules) are permitted.
+      allowAll: true
+      # -- Extra egress rules (NetworkPolicyEgressRule objects) appended when
+      # allowAll=false. Use to pin threat-intel egress to known CIDRs.
+      extra: []
+
+# =============================================================================
+# helm test — a short-lived connectivity Pod (`helm test <release>`) that curls
+# the API /health and the UI / to smoke-verify a release is actually serving.
+# =============================================================================
+tests:
+  enabled: true
+  image:
+    # -- Small image with wget (busybox). Pinned for reproducibility.
+    repository: busybox
+    tag: "1.37.0"
+    pullPolicy: IfNotPresent
+  # -- Overall timeout (seconds) for each curl/wget probe.
+  timeoutSeconds: 10
 
 # Extra manifests to be deployed alongside the chart.
 extraManifests: []

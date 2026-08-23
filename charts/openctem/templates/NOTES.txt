@@ -51,6 +51,9 @@
 {{- if eq (.Values.api.auth.provider | toString) "local" }}{{- else }}
 {{- $warn = append $warn (printf "AUTH_PROVIDER=%s requires Keycloak configured over HTTPS in production." .Values.api.auth.provider) -}}
 {{- end }}
+{{- if and .Values.ui.secret.createSecret (not .Values.ui.secret.existingSecret) (not .Values.ui.secret.csrfToken) }}
+{{- $warn = append $warn "UI CSRF_SECRET is auto-generated. Lower stakes than the API keys (a rotated CSRF salt just re-issues tokens), but under GitOps the cluster lookup returns empty so it rotates on every sync. Set ui.secret.csrfToken or ui.secret.existingSecret for stability." -}}
+{{- end }}
 {{- if $warn }}
 !! ACTION REQUIRED — the API may fail to boot until these are resolved:
 {{- range $i, $w := $warn }}
@@ -72,4 +75,36 @@
 {{- if .Values.api.bootstrapAdmin.enabled }}
 - A platform admin was bootstrapped for {{ .Values.api.bootstrapAdmin.email }}. Retrieve its API key:
     kubectl logs job/{{ include "openctem.apiFullname" . }}-bootstrap-admin
+{{- end }}
+
+6. Smoke-test this release
+    helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.tests.enabled }}
+  (curls the API /health and the UI / from an in-cluster Pod.)
+{{- else }}
+  (disabled: tests.enabled=false)
+{{- end }}
+
+7. Datastores
+{{- if or .Values.postgresql.enabled .Values.redis.enabled }}
+- Using BUNDLED Bitnami {{ if .Values.postgresql.enabled }}PostgreSQL{{ end }}{{ if and .Values.postgresql.enabled .Values.redis.enabled }} + {{ end }}{{ if .Values.redis.enabled }}Redis{{ end }} — this is DEV/EVAL ONLY (single instance, no backups; Bitnami deprecated its free images). For production set postgresql.enabled=false / redis.enabled=false and use external managed datastores with TLS (see values-production.yaml).
+{{- else }}
+- Using EXTERNAL Postgres + Redis (production-appropriate). Ensure both enforce TLS.
+{{- end }}
+
+8. Rollback caveat (READ before `helm rollback`)
+- `helm rollback` reverts Kubernetes manifests ONLY. It does NOT down-migrate the
+  database — the schema stays at the newer version. So the app version you roll
+  back TO must be forward-compatible with the newer schema (OpenCTEM migrations
+  are designed to be). If it is not, revert the schema manually first:
+    * enable a gated down-migration Job:
+        --set api.migrations.downMigration.enabled=true \
+        --set api.migrations.downMigration.steps=<N>
+      (take a DB backup first; it runs `migrate ... down <N>`), OR
+    * run migrate by hand against the DB.
+{{- if .Values.networkPolicy.enabled }}
+
+9. NetworkPolicy is ENABLED — default-deny ingress + allowed OpenCTEM flows.
+   Run OpenCTEM in a dedicated namespace (the default-deny selects every pod in
+   the namespace). API egress allowAll={{ .Values.networkPolicy.api.egress.allowAll }}.
 {{- end }}

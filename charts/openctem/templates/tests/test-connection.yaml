@@ -1,0 +1,49 @@
+{{- if .Values.tests.enabled }}
+{{/*
+`helm test <release>` smoke check: curl the API /health and the UI /. Runs as a
+Helm test hook and is deleted after it succeeds. Uses busybox wget (small,
+pinned) so it works on air-gapped mirrors that copy this one image.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "openctem.fullname" . }}-test-connection
+  labels:
+    {{- include "openctem.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: test-api-health
+      image: "{{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag }}"
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "GET http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}/health"
+          wget -q -T {{ .Values.tests.timeoutSeconds }} -O- "http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}/health"
+          echo
+          echo "GET http://{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}/"
+          wget -q -T {{ .Values.tests.timeoutSeconds }} --spider "http://{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}/"
+          echo "OK: api /health and ui / both reachable"
+{{- end }}

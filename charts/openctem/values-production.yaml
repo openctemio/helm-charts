@@ -67,9 +67,20 @@ api:
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
 
+  # With replicaCount/minReplicas = 2, keep 1 API pod serving through a node
+  # drain or rolling upgrade.
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
+
+  # Spread the 2+ API replicas across nodes (soft: schedule anyway if it can't).
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: api
 
   ingress:
     enabled: true
@@ -140,6 +151,14 @@ ui:
     enabled: true
     minAvailable: 1
 
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: ui
+
   ingress:
     enabled: true
     className: nginx
@@ -190,3 +209,28 @@ redisConfig:
     passwordKey: REDIS_PASSWORD
     # REQUIRED >= 32 chars in production.  openssl rand -base64 32
     password: "<REQUIRED_REDIS_PASSWORD_32_PLUS_CHARS>"
+
+# -----------------------------------------------------------------------------
+# NetworkPolicy — recommended in production (requires a CNI that enforces it).
+# Default-deny ingress + allow only the real flows. Run OpenCTEM in a dedicated
+# namespace, since the default-deny selects every pod in the namespace.
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  # Point at the namespace your ingress controller runs in so only it can reach
+  # the UI. Example for ingress-nginx installed in namespace "ingress-nginx":
+  ingressControllerNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  api:
+    egress:
+      # Keep true unless you can enumerate every threat-intel / CVE / CT-feed
+      # endpoint. When external Postgres/Redis are used (this file), set false
+      # ONLY if you also add their CIDRs (and DNS is auto-included) under extra.
+      allowAll: true
+      extra: []
+      # - to:
+      #     - ipBlock:
+      #         cidr: 10.0.0.0/8       # managed Postgres/Redis subnet
+      #   ports:
+      #     - { port: 5432, protocol: TCP }
+      #     - { port: 6379, protocol: TCP }

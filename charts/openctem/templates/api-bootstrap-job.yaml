@@ -45,7 +45,7 @@ kind: Job
 metadata:
   name: {{ include "openctem.apiFullname" . }}-bootstrap-admin
   labels:
-    {{- include "openctem.apiLabels" . | nindent 4 }}
+    {{- include "openctem.labels" . | nindent 4 }}
     app.kubernetes.io/component: bootstrap-admin
   annotations:
     "helm.sh/hook": post-install
@@ -58,7 +58,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "openctem.apiSelectorLabels" . | nindent 8 }}
+        {{- include "openctem.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: bootstrap-admin
     spec:
       {{- with .Values.imagePullSecrets }}
@@ -106,7 +106,7 @@ kind: Job
 metadata:
   name: {{ include "openctem.apiFullname" . }}-bootstrap-tenant
   labels:
-    {{- include "openctem.apiLabels" . | nindent 4 }}
+    {{- include "openctem.labels" . | nindent 4 }}
     app.kubernetes.io/component: bootstrap-tenant
   annotations:
     "helm.sh/hook": post-install
@@ -119,7 +119,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "openctem.apiSelectorLabels" . | nindent 8 }}
+        {{- include "openctem.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: bootstrap-tenant
     spec:
       {{- with .Values.imagePullSecrets }}

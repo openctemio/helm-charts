@@ -8,7 +8,55 @@ fullnameOverride: ""
 imagePullSecrets: []
 
 api:
+  # -- Replica count. Default 1 for dev/eval. PRODUCTION should run >= 2 for HA
+  # (see values-production.yaml) so a node drain / rolling upgrade keeps the API
+  # serving. With >= 2 replicas also enable podDisruptionBudget and set
+  # topologySpreadConstraints (below) so the replicas don't co-locate.
   replicaCount: 1
+
+  # -- Application environment. "production" (the secure default) turns
+  # validateProduction() into a HARD BOOT GATE: it requires DB TLS, Redis TLS +
+  # a >=32-char Redis password, a >=64-char JWT secret, an encryption key, and
+  # secure cookies — the API refuses to start otherwise. Set to "development"
+  # or "staging" ONLY as a conscious opt-out (e.g. to run the bundled, non-TLS
+  # Redis for a demo). See values-production.yaml for the required prod values.
+  appEnv: "production"
+
+  auth:
+    # -- AUTH_PROVIDER: "local" (built-in email/password, the product default),
+    # "oidc" (Keycloak) or "hybrid". "oidc"/"hybrid" additionally require the
+    # Keycloak block to be configured in production.
+    provider: "local"
+    # -- AUTH_COOKIE_SECURE — must be true in production (HTTPS).
+    cookieSecure: true
+    # -- JWT signing secret (AUTH_JWT_SECRET). STABLE across upgrades — rotating
+    # it logs every user out. Leave blank to auto-generate-once and persist (via
+    # cluster lookup); production should set an explicit value or existingSecret.
+    # Must be >= 64 characters in production.
+    jwtSecret: ""
+    # -- Source AUTH_JWT_SECRET from an existing Secret instead of the chart.
+    existingSecret: ""
+    jwtSecretKey: AUTH_JWT_SECRET
+
+  encryption:
+    # -- APP_ENCRYPTION_KEY (AES-256-GCM) for integration credentials at rest.
+    # Without it, non-dev deployments refuse to boot; a wrong/rotated key makes
+    # all stored credentials undecryptable. STABLE across upgrades — never
+    # rotated automatically. Leave blank to auto-generate-once and persist;
+    # production should set an explicit value or existingSecret.
+    # Accepts 32 raw / 64 hex / 44 base64 chars.
+    key: ""
+    # -- Source APP_ENCRYPTION_KEY from an existing Secret instead of the chart.
+    existingSecret: ""
+    keyRef: APP_ENCRYPTION_KEY
+
+  redis:
+    # -- REDIS_TLS_ENABLED. Production REQUIRES TLS. The bundled Bitnami Redis
+    # does not terminate TLS, so production must point at an external Redis with
+    # TLS (redis.enabled=false + redisConfig.*) and set this true.
+    tlsEnabled: false
+    # -- REDIS_TLS_SKIP_VERIFY — must stay false in production.
+    tlsSkipVerify: false
 
   image:
     repository: openctemio/api
@@ -24,8 +72,52 @@ api:
   podAnnotations: {}
   podLabels: {}
 
-  podSecurityContext: {}
-  securityContext: {}
+  # -- Pod-level security context (safe non-root defaults; API image runs as uid 1000).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container-level security context. readOnlyRootFilesystem is left OFF: the
+  # API writes local attachment storage under /app/data; enable it only with a
+  # writable volume mounted there.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    # readOnlyRootFilesystem: true
+
+  # -- Bootstrap the first PLATFORM admin (admin_users + admin API key printed
+  # to the Job log; used by the openctem-admin CLI / platform console).
+  bootstrapAdmin:
+    enabled: false
+    email: ""
+    name: ""
+    role: super_admin
+    force: false
+    backoffLimit: 2
+    activeDeadlineSeconds: 300
+
+  # -- Bootstrap the first TENANT + OWNER user (the login the UI needs on day
+  # one). Password comes from passwordExistingSecret (preferred) or the inline
+  # password value below.
+  bootstrapTenant:
+    enabled: false
+    email: ""
+    name: ""
+    teamName: ""
+    teamSlug: ""
+    password: ""
+    passwordExistingSecret: ""
+    passwordSecretKey: TENANT_PASSWORD
+    force: false
+    backoffLimit: 2
+    activeDeadlineSeconds: 300
 
   deploymentStrategy: {}
     # type: RollingUpdate
@@ -65,8 +157,28 @@ api:
               type: PathPrefix
               value: /
 
-  resources: {}
+  # -- CPU requests are REQUIRED for the CPU-target HPA to function.
+  # Memory limit is 1Gi (not 512Mi): the Go API does ingest/enrichment and
+  # threat-intel loading that spikes memory; 512Mi OOM-kills under load. Tune
+  # down only if you have measured a smaller working set.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
+  # -- startupProbe is ENABLED by default: first boot can be slow (app init +
+  # threat-intel load) and without it a slow start trips livenessProbe and the
+  # kubelet kills the pod in a crash loop. failureThreshold*periodSeconds =
+  # 30*5 = up to 150s of grace before liveness takes over. Set to {} to disable.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: http
+    failureThreshold: 30
+    periodSeconds: 5
   livenessProbe:
     httpGet:
       path: /health
@@ -83,12 +195,32 @@ api:
     targetCPUUtilizationPercentage: 80
     # targetMemoryUtilizationPercentage: 80
 
+  # -- Optional PodDisruptionBudget. Set minAvailable OR maxUnavailable.
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+    maxUnavailable: ""
+
   volumes: []
   volumeMounts: []
 
   nodeSelector: {}
   tolerations: []
+  # -- Pod affinity/anti-affinity. For HA, spread replicas across nodes. See
+  # topologySpreadConstraints below for a lighter-weight alternative; use one or
+  # the other. Example soft anti-affinity is in values-production.yaml.
   affinity: {}
+  # -- topologySpreadConstraints (values-driven, templated). Keeps the >= 2
+  # replicas off a single node/zone. Empty by default; values-production.yaml
+  # ships a soft (ScheduleAnyway) hostname spread. Supports `tpl` for dynamic
+  # label values.
+  topologySpreadConstraints: []
+  # - maxSkew: 1
+  #   topologyKey: kubernetes.io/hostname
+  #   whenUnsatisfiable: ScheduleAnyway
+  #   labelSelector:
+  #     matchLabels:
+  #       app.kubernetes.io/component: api
 
   extraEnv: []
   # - name: LOG_LEVEL
@@ -135,7 +267,24 @@ api:
     # -- Extra args appended BEFORE the "up" subcommand.
     extraArgs: []
 
+    # -- Manual, gated DOWN-migration Job for controlled rollbacks. DISABLED by
+    # default. `helm rollback` does NOT down-migrate — it only reverts the
+    # Kubernetes manifests, leaving the DB at the NEWER schema. If the older app
+    # version is not forward-compatible with that schema you must revert the
+    # schema yourself. Enabling this renders a one-shot Job that runs
+    # `migrate ... down <steps>`. Run it deliberately (never as an automatic
+    # hook), confirm the target step count, and take a DB backup first.
+    downMigration:
+      enabled: false
+      # -- Number of migrations to revert (passed to `migrate ... down N`).
+      steps: 1
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+
 ui:
+  # -- Replica count. Default 1 for dev/eval. PRODUCTION should run >= 2 for HA
+  # (see values-production.yaml). Pair with podDisruptionBudget +
+  # topologySpreadConstraints when running >= 2.
   replicaCount: 1
 
   image:
@@ -153,7 +302,9 @@ ui:
     existingSecret: ""
     # -- Create UI secret when existingSecret is not set.
     createSecret: true
-    csrfTokenKey: CSRF_TOKEN
+    # -- Secret data key holding the CSRF secret. The UI reads it as the
+    # CSRF_SECRET env var (ui/src/lib/env.ts).
+    csrfTokenKey: CSRF_SECRET
     # -- Leave empty to auto-generate like `openssl rand -base64 32`.
     csrfToken: ""
 
@@ -166,8 +317,24 @@ ui:
   podAnnotations: {}
   podLabels: {}
 
-  podSecurityContext: {}
-  securityContext: {}
+  # -- Pod-level security context (UI image runs as uid 1001 "nextjs").
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container-level security context. readOnlyRootFilesystem is left OFF:
+  # Next.js writes to .next/cache at runtime.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    # readOnlyRootFilesystem: true
 
   deploymentStrategy: {}
     # type: RollingUpdate
@@ -207,8 +374,22 @@ ui:
               type: PathPrefix
               value: /
 
-  resources: {}
+  # -- CPU requests are REQUIRED for the CPU-target HPA to function.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
 
+  # -- Optional startupProbe. Empty {} disables it.
+  startupProbe: {}
+    # httpGet:
+    #   path: /
+    #   port: http
+    # failureThreshold: 30
+    # periodSeconds: 5
   livenessProbe:
     httpGet:
       path: /
@@ -225,12 +406,26 @@ ui:
     targetCPUUtilizationPercentage: 80
     # targetMemoryUtilizationPercentage: 80
 
+  # -- Optional PodDisruptionBudget. Set minAvailable OR maxUnavailable.
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+    maxUnavailable: ""
+
   volumes: []
   volumeMounts: []
 
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # -- topologySpreadConstraints (values-driven, templated). See api section.
+  topologySpreadConstraints: []
+  # - maxSkew: 1
+  #   topologyKey: kubernetes.io/hostname
+  #   whenUnsatisfiable: ScheduleAnyway
+  #   labelSelector:
+  #     matchLabels:
+  #       app.kubernetes.io/component: ui
 
   extraEnv:
   # - name: ENABLE_TOKEN_REFRESH
@@ -256,8 +451,15 @@ database:
     username: ""
     password: ""
 
+# =============================================================================
+# Bundled Bitnami PostgreSQL — DEV / EVAL ONLY.
+# PRODUCTION: set postgresql.enabled=false and point `database.*` at an external
+# managed Postgres with TLS (see values-production.yaml). The bundled subchart
+# is single-instance, not backed up, and Bitnami has DEPRECATED its free Docker
+# Hub images (supply-chain risk) — do not run it for real data.
+# =============================================================================
 postgresql:
-  # -- Deploy bundled Bitnami PostgreSQL subchart.
+  # -- Deploy bundled Bitnami PostgreSQL subchart. DEV/EVAL ONLY — see note above.
   enabled: true
   auth:
     username: "openctem"
@@ -277,8 +479,15 @@ redisConfig:
     passwordKey: REDIS_PASSWORD
     password: ""
 
+# =============================================================================
+# Bundled Bitnami Redis — DEV / EVAL ONLY.
+# PRODUCTION: set redis.enabled=false and point `redisConfig.*` at an external
+# managed Redis with TLS + a >= 32-char password. The bundled Redis CANNOT
+# terminate TLS, so it can never satisfy the production Redis boot gate. Same
+# Bitnami deprecated-image supply-chain caveat as Postgres above.
+# =============================================================================
 redis:
-  # -- Deploy bundled Bitnami Redis subchart.
+  # -- Deploy bundled Bitnami Redis subchart. DEV/EVAL ONLY — see note above.
   enabled: true
   architecture: standalone
   auth:
@@ -286,6 +495,52 @@ redis:
     password: ""
     existingSecret: ""
     existingSecretPasswordKey: redis-password
+
+# =============================================================================
+# NetworkPolicy — opt-in micro-segmentation (default OFF for compatibility with
+# clusters whose CNI does not enforce NetworkPolicy). When enabled the chart
+# renders a default-DENY-ingress baseline plus explicit allow rules for the real
+# flows: ingress-controller -> ui, ui -> api, api -> postgres:5432,
+# api -> redis:6379, and api egress (DNS + HTTPS for threat-intel / CT feeds).
+# =============================================================================
+networkPolicy:
+  # -- Master switch for all NetworkPolicy resources in this chart.
+  enabled: false
+
+  # -- Label selector identifying the namespace(s) your ingress controller runs
+  # in, used to allow inbound traffic to the UI. Empty {} allows from ALL
+  # namespaces (podSelector only). Example: { kubernetes.io/metadata.name: ingress-nginx }
+  ingressControllerNamespaceSelector: {}
+  # -- Pod selector for the ingress controller within the namespace above.
+  ingressControllerPodSelector: {}
+
+  # -- Egress policy for the API. The API reaches out to threat-intel / CVE /
+  # Certificate-Transparency feeds over HTTPS and needs DNS. Kept permissive by
+  # default (all egress) so those feeds are not silently broken; tighten
+  # `api.egress` to explicit CIDRs/ports if your environment allows it.
+  api:
+    egress:
+      # -- Allow all egress from the API (recommended unless you can enumerate
+      # every threat-intel endpoint). When false, only the explicit rules below
+      # (DNS + the datastore rules) are permitted.
+      allowAll: true
+      # -- Extra egress rules (NetworkPolicyEgressRule objects) appended when
+      # allowAll=false. Use to pin threat-intel egress to known CIDRs.
+      extra: []
+
+# =============================================================================
+# helm test — a short-lived connectivity Pod (`helm test <release>`) that curls
+# the API /health and the UI / to smoke-verify a release is actually serving.
+# =============================================================================
+tests:
+  enabled: true
+  image:
+    # -- Small image with wget (busybox). Pinned for reproducibility.
+    repository: busybox
+    tag: "1.37.0"
+    pullPolicy: IfNotPresent
+  # -- Overall timeout (seconds) for each curl/wget probe.
+  timeoutSeconds: 10
 
 # Extra manifests to be deployed alongside the chart.
 extraManifests: []

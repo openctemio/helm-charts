@@ -61,7 +61,8 @@ spec:
               {{- end }}
             - name: NODE_ENV
               value: {{ .Values.ui.config.nodeEnv | quote }}
-            - name: CSRF_TOKEN
+            # -- The UI reads CSRF_SECRET (ui/src/lib/env.ts), not CSRF_TOKEN.
+            - name: CSRF_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "openctem.uiSecretName" . }}
@@ -73,6 +74,10 @@ spec:
             {{- with .Values.ui.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- with .Values.ui.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.ui.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
@@ -100,6 +105,10 @@ spec:
       {{- with .Values.ui.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ui.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- tpl (toYaml .) $ | nindent 8 }}
       {{- end }}
       {{- with .Values.ui.tolerations }}
       tolerations:

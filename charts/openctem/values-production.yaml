@@ -1,0 +1,236 @@
+# =============================================================================
+# OpenCTEM — production values example.
+#
+# Copy, fill in every <PLACEHOLDER>, and deploy with:
+#   helm upgrade --install openctem openctemio/openctem \
+#     -n openctem --create-namespace -f values-production.yaml
+#
+# WHY this file exists: with api.appEnv=production (the chart default) the API
+# runs validateProduction() as a HARD BOOT GATE. It will refuse to start unless
+# DB TLS, Redis TLS + a strong Redis password, a >=64-char JWT secret, an
+# encryption key, and secure cookies are all provided. That is the correct
+# secure-by-default posture. Everything marked REQUIRED below is load-bearing.
+#
+# The bundled Bitnami Postgres/Redis subcharts are turned OFF here: production
+# should use managed/external datastores with TLS. (The bundled Redis cannot
+# terminate TLS, so it can never satisfy the production Redis gate.)
+# =============================================================================
+
+api:
+  appEnv: "production"          # REQUIRED to stay "production" for a real deployment
+
+  replicaCount: 2
+
+  image:
+    repository: openctemio/api
+    tag: ""                     # defaults to chart appVersion (v0.7.0)
+
+  auth:
+    provider: "local"           # built-in email/password (product default)
+    cookieSecure: true          # REQUIRED true in production (HTTPS)
+    # REQUIRED: >= 64 chars. Rotating this logs everyone out — keep it STABLE.
+    #   openssl rand -base64 48
+    # Prefer existingSecret (below) over an inline value in production.
+    jwtSecret: "<REQUIRED_JWT_SECRET_64_PLUS_CHARS>"
+    # existingSecret: openctem-api-jwt      # Secret with key jwtSecretKey
+    # jwtSecretKey: AUTH_JWT_SECRET
+
+  encryption:
+    # REQUIRED. AES-256-GCM key for integration credentials at rest.
+    # A rotated/lost key makes ALL stored credentials undecryptable — keep it STABLE.
+    #   openssl rand -hex 32     (64 hex chars)   OR   openssl rand -base64 32 (44 chars)
+    key: "<REQUIRED_ENCRYPTION_KEY_64_HEX_OR_44_BASE64>"
+    # existingSecret: openctem-api-encryption   # Secret with key keyRef
+    # keyRef: APP_ENCRYPTION_KEY
+
+  redis:
+    tlsEnabled: true            # REQUIRED true in production
+    tlsSkipVerify: false        # REQUIRED false in production
+
+  migrations:
+    # Drives DB_SSLMODE for BOTH the migration Job and the API container.
+    # REQUIRED to be a TLS mode ('require' / 'verify-ca' / 'verify-full') in prod.
+    sslMode: require
+
+  # Resource requests are needed for the CPU-target HPA below.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+  # With replicaCount/minReplicas = 2, keep 1 API pod serving through a node
+  # drain or rolling upgrade.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Spread the 2+ API replicas across nodes (soft: schedule anyway if it can't).
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: api
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: api.example.com        # <-- your API host
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: openctem-api-tls
+        hosts:
+          - api.example.com
+
+  # Give a fresh install a real UI login (first tenant + owner).
+  bootstrapTenant:
+    enabled: true
+    email: "admin@example.com"        # <-- first owner login
+    name: "Platform Owner"
+    teamName: "Example Org"
+    teamSlug: "example-org"
+    # Prefer an existing Secret over an inline password.
+    passwordExistingSecret: ""        # Secret with key passwordSecretKey
+    passwordSecretKey: TENANT_PASSWORD
+    password: "<REQUIRED_STRONG_PASSWORD_MIN_8>"
+
+  # Optional: also create a platform admin (admin-cli / console API key).
+  bootstrapAdmin:
+    enabled: false
+    email: "ops@example.com"
+    role: super_admin
+
+ui:
+  replicaCount: 2
+
+  image:
+    repository: openctemio/ui
+    tag: ""
+
+  config:
+    nodeEnv: "production"
+
+  secret:
+    createSecret: true
+    csrfTokenKey: CSRF_SECRET
+    # Leave csrfToken blank to auto-generate (persisted across upgrades via
+    # cluster lookup), or set an explicit >=32-char value / existingSecret.
+    csrfToken: ""
+    # existingSecret: openctem-ui-csrf
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: ui
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: app.example.com         # <-- your UI host
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: openctem-ui-tls
+        hosts:
+          - app.example.com
+
+# -----------------------------------------------------------------------------
+# External PostgreSQL (TLS REQUIRED in production)
+# -----------------------------------------------------------------------------
+postgresql:
+  enabled: false                # use an external / managed Postgres
+
+database:
+  host: "<REQUIRED_DB_HOST>"    # e.g. postgres.internal or RDS endpoint
+  port: 5432
+  name: openctem
+  auth:
+    # Prefer an existing Secret with DB_USER + DB_PASSWORD keys.
+    existingSecret: ""          # e.g. openctem-db-credentials
+    createSecret: true
+    userKey: DB_USER
+    passwordKey: DB_PASSWORD
+    username: "openctem"
+    password: "<REQUIRED_DB_PASSWORD>"
+
+# -----------------------------------------------------------------------------
+# External Redis (TLS + >=32-char password REQUIRED in production)
+# -----------------------------------------------------------------------------
+redis:
+  enabled: false                # bundled Redis cannot do TLS — use external
+
+redisConfig:
+  host: "<REQUIRED_REDIS_HOST>"
+  port: 6379
+  db: 0
+  auth:
+    existingSecret: ""          # Secret with key passwordKey
+    createSecret: true
+    passwordKey: REDIS_PASSWORD
+    # REQUIRED >= 32 chars in production.  openssl rand -base64 32
+    password: "<REQUIRED_REDIS_PASSWORD_32_PLUS_CHARS>"
+
+# -----------------------------------------------------------------------------
+# NetworkPolicy — recommended in production (requires a CNI that enforces it).
+# Default-deny ingress + allow only the real flows. Run OpenCTEM in a dedicated
+# namespace, since the default-deny selects every pod in the namespace.
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  # Point at the namespace your ingress controller runs in so only it can reach
+  # the UI. Example for ingress-nginx installed in namespace "ingress-nginx":
+  ingressControllerNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  api:
+    egress:
+      # Keep true unless you can enumerate every threat-intel / CVE / CT-feed
+      # endpoint. When external Postgres/Redis are used (this file), set false
+      # ONLY if you also add their CIDRs (and DNS is auto-included) under extra.
+      allowAll: true
+      extra: []
+      # - to:
+      #     - ipBlock:
+      #         cidr: 10.0.0.0/8       # managed Postgres/Redis subnet
+      #   ports:
+      #     - { port: 5432, protocol: TCP }
+      #     - { port: 6379, protocol: TCP }

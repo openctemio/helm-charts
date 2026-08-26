@@ -165,6 +165,105 @@ Build checksum source for UI secret (for pod annotation rollout trigger).
 {{- end }}
 
 {{/*
+Name of the chart-managed API app secret holding APP_ENCRYPTION_KEY and
+AUTH_JWT_SECRET (only the keys not sourced from an existingSecret).
+*/}}
+{{- define "openctem.apiAppSecretName" -}}
+{{- printf "%s-app" (include "openctem.apiFullname" .) -}}
+{{- end }}
+
+{{/*
+Effective secret name / key for APP_ENCRYPTION_KEY.
+*/}}
+{{- define "openctem.apiEncryptionSecretName" -}}
+{{- if .Values.api.encryption.existingSecret -}}
+{{- .Values.api.encryption.existingSecret -}}
+{{- else -}}
+{{- include "openctem.apiAppSecretName" . -}}
+{{- end -}}
+{{- end }}
+{{- define "openctem.apiEncryptionSecretKey" -}}
+{{- if .Values.api.encryption.existingSecret -}}
+{{- .Values.api.encryption.keyRef -}}
+{{- else -}}
+APP_ENCRYPTION_KEY
+{{- end -}}
+{{- end }}
+
+{{/*
+Effective secret name / key for AUTH_JWT_SECRET.
+*/}}
+{{- define "openctem.apiJwtSecretName" -}}
+{{- if .Values.api.auth.existingSecret -}}
+{{- .Values.api.auth.existingSecret -}}
+{{- else -}}
+{{- include "openctem.apiAppSecretName" . -}}
+{{- end -}}
+{{- end }}
+{{- define "openctem.apiJwtSecretKey" -}}
+{{- if .Values.api.auth.existingSecret -}}
+{{- .Values.api.auth.jwtSecretKey -}}
+{{- else -}}
+AUTH_JWT_SECRET
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the APP_ENCRYPTION_KEY value.
+
+Precedence:
+  1. explicit inline value (api.encryption.key)
+  2. value already stored in the chart-managed Secret (cluster lookup, so it
+     PERSISTS across upgrades and is never rotated)
+  3. generate a fresh 44-char base64 key (a valid AES-256 key per api config
+     validateEncryption)
+
+FAIL-CLOSED IN PRODUCTION (api.appEnv == "production"): steps 2 and 3 are
+DISALLOWED. Under GitOps (`helm template` / ArgoCD / Flux) the cluster `lookup`
+returns empty on every render, so auto-generate would mint a NEW key on each
+sync — rotating APP_ENCRYPTION_KEY and making all stored integration
+credentials permanently undecryptable. In production we therefore REQUIRE an
+explicit api.encryption.key OR api.encryption.existingSecret and fail the
+render otherwise. Auto-gen/lookup convenience is kept for dev/staging only.
+Call with: (dict "context" . "existingSecret" $existingSecret)
+*/}}
+{{- define "openctem.apiEncryptionKeyValue" -}}
+{{- $ctx := .context -}}
+{{- $existing := .existingSecret -}}
+{{- if $ctx.Values.api.encryption.key -}}
+{{- $ctx.Values.api.encryption.key -}}
+{{- else if eq ($ctx.Values.api.appEnv | toString) "production" -}}
+{{- fail "\n\nAPP_ENCRYPTION_KEY is required in production (api.appEnv=production).\nAuto-generation via cluster lookup is DISABLED in production because under\nGitOps (helm template/ArgoCD/Flux) the lookup returns empty and the key would\nregenerate on every sync — rotating it makes ALL stored integration\ncredentials permanently undecryptable.\nProvide ONE of:\n  - api.encryption.existingSecret  (RECOMMENDED: External Secrets Operator /\n    sealed-secrets / GitOps-friendly, key = api.encryption.keyRef), OR\n  - api.encryption.key  (explicit, STABLE value: `openssl rand -hex 32`)\nOr set api.appEnv to a non-production value for a dev/eval install.\n" -}}
+{{- else if and $existing (hasKey $existing.data "APP_ENCRYPTION_KEY") -}}
+{{- index $existing.data "APP_ENCRYPTION_KEY" | b64dec -}}
+{{- else -}}
+{{- randBytes 32 -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the AUTH_JWT_SECRET value. Same precedence and the same FAIL-CLOSED
+production rule as the encryption key: in production an explicit
+api.auth.jwtSecret or api.auth.existingSecret is REQUIRED (a rotated JWT secret
+logs every user out; GitOps + lookup would rotate it on every sync). Generated
+value (non-prod only) is 64 base64 chars, satisfying the >= 64 char check.
+Call with: (dict "context" . "existingSecret" $existingSecret)
+*/}}
+{{- define "openctem.apiJwtSecretValue" -}}
+{{- $ctx := .context -}}
+{{- $existing := .existingSecret -}}
+{{- if $ctx.Values.api.auth.jwtSecret -}}
+{{- $ctx.Values.api.auth.jwtSecret -}}
+{{- else if eq ($ctx.Values.api.appEnv | toString) "production" -}}
+{{- fail "\n\nAUTH_JWT_SECRET is required in production (api.appEnv=production).\nAuto-generation via cluster lookup is DISABLED in production because under\nGitOps (helm template/ArgoCD/Flux) the lookup returns empty and the secret\nwould regenerate on every sync — rotating it logs every user out.\nProvide ONE of:\n  - api.auth.existingSecret  (RECOMMENDED: External Secrets Operator /\n    sealed-secrets / GitOps-friendly, key = api.auth.jwtSecretKey), OR\n  - api.auth.jwtSecret  (explicit, STABLE, >= 64 chars: `openssl rand -base64 48`)\nOr set api.appEnv to a non-production value for a dev/eval install.\n" -}}
+{{- else if and $existing (hasKey $existing.data "AUTH_JWT_SECRET") -}}
+{{- index $existing.data "AUTH_JWT_SECRET" | b64dec -}}
+{{- else -}}
+{{- randBytes 48 -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Resolve PostgreSQL service name when subchart is enabled.
 */}}
 {{- define "openctem.postgresqlHost" -}}

@@ -1,0 +1,18 @@
+{{- if .Values.api.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "openctem.apiFullname" . }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+spec:
+  {{- with .Values.api.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.api.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "openctem.apiSelectorLabels" . | nindent 6 }}
+{{- end }}

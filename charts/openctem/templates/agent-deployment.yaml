@@ -1,0 +1,100 @@
+{{- if .Values.agent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openctem.agentFullname" . }}
+  labels:
+    {{- include "openctem.agentLabels" . | nindent 4 }}
+spec:
+  # The bundled agent registers once and holds a lease; run a single replica
+  # unless you deliberately want multiple co-located workers.
+  replicas: {{ .Values.agent.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "openctem.agentSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if not .Values.agent.existingSecret }}
+        checksum/bootstrap-secret: {{ include (print $.Template.BasePath "/agent-secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.agent.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "openctem.agentLabels" . | nindent 8 }}
+        {{- with .Values.agent.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent
+          {{- with .Values.agent.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          args:
+            - "-platform"
+            - "-enable-recon={{ .Values.agent.executors.recon }}"
+            - "-enable-vulnscan={{ .Values.agent.executors.vulnscan }}"
+            - "-enable-secrets={{ .Values.agent.executors.secrets }}"
+            - "-enable-assets={{ .Values.agent.executors.assets }}"
+            - "-enable-pipeline={{ .Values.agent.executors.pipeline }}"
+            - "-max-concurrent={{ .Values.agent.maxConcurrent }}"
+            {{- if .Values.agent.verbose }}
+            - "-verbose"
+            {{- end }}
+          env:
+            # Co-located: talk to the in-cluster API service.
+            - name: API_URL
+              value: {{ .Values.agent.apiUrl | default (printf "http://%s:%v" (include "openctem.apiFullname" .) .Values.api.service.port) | quote }}
+            - name: AGENT_NAME
+              value: {{ .Values.agent.name | default (include "openctem.agentFullname" .) | quote }}
+            - name: REGION
+              value: {{ .Values.agent.region | quote }}
+            # Self-registration bootstrap token — injected from a Secret, never
+            # placed in args (which are visible via `kubectl describe pod`).
+            - name: BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.agentSecretName" . }}
+                  key: {{ .Values.agent.existingSecretKey | default "bootstrap-token" }}
+            {{- if .Values.agent.keyAutoRenew }}
+            - name: PLATFORM_KEY_AUTORENEW
+              value: "true"
+            {{- end }}
+            # Co-located agents reach EXTERNAL/reachable targets only. Internal-
+            # network scanning must use a remote agent, so private targets stay
+            # blocked unless an operator explicitly opts in.
+            - name: AGENT_ALLOW_PRIVATE_TARGETS
+              value: {{ .Values.agent.allowPrivateTargets | quote }}
+            {{- with .Values.agent.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.agent.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

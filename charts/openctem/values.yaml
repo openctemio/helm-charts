@@ -559,3 +559,62 @@ extraManifests: []
 #       remoteRef:
 #         key: openctem-api-secret
 #         property: DB_USERNAME
+
+# =============================================================================
+# Bundled agent (optional, opt-in)
+# =============================================================================
+# A co-located OpenCTEM agent that runs inside the same release and self-
+# registers with the in-cluster API using a bootstrap token. It lets the
+# platform work out-of-the-box for EXTERNAL-reachable work (public DAST/recon/
+# validate, enrichment) without deploying a separate remote agent.
+#
+# IMPORTANT — reachability: a co-located agent can only reach what the cluster
+# can route to. Scanning a customer's INTERNAL network still requires a remote
+# agent. Keep allowPrivateTargets=false unless you intend the agent to touch
+# in-cluster/private ranges.
+agent:
+  # -- Enable the bundled co-located agent. Disabled by default (opt-in).
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: openctemio/agent
+    # -- Defaults to the chart's appVersion when empty.
+    tag: ""
+    pullPolicy: IfNotPresent
+  # -- Display name for the registered agent. Defaults to the workload name.
+  name: ""
+  region: default
+  # -- Override the API base URL. Defaults to the in-cluster API service.
+  apiUrl: ""
+  # -- Bootstrap token for self-registration (dev/quickstart). For production
+  #    provide it out-of-band via existingSecret instead of committing it here.
+  bootstrapToken: ""
+  # -- Name of a pre-created Secret holding the bootstrap token. Takes
+  #    precedence over bootstrapToken; nothing secret is then rendered by Helm.
+  existingSecret: ""
+  # -- Key within the secret that holds the token.
+  existingSecretKey: "bootstrap-token"
+  # -- Auto-renew the platform API key before expiry.
+  keyAutoRenew: true
+  maxConcurrent: 5
+  verbose: false
+  # -- Keep private/internal targets blocked by default (co-located agents are
+  #    for external-reachable work; internal scanning belongs on a remote agent).
+  allowPrivateTargets: false
+  # Which executor capabilities this bundled agent advertises. Only enable what
+  # makes sense to run next to the platform; each maps to an agent capability.
+  executors:
+    recon: false
+    vulnscan: true
+    secrets: false
+    assets: false
+    pipeline: false
+  extraEnv: []
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext: {}
+  securityContext: {}
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

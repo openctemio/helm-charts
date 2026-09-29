@@ -105,6 +105,40 @@ Create UI workload name
 {{- end }}
 
 {{/*
+Labels for the bundled agent component
+*/}}
+{{- define "openctem.agentLabels" -}}
+{{ include "openctem.labels" . }}
+app.kubernetes.io/component: agent
+{{- end }}
+
+{{/*
+Selector labels for the bundled agent component
+*/}}
+{{- define "openctem.agentSelectorLabels" -}}
+{{ include "openctem.selectorLabels" . }}
+app.kubernetes.io/component: agent
+{{- end }}
+
+{{/*
+Create bundled agent workload name
+*/}}
+{{- define "openctem.agentFullname" -}}
+{{ include "openctem.componentFullname" (dict "context" . "component" "agent") }}
+{{- end }}
+
+{{/*
+Resolve the bundled agent bootstrap-token secret name.
+*/}}
+{{- define "openctem.agentSecretName" -}}
+{{- if .Values.agent.existingSecret }}
+{{- .Values.agent.existingSecret }}
+{{- else }}
+{{- printf "%s-bootstrap" (include "openctem.agentFullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
 Create the API service account name to use
 */}}
 {{- define "openctem.apiServiceAccountName" -}}

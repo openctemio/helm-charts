@@ -59,7 +59,7 @@ api:
     tlsSkipVerify: false
 
   image:
-    repository: openctemio/api
+    repository: ghcr.io/openctemio/api
     pullPolicy: IfNotPresent
     tag: ""
 
@@ -236,7 +236,7 @@ api:
     enabled: true
 
     image:
-      repository: openctemio/migrations
+      repository: ghcr.io/openctemio/migrations
       # -- Image tag for the migrations image. Defaults to .Chart.AppVersion.
       tag: ""
       pullPolicy: IfNotPresent
@@ -288,7 +288,7 @@ ui:
   replicaCount: 1
 
   image:
-    repository: openctemio/ui
+    repository: ghcr.io/openctemio/ui
     pullPolicy: IfNotPresent
     tag: ""
 
@@ -577,7 +577,7 @@ agent:
   enabled: false
   replicaCount: 1
   image:
-    repository: openctemio/agent
+    repository: ghcr.io/openctemio/agent
     # -- Defaults to the chart's appVersion when empty.
     tag: ""
     pullPolicy: IfNotPresent

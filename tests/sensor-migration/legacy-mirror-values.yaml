@@ -1,0 +1,10 @@
+# A private mirror: the repository is not the frozen agent image, so it is
+# kept with its tag.
+api:
+  appEnv: development
+agent:
+  enabled: true
+  bootstrapToken: "test-bootstrap-token"
+  image:
+    repository: registry.example.com/openctemio/sensor
+    tag: v0.3.0-default

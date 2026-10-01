@@ -1,0 +1,26 @@
+# A chart <= 0.4.x values file for the bundled agent, unchanged. It must keep
+# rendering on chart >= 0.5.0, as the sensor.
+api:
+  appEnv: development
+agent:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/openctemio/agent
+    tag: v0.2.2-default
+    pullPolicy: IfNotPresent
+  name: edge-scanner
+  region: eu-west
+  bootstrapToken: "test-bootstrap-token"
+  existingSecretKey: "bootstrap-token"
+  keyAutoRenew: true
+  maxConcurrent: 3
+  verbose: true
+  allowPrivateTargets: false
+  executors:
+    recon: true
+    vulnscan: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi

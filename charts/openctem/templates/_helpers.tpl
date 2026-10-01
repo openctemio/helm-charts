@@ -105,37 +105,254 @@ Create UI workload name
 {{- end }}
 
 {{/*
-Labels for the bundled agent component
+Labels for the bundled sensor component
 */}}
-{{- define "openctem.agentLabels" -}}
+{{- define "openctem.sensorLabels" -}}
 {{ include "openctem.labels" . }}
-app.kubernetes.io/component: agent
+app.kubernetes.io/component: sensor
 {{- end }}
 
 {{/*
-Selector labels for the bundled agent component
+Selector labels for the bundled sensor component
 */}}
-{{- define "openctem.agentSelectorLabels" -}}
+{{- define "openctem.sensorSelectorLabels" -}}
 {{ include "openctem.selectorLabels" . }}
-app.kubernetes.io/component: agent
+app.kubernetes.io/component: sensor
 {{- end }}
 
 {{/*
-Create bundled agent workload name
+Create bundled sensor workload name
 */}}
-{{- define "openctem.agentFullname" -}}
-{{ include "openctem.componentFullname" (dict "context" . "component" "agent") }}
+{{- define "openctem.sensorFullname" -}}
+{{ include "openctem.componentFullname" (dict "context" . "component" "sensor") }}
 {{- end }}
 
 {{/*
-Resolve the bundled agent bootstrap-token secret name.
+Resolve the bundled sensor credential Secret name and key (the API key in
+daemon mode, the bootstrap token in platform mode).
+Call with: (dict "context" . "sensor" $sensor), $sensor = the resolved
+"openctem.sensor" values.
 */}}
-{{- define "openctem.agentSecretName" -}}
-{{- if .Values.agent.existingSecret }}
-{{- .Values.agent.existingSecret }}
+{{- define "openctem.sensorSecretName" -}}
+{{- if .sensor.existingSecret }}
+{{- .sensor.existingSecret }}
 {{- else }}
-{{- printf "%s-bootstrap" (include "openctem.agentFullname" .) }}
+{{- printf "%s-credentials" (include "openctem.sensorFullname" .context) }}
 {{- end }}
+{{- end }}
+{{- define "openctem.sensorSecretKey" -}}
+{{- if .sensor.existingSecretKey }}
+{{- .sensor.existingSecretKey }}
+{{- else if eq .sensor.mode "platform" }}
+{{- "bootstrap-token" }}
+{{- else }}
+{{- "api-key" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Chart defaults of the sensor: block. MUST stay identical to values.yaml
+(tests/sensor-migration/run.sh fails CI on drift). Helm cannot read the
+chart's own values.yaml at render time, so this copy is how the legacy
+agent: mapping below tells which sensor.* keys the user actually set.
+*/}}
+{{- define "openctem.sensorDefaults" -}}
+enabled: false
+mode: daemon
+replicaCount: 1
+image:
+  repository: ghcr.io/openctemio/sensor
+  tag: v0.3.0-default
+  pullPolicy: IfNotPresent
+name: ""
+region: default
+apiUrl: ""
+apiKey: ""
+bootstrapToken: ""
+existingSecret: ""
+existingSecretKey: ""
+tools: nuclei
+keyAutoRenew: false
+verbose: false
+allowPrivateTargets: ""
+scanRoots: ""
+maxConcurrent: 5
+executors:
+  recon: false
+  vulnscan: true
+  secrets: false
+  assets: false
+  pipeline: false
+extraEnv: []
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+{{- end }}
+
+{{/*
+Map one legacy agent.<path> value onto the sensor values (internal).
+Takes the agent value unless the user set sensor.<path> (a value different
+from the chart default) to something else, which is recorded as a conflict.
+Conflicts name the keys, never the values (one may be a credential).
+Call with: (dict "target" <sensor map holding the key> "key" <key>
+"path" <dotted path> "value" <agent value> "default" <chart default>
+"state" <dict with conflicts/mapped lists>)
+*/}}
+{{- define "openctem.sensorMapLegacyKey" -}}
+{{- $current := index .target .key -}}
+{{- if and (ne (toYaml $current) (toYaml .default)) (ne (toYaml $current) (toYaml .value)) -}}
+{{- $_ := set .state "conflicts" (append .state.conflicts (printf "agent.%s and sensor.%s" .path .path)) -}}
+{{- else -}}
+{{- $_ := set .target .key .value -}}
+{{- $_ := set .state "mapped" (append .state.mapped .path) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the effective sensor values, as YAML (use with fromYaml):
+
+  .Values.sensor, plus the legacy .Values.agent block (chart <= 0.4.x) mapped
+  key by key onto it. This is the automatic migration for an old values file:
+    - agent.<key> -> sensor.<key> for every key (same names);
+    - agent.image.repository/tag are dropped when they name the frozen
+      ghcr.io/openctemio/agent image (its v0.2.x tags do not exist on
+      ghcr.io/openctemio/sensor); a custom repository (a mirror) is kept with
+      its tag;
+    - agent.allowPrivateTargets true/false -> "1"/"" (the sensor only
+      recognises "1");
+    - chart <= 0.4.x always ran `-platform` with a bootstrap token, so an
+      agent: block selects mode "platform" unless sensor.mode or an API key
+      (sensor.apiKey / agent.apiKey) says otherwise;
+    - agent.X and sensor.X both set to different values -> the render fails,
+      naming both keys but no values (the sensor binary applies the same rule
+      to its AGENT_ and SENSOR_ variables).
+  The result carries "_legacy" (used, mapped, dropped, notes) for NOTES.txt.
+*/}}
+{{- define "openctem.sensor" -}}
+{{- $defaults := include "openctem.sensorDefaults" . | fromYaml -}}
+{{- $sensor := deepCopy (.Values.sensor | default dict) -}}
+{{- $legacy := .Values.agent -}}
+{{- $state := dict "conflicts" list "mapped" list "dropped" list "notes" list -}}
+{{- if $legacy -}}
+{{- if not (kindIs "map" $legacy) -}}
+{{- fail "\n\nThe values key `agent` was renamed to `sensor` (chart 0.5.0, OpenCTEM v0.9.0) and, when present, must be a map like `sensor`.\n" -}}
+{{- end -}}
+{{- $legacy = deepCopy $legacy -}}
+{{- if hasKey $legacy "image" -}}
+{{- $li := $legacy.image | default dict -}}
+{{- $repo := toString ($li.repository | default "") -}}
+{{- if or (eq $repo "") (has $repo (list "ghcr.io/openctemio/agent" "docker.io/openctemio/agent" "openctemio/agent")) -}}
+{{- range $k := list "repository" "tag" -}}
+{{- if index $li $k -}}
+{{- $_ := set $state "dropped" (append $state.dropped (printf "agent.image.%s=%s" $k (toString (index $li $k)))) -}}
+{{- end -}}
+{{- end -}}
+{{- $li = omit $li "repository" "tag" -}}
+{{- end -}}
+{{- $_ := set $legacy "image" $li -}}
+{{- end -}}
+{{- if hasKey $legacy "allowPrivateTargets" -}}
+{{- $apt := toString $legacy.allowPrivateTargets -}}
+{{- if has $apt (list "true" "1") -}}
+{{- if eq $apt "true" -}}
+{{- $_ := set $state "notes" (append $state.notes "agent.allowPrivateTargets=true is now SENSOR_ALLOW_PRIVATE_TARGETS=1, so private (RFC1918 / ULA) targets ARE allowed. Chart <= 0.4.x rendered \"true\", which the binary ignores (it only accepts \"1\"), so they were blocked before this upgrade. Leave sensor.allowPrivateTargets empty to keep them blocked.") -}}
+{{- end -}}
+{{- $_ := set $legacy "allowPrivateTargets" "1" -}}
+{{- else if has $apt (list "false" "0" "" "<nil>") -}}
+{{- $_ := set $legacy "allowPrivateTargets" "" -}}
+{{- end -}}
+{{- end -}}
+{{- range $k, $v := $legacy -}}
+{{- $d := index $defaults $k -}}
+{{- if and (has $k (list "image" "executors")) (kindIs "map" $v) -}}
+{{- $target := index $sensor $k -}}
+{{- if not (kindIs "map" $target) -}}
+{{- $target = dict -}}
+{{- $_ := set $sensor $k $target -}}
+{{- end -}}
+{{- range $k2, $v2 := $v -}}
+{{- include "openctem.sensorMapLegacyKey" (dict "target" $target "key" $k2 "path" (printf "%s.%s" $k $k2) "value" $v2 "default" (index ($d | default dict) $k2) "state" $state) -}}
+{{- end -}}
+{{- else -}}
+{{- include "openctem.sensorMapLegacyKey" (dict "target" $sensor "key" $k "path" $k "value" $v "default" $d "state" $state) -}}
+{{- end -}}
+{{- end -}}
+{{- if $state.conflicts -}}
+{{- fail (printf "\n\nThe values set both the legacy `agent:` block and `sensor:`, with different values:\n  - %s\n`agent:` was renamed to `sensor:` in chart 0.5.0 (OpenCTEM v0.9.0). Move these settings into `sensor:` and delete `agent:` (or make both agree).\n" (join "\n  - " $state.conflicts)) -}}
+{{- end -}}
+{{- if and $sensor.enabled (not (hasKey $legacy "mode")) (eq (toString $sensor.mode) (toString $defaults.mode)) (not $sensor.apiKey) -}}
+{{- $_ := set $sensor "mode" "platform" -}}
+{{- $_ := set $state "notes" (append $state.notes "sensor.mode=platform (what chart <= 0.4.x ran: -platform with the bootstrap token). The OpenCTEM API does not serve /api/v1/platform/register, so this mode cannot register. Switch to sensor.mode=daemon with the API key of a sensor created under Settings → Sensors (sensor.apiKey or sensor.existingSecret).") -}}
+{{- end -}}
+{{- end -}}
+{{- if not (has (toString $sensor.mode) (list "daemon" "platform")) -}}
+{{- fail (printf "\n\nsensor.mode=%q is not supported. Use \"daemon\" (API key) or \"platform\" (bootstrap token).\n" (toString $sensor.mode)) -}}
+{{- end -}}
+{{- $apt := toString ($sensor.allowPrivateTargets | default "") -}}
+{{- if eq $apt "false" -}}
+{{- $apt = "" -}}
+{{- end -}}
+{{- if not (has $apt (list "" "1")) -}}
+{{- fail (printf "\n\nsensor.allowPrivateTargets=%q is not recognised. Use \"1\" to allow private (RFC1918 / ULA) scan targets, or leave it empty to refuse them. The sensor treats any other value, including \"true\", as off.\n" $apt) -}}
+{{- end -}}
+{{- $_ := set $sensor "allowPrivateTargets" $apt -}}
+{{- $_ := set $sensor "_legacy" (dict "used" (not (empty $legacy)) "mapped" $state.mapped "dropped" $state.dropped "notes" $state.notes) -}}
+{{- toYaml $sensor -}}
+{{- end }}
+
+{{/*
+api.extraEnv with the API's renamed settings (RFC-023 §9.5) moved to their
+new names: AGENT_<X> -> SENSOR_<X>. The API still reads the old names (with a
+startup WARN) and refuses to start when both are set to different values, so
+the same conflict fails the render here; an identical duplicate is dropped.
+Entries with other names are passed through unchanged.
+*/}}
+{{- define "openctem.apiRenamedEnv" -}}
+AGENT_CONFIG_TEMPLATES_DIR: SENSOR_CONFIG_TEMPLATES_DIR
+AGENT_PUBLIC_API_URL: SENSOR_PUBLIC_API_URL
+AGENT_KEY_TTL: SENSOR_KEY_TTL
+AGENT_LB_JOB_WEIGHT: SENSOR_LB_JOB_WEIGHT
+AGENT_LB_CPU_WEIGHT: SENSOR_LB_CPU_WEIGHT
+AGENT_LB_MEMORY_WEIGHT: SENSOR_LB_MEMORY_WEIGHT
+AGENT_LB_DISK_IO_WEIGHT: SENSOR_LB_DISK_IO_WEIGHT
+AGENT_LB_NETWORK_WEIGHT: SENSOR_LB_NETWORK_WEIGHT
+AGENT_LB_MAX_DISK_THROUGHPUT_MBPS: SENSOR_LB_MAX_DISK_THROUGHPUT_MBPS
+AGENT_LB_MAX_NETWORK_THROUGHPUT_MBPS: SENSOR_LB_MAX_NETWORK_THROUGHPUT_MBPS
+{{- end }}
+
+{{- define "openctem.apiExtraEnv" -}}
+{{- $renamed := include "openctem.apiRenamedEnv" . | fromYaml -}}
+{{- $byName := dict -}}
+{{- range $e := .Values.api.extraEnv -}}
+{{- if and (kindIs "map" $e) $e.name -}}
+{{- $_ := set $byName (toString $e.name) $e -}}
+{{- end -}}
+{{- end -}}
+{{- $out := list -}}
+{{- range $e := .Values.api.extraEnv -}}
+{{- $name := "" -}}
+{{- if kindIs "map" $e -}}
+{{- $name = toString ($e.name | default "") -}}
+{{- end -}}
+{{- if hasKey $renamed $name -}}
+{{- $new := index $renamed $name -}}
+{{- if hasKey $byName $new -}}
+{{- if ne (toYaml (omit $e "name")) (toYaml (omit (index $byName $new) "name")) -}}
+{{- fail (printf "\n\napi.extraEnv sets both %s (the pre-rename name) and %s to different values. The API refuses to start with both; keep only %s.\n" $name $new $new) -}}
+{{- end -}}
+{{- else -}}
+{{- $out = append $out (merge (dict "name" $new) (omit $e "name")) -}}
+{{- end -}}
+{{- else -}}
+{{- $out = append $out $e -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
 {{- end }}
 
 {{/*

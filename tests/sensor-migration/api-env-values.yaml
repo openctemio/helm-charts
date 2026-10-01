@@ -1,0 +1,12 @@
+# The API's pre-rename settings in api.extraEnv are passed as SENSOR_*.
+api:
+  appEnv: development
+  extraEnv:
+    - name: LOG_LEVEL
+      value: debug
+    - name: AGENT_KEY_TTL
+      value: 24h
+    - name: AGENT_PUBLIC_API_URL
+      value: https://api.example.com
+    - name: SENSOR_PUBLIC_API_URL
+      value: https://api.example.com

@@ -176,6 +176,18 @@ keyAutoRenew: false
 verbose: false
 allowPrivateTargets: ""
 scanRoots: ""
+outbox:
+  persistence:
+    enabled: false
+    existingClaim: ""
+    size: 2Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    fsGroup: 999
+  emptyDirSizeLimit: ""
+  maxBytes: ""
+  maxAge: ""
 maxConcurrent: 5
 executors:
   recon: false

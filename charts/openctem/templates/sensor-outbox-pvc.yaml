@@ -1,0 +1,22 @@
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- $persist := (($sensor.outbox | default dict).persistence | default dict) -}}
+{{- if and $sensor.enabled $persist.enabled (not $persist.existingClaim) }}
+# The sensor's outbox: results not yet accepted by the platform. Kept on
+# uninstall would need helm.sh/resource-policy; it is deleted with the
+# release like the sensor itself.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openctem.sensorFullname" . }}-outbox
+  labels:
+    {{- include "openctem.sensorLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml $persist.accessModes | nindent 4 }}
+  {{- with $persist.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $persist.size | quote }}
+{{- end }}

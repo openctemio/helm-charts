@@ -1,0 +1,11 @@
+# agent: and sensor: set the same keys to different values: the render fails.
+api:
+  appEnv: development
+agent:
+  enabled: true
+  bootstrapToken: "old-token"
+  maxConcurrent: 3
+sensor:
+  enabled: true
+  bootstrapToken: "new-token"
+  maxConcurrent: 8

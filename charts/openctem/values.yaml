@@ -92,13 +92,25 @@ api:
         - ALL
     # readOnlyRootFilesystem: true
 
-  # -- Bootstrap the first PLATFORM admin (admin_users + admin API key printed
-  # to the Job log; used by the openctem-admin CLI / platform console).
+  # -- Bootstrap the first PLATFORM administrators (RFC-022): the primary admin
+  # and a break-glass backup super admin, each a new sign-in account with a
+  # temporary password printed ONCE to the Job log. Both sign in on /login,
+  # enroll an authenticator when opening the admin console, and must change
+  # the temporary password first. The backup is local (never bound to the
+  # platform identity provider, exempt from "require IdP"); every sign-in with
+  # it is audited (high), logged with alert=break_glass_sign_in and emailed to
+  # the other admins (system SMTP). Store its credentials offline and test it
+  # at least every 90 days. Re-running is safe: existing admins are skipped.
   bootstrapAdmin:
     enabled: false
     email: ""
     name: ""
     role: super_admin
+    # -- Break-glass backup administrator (required unless noBackup=true).
+    backupEmail: ""
+    backupName: ""
+    # -- Skip the break-glass backup (not recommended).
+    noBackup: false
     force: false
     backoffLimit: 2
     activeDeadlineSeconds: 300

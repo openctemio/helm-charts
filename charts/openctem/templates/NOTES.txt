@@ -52,6 +52,59 @@
   {{- end }}
 {{- end }}
 {{- end }}
+{{- $gwMode := include "openctem.gatewayMode" . }}
+{{- if $gwMode }}
+
+Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
+- URL: {{ include "openctem.gatewayPublicUrl" . }}
+- The API trusts client-IP headers only from: {{ include "openctem.gatewayTrustedProxies" . }}
+{{- if eq $gwMode "ingress" }}
+- Ingress `{{ include "openctem.gatewayFullname" . }}` (path rules only). A plain Ingress cannot match headers:
+  API-key clients (Bearer oct_*, X-API-Key) reach the API on the dedicated paths
+  (/api/v1/agent, /api/v2/sensor, /api/v1/platform, /scim/v2, /api/v1/mcp,
+  /api/v1/webhooks/incoming, ...) but get 401 on other /api/v1/* paths, which go
+  to the UI. For those, use gateway.mode=httpRoute or caddy.
+{{- else if eq $gwMode "httpRoute" }}
+- HTTPRoute `{{ include "openctem.gatewayFullname" . }}`; TLS terminates on the parent Gateway's listener.
+{{- if .Values.gateway.httpRoute.apiKeyHeaderRouting }}
+  API-key header routing needs RegularExpression header matches (Extended support).
+{{- end }}
+  Bearer tokens other than oct_* keys reach the API only on the dedicated paths.
+{{- else if eq $gwMode "caddy" }}
+{{- $tlsMode := include "openctem.gatewayCaddyTlsMode" . }}
+{{- $gw := include "openctem.gatewayFullname" . }}
+- Bundled Caddy: Service `{{ $gw }}` (type {{ .Values.gateway.caddy.service.type }}, TLS mode {{ $tlsMode }}).
+    kubectl -n {{ .Release.Namespace }} get svc {{ $gw }}
+  Point {{ .Values.gateway.host | default "your DNS name" }} at its external address.
+{{- if eq $tlsMode "internal" }}
+- TLS from Caddy's own CA. Its root certificate is created on first start; give it to
+  sensors (SSL_CERT_FILE) and browsers:
+    kubectl -n {{ .Release.Namespace }} exec deploy/{{ $gw }} -- cat /data/caddy/pki/authorities/local/root.crt > openctem-root-ca.crt
+{{- else if eq $tlsMode "acme" }}
+- TLS from ACME ({{ .Values.gateway.caddy.tls.acme.ca }}): {{ .Values.gateway.host }} must resolve to the
+  Service and port 443 must be reachable from the Internet.
+{{- else if eq $tlsMode "files" }}
+- TLS from Secret `{{ .Values.gateway.caddy.tls.files.secretName }}`. Caddy reloads only on restart:
+    kubectl -n {{ .Release.Namespace }} rollout restart deploy/{{ $gw }}
+{{- else if eq $tlsMode "http" }}
+!! WARNING: plain HTTP (gateway.caddy.tls.mode=http). Passwords, session cookies and
+   sensor keys cross the network UNENCRYPTED unless a proxy that terminates TLS
+   sits in front of this gateway.
+{{- if not .Values.gateway.caddy.frontProxies }}
+   gateway.caddy.frontProxies is empty, so the audit log records the front
+   proxy's address instead of the client's.
+{{- end }}
+{{- end }}
+{{- if not .Values.gateway.caddy.persistence.enabled }}
+- WARNING: /data is an emptyDir. Certificates{{ if eq $tlsMode "internal" }} and the internal CA{{ end }} are re-created
+  whenever the pod is replaced. Set gateway.caddy.persistence.enabled=true.
+{{- end }}
+{{- end }}
+{{- if or .Values.api.ingress.enabled .Values.ui.ingress.enabled .Values.api.httpRoute.enabled .Values.ui.httpRoute.enabled }}
+- NOTE: the per-component api/ui ingress or httpRoute is also enabled. Do not give
+  it the gateway's host; the gateway alone serves both.
+{{- end }}
+{{- end }}
 
 3. Deployment mode
 - APP_ENV: {{ .Values.api.appEnv }}

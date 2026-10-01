@@ -1,0 +1,5 @@
+https://{$OPENCTEM_HOSTNAME} {
+	tls internal
+	header Strict-Transport-Security "max-age=31536000"
+	import openctem
+}

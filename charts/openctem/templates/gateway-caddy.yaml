@@ -1,0 +1,255 @@
+{{- if eq (include "openctem.gatewayMode" .) "caddy" }}
+{{- $g := .Values.gateway -}}
+{{- $c := $g.caddy -}}
+{{- $tlsMode := include "openctem.gatewayCaddyTlsMode" . -}}
+{{- $plain := eq $tlsMode "http" -}}
+{{- $listenHttp := or $plain (eq $tlsMode "acme") -}}
+{{- if and $c.service.http.enabled (not $listenHttp) -}}
+{{- fail (printf "\n\ngateway.caddy.service.http.enabled=true: port 80 is served only in tls.mode=acme (HTTP-01 + redirect) or http; tls.mode=%s listens on 443 alone.\n" $tlsMode) -}}
+{{- end -}}
+{{- $fullName := include "openctem.gatewayFullname" . -}}
+{{- $claim := $c.persistence.existingClaim | default (printf "%s-data" $fullName) -}}
+# The Caddyfile and TLS mode files are the docker-compose gateway's, unchanged
+# (charts/openctem/files/gateway/).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "openctem.gatewayLabels" . | nindent 4 }}
+data:
+  {{- include "openctem.gatewayCaddyConfigData" . | nindent 2 }}
+{{- if and $c.persistence.enabled (not $c.persistence.existingClaim) }}
+---
+# Certificates, the ACME account and the internal CA. Kept on `helm uninstall`
+# (a new internal CA would have to be trusted again by every sensor/browser).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  labels:
+    {{- include "openctem.gatewayLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml $c.persistence.accessModes | nindent 4 }}
+  {{- with $c.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $c.persistence.size | quote }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "openctem.gatewayLabels" . | nindent 4 }}
+  {{- with $c.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $c.service.type }}
+  {{- if and (has $c.service.type (list "LoadBalancer" "NodePort")) $c.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ $c.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- if eq $c.service.type "LoadBalancer" }}
+  {{- with $c.service.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  {{- with $c.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  # Only the public port(s): never the Caddy admin API, the API or the UI.
+  ports:
+    {{- if not $plain }}
+    - name: https
+      port: {{ $c.service.httpsPort }}
+      targetPort: https
+      protocol: TCP
+      {{- if and $c.service.httpsNodePort (ne $c.service.type "ClusterIP") }}
+      nodePort: {{ $c.service.httpsNodePort | int }}
+      {{- end }}
+    {{- end }}
+    {{- if or $plain $c.service.http.enabled }}
+    - name: http
+      port: {{ $c.service.http.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and $c.service.http.nodePort (ne $c.service.type "ClusterIP") }}
+      nodePort: {{ $c.service.http.nodePort | int }}
+      {{- end }}
+    {{- end }}
+  selector:
+    {{- include "openctem.gatewaySelectorLabels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "openctem.gatewayLabels" . | nindent 4 }}
+spec:
+  # One replica: /data (certificates, internal CA) is a ReadWriteOnce volume.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "openctem.gatewaySelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include "openctem.gatewayCaddyConfigData" . | sha256sum }}
+        {{- with $c.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "openctem.gatewayLabels" . | nindent 8 }}
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      {{- with $c.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: caddy
+          image: "{{ $c.image.repository }}:{{ $c.image.tag }}"
+          imagePullPolicy: {{ $c.image.pullPolicy }}
+          command: ["/bin/sh", "/etc/caddy/entrypoint.sh"]
+          {{- with $c.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            {{- if not $plain }}
+            - name: https
+              containerPort: 443
+              protocol: TCP
+            {{- end }}
+            {{- if $listenHttp }}
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            {{- end }}
+          env:
+            - name: OPENCTEM_TLS_MODE
+              value: {{ $tlsMode | quote }}
+            - name: OPENCTEM_HOSTNAME
+              value: {{ $g.host | quote }}
+            - name: OPENCTEM_API_UPSTREAM
+              value: "{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}"
+            - name: OPENCTEM_WEB_UPSTREAM
+              value: "{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}"
+            - name: GATEWAY_MAX_BODY_SIZE
+              value: {{ $c.maxBodySize | quote }}
+            {{- with $c.frontProxies }}
+            - name: OPENCTEM_TRUSTED_PROXIES
+              value: {{ join " " . | quote }}
+            {{- end }}
+            {{- if eq $tlsMode "acme" }}
+            - name: ACME_EMAIL
+              value: {{ $c.tls.acme.email | quote }}
+            - name: ACME_CA
+              value: {{ $c.tls.acme.ca | quote }}
+            {{- end }}
+            {{- if eq $tlsMode "files" }}
+            - name: TLS_CERT_FILE
+              value: tls.crt
+            - name: TLS_KEY_FILE
+              value: tls.key
+            {{- end }}
+            - name: OPENCTEM_ALLOW_PLAIN_HTTP
+              value: {{ $c.tls.allowPlainHttp | toString | quote }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ if $plain }}http{{ else }}https{{ end }}
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+          {{- with $c.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/caddy
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: caddy-config
+              mountPath: /config
+            - name: tmp
+              mountPath: /tmp
+            {{- if eq $tlsMode "files" }}
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullName }}
+            items:
+              - key: Caddyfile
+                path: Caddyfile
+              - key: entrypoint.sh
+                path: entrypoint.sh
+              {{- range $path, $_ := .Files.Glob "files/gateway/modes/*" }}
+              - key: modes-{{ base $path }}
+                path: modes/{{ base $path }}
+              {{- end }}
+        - name: data
+          {{- if $c.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $claim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: caddy-config
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if eq $tlsMode "files" }}
+        - name: certs
+          secret:
+            secretName: {{ $c.tls.files.secretName }}
+            defaultMode: 0440
+            items:
+              - key: {{ $c.tls.files.certKey }}
+                path: tls.crt
+              - key: {{ $c.tls.files.keyKey }}
+                path: tls.key
+        {{- end }}
+      {{- with $c.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

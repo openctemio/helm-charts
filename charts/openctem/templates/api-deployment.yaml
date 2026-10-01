@@ -130,6 +130,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.redisPasswordSecretName" . }}
                   key: {{ include "openctem.redisPasswordSecretKey" . }}
+            {{- with include "openctem.gatewayApiEnv" . }}
+            # Gateway (gateway.*): trusted proxy hops and the public origin
+            {{- . | nindent 12 }}
+            {{- end }}
             # Extra environment variables
             {{- if .Values.api.extraEnv }}
             {{- include "openctem.apiExtraEnv" . | nindent 12 }}

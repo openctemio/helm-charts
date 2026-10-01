@@ -1,0 +1,63 @@
+{{- if eq (include "openctem.gatewayMode" .) "ingress" }}
+{{- $g := .Values.gateway -}}
+{{- $api := include "openctem.apiFullname" . -}}
+{{- $apiPort := .Values.api.service.port -}}
+{{- $secretName := $g.ingress.tls.secretName | default (printf "%s-tls" (include "openctem.gatewayFullname" .)) -}}
+{{- $annotations := deepCopy ($g.ingress.annotations | default dict) -}}
+{{- if $g.ingress.tls.enabled -}}
+{{- with $g.ingress.tls.clusterIssuer }}{{- $_ := set $annotations "cert-manager.io/cluster-issuer" . }}{{- end -}}
+{{- with $g.ingress.tls.issuer }}{{- $_ := set $annotations "cert-manager.io/issuer" . }}{{- end -}}
+{{- end -}}
+# One host for the UI and the API (gateway.mode=ingress). A plain Ingress
+# cannot match headers: API-key clients reach the API only on the dedicated
+# paths below; /metrics, /ready and /debug/* are never routed to the API.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "openctem.gatewayFullname" . }}
+  labels:
+    {{- include "openctem.gatewayLabels" . | nindent 4 }}
+  {{- with $annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $g.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $g.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ $g.host | quote }}
+      secretName: {{ $secretName }}
+  {{- end }}
+  rules:
+    - host: {{ $g.host | quote }}
+      http:
+        paths:
+          {{- range include "openctem.gatewayApiExactPaths" . | fromYamlArray }}
+          - path: {{ . }}
+            pathType: Exact
+            backend:
+              service:
+                name: {{ $api }}
+                port:
+                  number: {{ $apiPort }}
+          {{- end }}
+          {{- range include "openctem.gatewayApiPrefixes" . | fromYamlArray }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $api }}
+                port:
+                  number: {{ $apiPort }}
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "openctem.uiFullname" . }}
+                port:
+                  number: {{ .Values.ui.service.port }}
+{{- end }}

@@ -67,6 +67,19 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.uiSecretName" . }}
                   key: {{ .Values.ui.secret.csrfTokenKey }}
+            {{- if include "openctem.gatewayMode" . }}
+            {{- $uiEnvNames := list }}
+            {{- range $e := .Values.ui.extraEnv }}
+            {{- if kindIs "map" $e }}{{- $uiEnvNames = append $uiEnvNames (toString ($e.name | default "")) }}{{- end }}
+            {{- end }}
+            {{- if not (has "TRUST_PROXY_HEADERS" $uiEnvNames) }}
+            # The gateway (or ingress controller) in front sets X-Real-IP /
+            # X-Forwarded-For, so pass them on to the API (audit log, IP
+            # allowlists). networkPolicy.enabled keeps other pods off the UI.
+            - name: TRUST_PROXY_HEADERS
+              value: "true"
+            {{- end }}
+            {{- end }}
           {{- with .Values.ui.extraEnv }}
             {{- toYaml . | nindent 12 }}
           {{- end }}

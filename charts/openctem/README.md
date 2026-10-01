@@ -38,6 +38,102 @@ Production checklist (the chart enforces / warns on most of these):
 - **Stable secrets** — see "Secrets & GitOps" below (required in production).
 - **NetworkPolicy** — enable `networkPolicy.enabled` on a CNI that enforces it.
 
+## Single-port gateway (one HTTPS entry point)
+
+Chart 0.7.0 can serve the UI **and** the REST API on one hostname and one HTTPS
+port (as Tenable.sc does), so sensors, API clients, SCIM, webhooks and browsers
+all use `https://<host>`. It is opt-in: `gateway.mode: none` (the default)
+renders exactly what 0.6.0 did, and the per-component `api.ingress` /
+`ui.ingress` / `*.httpRoute` keep working (give them a different host).
+
+| `gateway.mode` | Renders | TLS | Routes API-key clients on any `/api/*` |
+|---|---|---|---|
+| `ingress` | one `Ingress` | ingress (`gateway.ingress.tls`, cert-manager) | **no**: dedicated paths only |
+| `httpRoute` | one Gateway API `HTTPRoute` | the parent Gateway's listener | `Bearer oct_*` and `X-API-Key` (header matches) |
+| `caddy` | Caddy `Deployment` + `Service` + `ConfigMap` + `PVC` | `internal` / `acme` / `files` / `http` | all rules |
+
+**Routing** (the same in every mode; `caddy` uses the docker-compose
+gateway's Caddyfile, copied verbatim into `files/gateway/`, and
+`tests/gateway/run.sh` fails if the chart's path list drifts from it):
+
+- to the API: `/api/v1/agent/`, `/api/v2/sensor/`, `/api/v1/platform/`
+  (sensors), `/scim/v2/`, `/api/v1/mcp`, `/api/v1/webhooks/incoming/`,
+  `/api/v1/auth/saml/`, and exactly `/api/v1/auth/backchannel-logout`,
+  `/api/v1/ws`, `/health`, `/openapi.yaml`, `/docs`;
+- to the API as well: `/api/*` with `Authorization: Bearer oct_*` or an
+  `X-API-Key` header (`httpRoute`, `caddy`), and `/api/*` with
+  `Authorization: Bearer *` but no `auth_token` session cookie (`caddy` only:
+  Gateway API has no "header absent" match);
+- never to the API: `/metrics`, `/ready`, `/debug/*` (`caddy` answers 404; the
+  other modes send them to the UI, which has no such pages), and the API's
+  ports 9090 / 2345 are never exposed;
+- everything else to the UI, including the browser's cookie calls to `/api/v1/*`.
+
+Why the header rules: the UI's `/api/v1` proxy authenticates with the browser's
+session cookie and drops the caller's `Authorization` header, so an API-key
+client sent there gets 401. **A plain Ingress cannot match headers**, so with
+`gateway.mode=ingress` API-key clients work only on the dedicated paths. If
+they need every `/api/v1/*` path, use `httpRoute` (needs RegularExpression
+header matching, Extended support in Envoy Gateway, Istio, Cilium, NGINX
+Gateway Fabric, Traefik, ...) or `caddy`, which can also sit behind your
+existing ingress/load balancer with `gateway.caddy.tls.mode=http`.
+
+Any mode also sets, on the API, `SERVER_TRUSTED_PROXIES` (from
+`gateway.trustedProxies`), and `APP_URL`, `CORS_ALLOWED_ORIGINS`,
+`SMTP_BASE_URL` (from `gateway.publicUrl`, default `https://<host>`; the API
+checks the WebSocket `Origin` against `CORS_ALLOWED_ORIGINS`), and on the UI
+`TRUST_PROXY_HEADERS=true`. A name already in `api.extraEnv` / `ui.extraEnv`
+wins.
+
+| Value | Default | Meaning |
+|---|---|---|
+| `gateway.mode` | `none` | `none`, `ingress`, `httpRoute`, `caddy`. |
+| `gateway.host` | — | Public DNS name (or IP for caddy `internal`/`files`). Required, except caddy `http` with `publicUrl`. |
+| `gateway.publicUrl` | `https://<host>` | Public origin; set it for a non-443 port. |
+| `gateway.trustedProxies` | — | **Required** with a mode. CIDRs of the pods that connect to the API (gateway/ingress controller and UI), i.e. the cluster's pod CIDR (`10.244.0.0/16` kubeadm/flannel, `10.42.0.0/16` k3s; `kubectl cluster-info dump \| grep -m1 -- --cluster-cidr`). Only these may assert the client IP for the audit log and IP allowlists. Set without a mode, it only sets `SERVER_TRUSTED_PROXIES`. |
+| `gateway.ingress.className` / `.annotations` | — | WebSockets and uploads usually need e.g. `nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"`, `proxy-body-size: "256m"`. |
+| `gateway.ingress.tls.enabled` / `.secretName` | `true` / `<fullname>-gateway-tls` | TLS for `host`. |
+| `gateway.ingress.tls.clusterIssuer` / `.issuer` | — | Adds the cert-manager annotation. |
+| `gateway.httpRoute.parentRefs` | `[{name: gateway, sectionName: https}]` | The Gateway (and its HTTPS listener). |
+| `gateway.httpRoute.apiKeyHeaderRouting` | `true` | The `Bearer oct_*` / `X-API-Key` header rule. |
+| `gateway.caddy.image` | `caddy:2.11.4-alpine` | Official image, pinned. |
+| `gateway.caddy.tls.mode` | `internal` | `internal`: Caddy's own CA (LAN / IP installs). `acme`: Let's Encrypt (`tls.acme.email` required, `tls.acme.ca`). `files`: your `kubernetes.io/tls` Secret (`tls.files.secretName`, `certKey`, `keyKey`). `http`: plain HTTP on port 80 behind a TLS proxy; **refused unless `tls.allowPlainHttp: true`**. |
+| `gateway.caddy.frontProxies` | `[]` | Proxies in front of Caddy whose `X-Forwarded-For` it believes (`http` mode behind an L7 proxy). |
+| `gateway.caddy.service.type` | `LoadBalancer` | Exposes **443 only** (`http` mode: 80 only). `service.http.enabled` adds 80 in `acme` mode (HTTP-01 + redirect). `externalTrafficPolicy: Local` keeps the client address. |
+| `gateway.caddy.persistence` | PVC `1Gi`, RWO | `/data`: certificates, ACME account, internal CA. Kept on uninstall (`helm.sh/resource-policy: keep`). `enabled: false` = `emptyDir` (a new CA on every reschedule). |
+| `gateway.caddy.maxBodySize` | `256MB` | Above the API's largest per-route limit. |
+
+The bundled Caddy runs one replica (its `/data` is ReadWriteOnce) as uid 1000
+with a read-only root filesystem, every capability dropped except
+`NET_BIND_SERVICE` (the image's `caddy` binary carries that file capability
+and will not start without it), and `allowPrivilegeEscalation: false`; this
+meets the `restricted` Pod Security Standard. Its admin API (`:2019`) stays
+inside the pod.
+
+**Internal CA** (`tls.mode=internal`): give sensors (`SSL_CERT_FILE`) and
+browsers the root certificate, created on first start:
+
+```bash
+kubectl -n openctem exec deploy/<release>-openctem-gateway -- \
+  cat /data/caddy/pki/authorities/local/root.crt > openctem-root-ca.crt
+```
+
+Example, bundled Caddy with your own certificate:
+
+```bash
+kubectl -n openctem create secret tls openctem-tls --cert=fullchain.pem --key=privkey.pem
+helm upgrade --install openctem charts/openctem -n openctem -f values.yaml \
+  --set gateway.mode=caddy --set gateway.host=ctem.example.com \
+  --set 'gateway.trustedProxies={10.244.0.0/16}' \
+  --set gateway.caddy.tls.mode=files --set gateway.caddy.tls.files.secretName=openctem-tls
+```
+
+With `networkPolicy.enabled`, the gateway's public port is open to any source;
+in `caddy` mode the UI accepts only the gateway (unless `ui.ingress` /
+`ui.httpRoute` is also enabled), and in `ingress` / `httpRoute` mode the
+ingress controller (`networkPolicy.ingressController*Selector`) may reach the
+API on 8080.
+
 ## Secrets & GitOps (IMPORTANT — data-loss footgun)
 
 `APP_ENCRYPTION_KEY` encrypts stored integration credentials and
@@ -104,7 +200,8 @@ or run `migrate ... down <N>` by hand against the database.
 ## NetworkPolicy
 
 `networkPolicy.enabled=true` renders a default-deny-ingress baseline plus allow
-rules for the real flows (ingress→ui, ui/test→api, api/migrations→postgres:5432
+rules for the real flows (ingress→ui, ui/test→api, the single-port gateway's
+flows, api/migrations→postgres:5432
 & redis:6379, api egress). Requires a CNI that enforces NetworkPolicy, and a
 **dedicated namespace** (the default-deny selects every pod in the namespace).
 API egress defaults to permissive (`networkPolicy.api.egress.allowAll=true`) so

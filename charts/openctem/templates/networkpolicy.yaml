@@ -1,8 +1,11 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $gwMode := include "openctem.gatewayMode" . }}
 {{/*
 Opt-in NetworkPolicy set. Baseline is default-DENY ingress for every pod in the
 namespace; the policies below re-open only the real OpenCTEM flows:
   ingress-controller -> ui:3000, (ui|helm-test) -> api:8080,
+  gateway.mode=caddy: anywhere -> gateway:443/80, gateway -> ui:3000/api:8080,
+  gateway.mode=ingress|httpRoute: ingress-controller -> api:8080,
   api/migrations -> postgres:5432, api/migrations -> redis:6379,
   api egress (DNS + HTTPS threat-intel / CT feeds).
 Recommendation: run OpenCTEM in a dedicated namespace, since the default-deny
@@ -37,6 +40,7 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    {{- if or (ne $gwMode "caddy") .Values.ui.ingress.enabled .Values.ui.httpRoute.enabled }}
     - from:
         {{- if or .Values.networkPolicy.ingressControllerNamespaceSelector .Values.networkPolicy.ingressControllerPodSelector }}
         - {{- if .Values.networkPolicy.ingressControllerNamespaceSelector }}
@@ -55,6 +59,18 @@ spec:
       ports:
         - port: 3000
           protocol: TCP
+    {{- end }}
+    {{- if eq $gwMode "caddy" }}
+    # The bundled gateway (the only source when the UI has no ingress of its
+    # own: the UI trusts the client-IP headers its caller sends).
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "openctem.gatewaySelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 3000
+          protocol: TCP
+    {{- end }}
 ---
 # Allow inbound to the API from any pod in this release (UI + the helm-test pod).
 apiVersion: networking.k8s.io/v1
@@ -77,6 +93,56 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+    {{- if has $gwMode (list "ingress" "httpRoute") }}
+    # gateway.mode={{ $gwMode }}: the ingress controller / Gateway routes the
+    # dedicated API paths straight to the API.
+    - from:
+        {{- if or .Values.networkPolicy.ingressControllerNamespaceSelector .Values.networkPolicy.ingressControllerPodSelector }}
+        - {{- if .Values.networkPolicy.ingressControllerNamespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerNamespaceSelector | nindent 14 }}
+          {{- end }}
+          {{- if .Values.networkPolicy.ingressControllerPodSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerPodSelector | nindent 14 }}
+          {{- end }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+{{- if eq $gwMode "caddy" }}
+---
+# The bundled gateway is the public entry point: its HTTPS (and, in tls.mode
+# http/acme, HTTP) port is open to any source. Nothing else on it is exposed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.gatewayFullname" . }}-allow-ingress
+  labels:
+    {{- include "openctem.gatewayLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "openctem.gatewaySelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        {{- $tlsMode := include "openctem.gatewayCaddyTlsMode" . }}
+        {{- if ne $tlsMode "http" }}
+        - port: 443
+          protocol: TCP
+        {{- end }}
+        {{- if has $tlsMode (list "http" "acme") }}
+        - port: 80
+          protocol: TCP
+        {{- end }}
+{{- end }}
 {{- if .Values.postgresql.enabled }}
 ---
 # Allow the API + migration jobs to reach the bundled PostgreSQL.

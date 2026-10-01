@@ -666,6 +666,34 @@ sensor:
   #    dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside.
   #    Empty: the sensor's working directory (/scan in the image).
   scanRoots: ""
+  # -- The sensor's outbox: results kept at /var/lib/openctem/outbox until the
+  #    platform accepted them (sensor >= v0.4.0), so an API outage or a pod
+  #    restart loses nothing. By default it is an emptyDir, which survives a
+  #    container restart but NOT a pod deletion, reschedule or upgrade:
+  #    results still queued then are lost. Enable persistence for a PVC.
+  outbox:
+    persistence:
+      # -- Back the outbox with a PersistentVolumeClaim. Needs
+      #    replicaCount 1 (one sensor process per outbox) and switches the
+      #    Deployment to the Recreate strategy (a ReadWriteOnce volume).
+      enabled: false
+      # -- Use this pre-created claim instead of creating one.
+      existingClaim: ""
+      size: 2Gi
+      # -- Empty: the cluster's default StorageClass.
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
+      # -- fsGroup given to the pod (unless podSecurityContext sets one) so
+      #    the image's user (uid/gid 999) can write the volume.
+      fsGroup: 999
+    # -- emptyDir size limit when persistence is off (empty: none).
+    emptyDirSizeLimit: ""
+    # -- SENSOR_OUTBOX_MAX_BYTES (empty: the sensor's default, 1GiB and at
+    #    most half of the free space). Keep it below the volume size.
+    maxBytes: ""
+    # -- SENSOR_OUTBOX_MAX_AGE (empty: 168h).
+    maxAge: ""
   # -- platform mode: maximum concurrent jobs (-max-concurrent).
   maxConcurrent: 5
   # -- platform mode: which executor capabilities the sensor advertises

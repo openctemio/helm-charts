@@ -6,9 +6,10 @@ migrations -5) and are idempotent: the underlying CLIs refuse to clobber an
 existing record, and the sh wrapper swallows that "already exists" exit so a
 re-run never fails the release.
 
-- api.bootstrapAdmin  -> /app/bootstrap-admin : creates the first PLATFORM admin
-  (admin_users row + admin API key) used by the openctem-admin CLI / platform
-  console. The API key is printed to the Job log.
+- api.bootstrapAdmin  -> /app/bootstrap-admin : creates the first PLATFORM
+  admin and a break-glass backup super admin (RFC-022), each with a sign-in
+  account whose temporary password is printed once to the Job log. Admins have
+  no API keys; they sign in on /login and open the console with TOTP.
 - api.bootstrapTenant -> /app/bootstrap-tenant : creates the first TENANT and an
   OWNER user (email + password) — this is the login the UI needs on day one.
 
@@ -85,7 +86,16 @@ spec:
               /app/bootstrap-admin \
                 -email="{{ required "api.bootstrapAdmin.email is required when api.bootstrapAdmin.enabled=true" .Values.api.bootstrapAdmin.email }}" \
                 -name="{{ .Values.api.bootstrapAdmin.name }}" \
-                -role="{{ .Values.api.bootstrapAdmin.role | default "super_admin" }}"{{ if .Values.api.bootstrapAdmin.force }} -force{{ end }} \
+                -role="{{ .Values.api.bootstrapAdmin.role | default "super_admin" }}" \
+              {{- if .Values.api.bootstrapAdmin.noBackup }}
+                -no-backup \
+              {{- else }}
+                -backup-email="{{ required "api.bootstrapAdmin.backupEmail is required (a break-glass backup admin), or set api.bootstrapAdmin.noBackup=true" .Values.api.bootstrapAdmin.backupEmail }}" \
+                -backup-name="{{ .Values.api.bootstrapAdmin.backupName }}" \
+              {{- end }}
+              {{- if .Values.api.bootstrapAdmin.force }}
+                -force \
+              {{- end }}
               || echo "bootstrap-admin exited non-zero (admin may already exist); continuing"
           env:
             {{- include "openctem.bootstrapDbEnv" . | nindent 12 }}

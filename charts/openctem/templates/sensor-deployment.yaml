@@ -1,0 +1,127 @@
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- if $sensor.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openctem.sensorFullname" . }}
+  labels:
+    {{- include "openctem.sensorLabels" . | nindent 4 }}
+spec:
+  # A daemon-mode sensor is one sensor identity (one API key) and a
+  # platform-mode sensor registers once and holds a lease; run a single
+  # replica unless you deliberately want multiple co-located workers.
+  replicas: {{ $sensor.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "openctem.sensorSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if not $sensor.existingSecret }}
+        checksum/credentials-secret: {{ include (print $.Template.BasePath "/sensor-secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with $sensor.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "openctem.sensorLabels" . | nindent 8 }}
+        {{- with $sensor.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sensor.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sensor
+          {{- with $sensor.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The sensor is versioned separately from the platform, so the tag
+          # does not default to the chart appVersion (see values.yaml).
+          image: "{{ $sensor.image.repository }}:{{ required "sensor.image.tag is required (the sensor does not follow the chart appVersion; e.g. v0.3.0-default)" $sensor.image.tag }}"
+          imagePullPolicy: {{ $sensor.image.pullPolicy }}
+          # The image entrypoint is /usr/local/bin/openctemio-sensor.
+          args:
+            {{- if eq $sensor.mode "platform" }}
+            - "-platform"
+            - "-enable-recon={{ $sensor.executors.recon }}"
+            - "-enable-vulnscan={{ $sensor.executors.vulnscan }}"
+            - "-enable-secrets={{ $sensor.executors.secrets }}"
+            - "-enable-assets={{ $sensor.executors.assets }}"
+            - "-enable-pipeline={{ $sensor.executors.pipeline }}"
+            - "-max-concurrent={{ $sensor.maxConcurrent }}"
+            {{- else }}
+            # Server-controlled daemon: scans only what the platform
+            # dispatches, with these scanners.
+            - "-daemon"
+            - "-enable-commands"
+            {{- with $sensor.tools }}
+            - "-tools={{ . }}"
+            {{- end }}
+            {{- end }}
+            {{- if $sensor.verbose }}
+            - "-verbose"
+            {{- end }}
+          env:
+            # Co-located: talk to the in-cluster API service. API_URL, API_KEY,
+            # BOOTSTRAP_TOKEN and REGION were not renamed.
+            - name: API_URL
+              value: {{ $sensor.apiUrl | default (printf "http://%s:%v" (include "openctem.apiFullname" .) .Values.api.service.port) | quote }}
+            - name: REGION
+              value: {{ $sensor.region | quote }}
+            # The credential comes from a Secret, never from args (which are
+            # visible via `kubectl describe pod`).
+            {{- if eq $sensor.mode "platform" }}
+            - name: SENSOR_NAME
+              value: {{ $sensor.name | default (include "openctem.sensorFullname" .) | quote }}
+            - name: BOOTSTRAP_TOKEN
+            {{- else }}
+            - name: API_KEY
+            {{- end }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}
+                  key: {{ include "openctem.sensorSecretKey" (dict "sensor" $sensor) }}
+            {{- if $sensor.keyAutoRenew }}
+            - name: PLATFORM_KEY_AUTORENEW
+              value: "true"
+            {{- end }}
+            {{- if eq $sensor.allowPrivateTargets "1" }}
+            # Explicit opt-in: allow RFC1918 / ULA scan targets. Unset (the
+            # default) keeps them blocked: co-located sensors are for
+            # external-reachable work; internal scanning belongs on a remote
+            # sensor.
+            - name: SENSOR_ALLOW_PRIVATE_TARGETS
+              value: "1"
+            {{- end }}
+            {{- with $sensor.scanRoots }}
+            - name: SENSOR_SCAN_ROOTS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $sensor.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $sensor.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with $sensor.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sensor.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sensor.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

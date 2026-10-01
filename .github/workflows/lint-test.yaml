@@ -61,6 +61,19 @@ jobs:
           # the defaults copy in _helpers.tpl matches values.yaml.
           tests/sensor-migration/run.sh
 
+      - name: Single-port gateway (render checks)
+        run: |
+          # gateway.mode ingress | httpRoute | caddy: routes, refusals, the
+          # API/UI settings, NetworkPolicy, and that the chart's API path list
+          # matches files/gateway/Caddyfile.
+          tests/gateway/run.sh
+
+      - name: Single-port gateway (bundled Caddy in Docker)
+        run: |
+          # Runs the rendered Caddy (internal, files, http TLS modes) in front
+          # of stub API/UI upstreams and checks the routing over real HTTPS.
+          tests/gateway/caddy-smoke.sh
+
       - name: Render templates (production values)
         run: |
           # Production values file provides the required secrets -> must render.

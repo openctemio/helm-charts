@@ -1,0 +1,70 @@
+{{- if eq (include "openctem.gatewayMode" .) "httpRoute" }}
+{{- $g := .Values.gateway -}}
+{{- $api := include "openctem.apiFullname" . -}}
+{{- $apiPort := .Values.api.service.port -}}
+# One host for the UI and the API (gateway.mode=httpRoute). TLS terminates on
+# the parent Gateway's listener. /metrics, /ready and /debug/* are never routed
+# to the API.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "openctem.gatewayFullname" . }}
+  labels:
+    {{- include "openctem.gatewayLabels" . | nindent 4 }}
+  {{- with $g.httpRoute.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml (required "gateway.httpRoute.parentRefs is required for gateway.mode=httpRoute" $g.httpRoute.parentRefs) | nindent 4 }}
+  hostnames:
+    - {{ $g.host | quote }}
+  rules:
+    # Dedicated API paths: sensors, SCIM, MCP, webhooks, SAML/OIDC callbacks,
+    # the browser WebSocket, liveness and the API reference.
+    - matches:
+        {{- range include "openctem.gatewayApiExactPaths" . | fromYamlArray }}
+        - path:
+            type: Exact
+            value: {{ . }}
+        {{- end }}
+        {{- range include "openctem.gatewayApiPrefixes" . | fromYamlArray }}
+        - path:
+            type: PathPrefix
+            value: {{ . }}
+        {{- end }}
+      backendRefs:
+        - name: {{ $api }}
+          port: {{ $apiPort }}
+    {{- if $g.httpRoute.apiKeyHeaderRouting }}
+    # API-key clients on any /api/* path. The UI's /api/v1 proxy drops the
+    # Authorization header, so these must not reach it.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+          headers:
+            - type: RegularExpression
+              name: Authorization
+              value: "^Bearer oct_.*"
+        - path:
+            type: PathPrefix
+            value: /api
+          headers:
+            - type: RegularExpression
+              name: X-API-Key
+              value: ".*"
+      backendRefs:
+        - name: {{ $api }}
+          port: {{ $apiPort }}
+    {{- end }}
+    # Everything else, including the browser's cookie calls to /api/v1/*.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "openctem.uiFullname" . }}
+          port: {{ .Values.ui.service.port }}
+{{- end }}

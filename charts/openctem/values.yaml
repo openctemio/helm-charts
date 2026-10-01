@@ -448,6 +448,205 @@ ui:
   # - secretRef:
   #     name: openctem-extra-secret
 
+# =============================================================================
+# Gateway: one public HTTPS entry point for the UI AND the REST API
+# =============================================================================
+# One hostname fronts both services (like Tenable.sc). Requests are routed by
+# path (and, where the router can, by credential):
+#
+#   to the API service
+#     /api/v1/agent/  /api/v2/sensor/  /api/v1/platform/   sensors
+#     /scim/v2/                                            SCIM provisioning
+#     /api/v1/mcp                                          MCP (oct_ key)
+#     /api/v1/webhooks/incoming/                           Jira/GitHub webhooks
+#     /api/v1/auth/saml/                                   SAML metadata, login, ACS
+#     /api/v1/auth/backchannel-logout                      OIDC back-channel logout
+#     /api/v1/ws                                           browser WebSocket
+#     /health  /openapi.yaml  /docs                        (exact paths)
+#     /api/* with `Authorization: Bearer oct_*` or an `X-API-Key` header
+#                                       (API-key clients; caddy + httpRoute)
+#     /api/* with `Authorization: Bearer *` and no `auth_token` session cookie
+#                                       (other token clients; caddy only)
+#   never routed to the API: /metrics, /ready, /debug/* (caddy answers 404; the
+#   ingress/httpRoute modes send them to the UI, which has no such pages), and
+#   the API's other ports (9090 gRPC, 2345 Delve) are never exposed.
+#   everything else to the UI service, including the browser's cookie calls to
+#   /api/v1/*, which the UI's proxy authenticates.
+#
+# Why the credential rule matters: the UI's /api/v1 proxy authenticates with the
+# browser's session cookie and DROPS the caller's Authorization header, so an
+# API-key client calling a generic /api/v1/* path through the UI gets 401.
+# A plain Kubernetes Ingress cannot match headers, so in `ingress` mode only
+# the dedicated API paths above work for API-key clients. If you need
+# API keys on every /api/v1/* path, use `httpRoute` (header matches) or
+# `caddy` (all rules; it can also sit behind your existing ingress/LB in
+# caddy.tls.mode=http).
+#
+# Enabling a mode also configures the API and UI for it:
+#   API: SERVER_TRUSTED_PROXIES = trustedProxies (only these peers may assert
+#        a client IP via X-Real-IP / X-Forwarded-For); APP_URL,
+#        CORS_ALLOWED_ORIGINS and SMTP_BASE_URL = publicUrl (SAML SP URLs derive
+#        from APP_URL; the API checks the WebSocket Origin against
+#        CORS_ALLOWED_ORIGINS). A name you already set in api.extraEnv wins.
+#   UI:  TRUST_PROXY_HEADERS=true (forward the client IP to the API).
+# The per-component api.ingress / ui.ingress / *.httpRoute keep working; do not
+# point them at the same host as the gateway.
+gateway:
+  # -- none (default; nothing changes) | ingress | httpRoute | caddy
+  mode: none
+  # -- Public hostname (DNS name, or an IP address in caddy internal/files
+  # mode). Required for every mode except caddy with tls.mode=http.
+  host: ""
+  # -- Public origin, used for APP_URL, CORS_ALLOWED_ORIGINS and SMTP_BASE_URL.
+  # Default: https://<host>. Set it when clients use a non-443 port
+  # (e.g. https://ctem.example.com:8443) or in caddy http mode.
+  publicUrl: ""
+  # -- REQUIRED when mode != none: CIDRs/IPs the API trusts to report the
+  # client address (SERVER_TRUSTED_PROXIES). These are the hops that connect
+  # to the API: the gateway pods (or the ingress controller / Gateway pods)
+  # and the UI pods. Pod IPs change, so give the cluster's POD CIDR, e.g.
+  #   kubeadm+flannel 10.244.0.0/16, k3s 10.42.0.0/16, GKE/EKS: the VPC/pod range.
+  #   kubectl cluster-info dump | grep -m1 -- --cluster-cidr
+  # Anything outside this list is recorded as its own TCP peer, so nothing can
+  # choose the IP written to the audit log or matched by IP allowlists.
+  trustedProxies: []
+
+  # ---------------------------------------------------------------------------
+  # mode: ingress  -- one networking.k8s.io/v1 Ingress, path rules only.
+  # ---------------------------------------------------------------------------
+  ingress:
+    className: ""
+    # -- Controller-specific annotations. WebSockets and large uploads usually
+    # need tuning, e.g. for ingress-nginx:
+    #   nginx.ingress.kubernetes.io/proxy-body-size: "256m"
+    #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    #   nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    annotations: {}
+    tls:
+      # -- Terminate TLS at the ingress for `host`.
+      enabled: true
+      # -- kubernetes.io/tls Secret. Default: <fullname>-gateway-tls (which
+      # cert-manager creates when an issuer below is set).
+      secretName: ""
+      # -- Convenience: adds cert-manager.io/cluster-issuer (or .../issuer).
+      clusterIssuer: ""
+      issuer: ""
+
+  # ---------------------------------------------------------------------------
+  # mode: httpRoute  -- one gateway.networking.k8s.io/v1 HTTPRoute. TLS is
+  # configured on the Gateway's listener, not here. Header matches need a
+  # Gateway implementation that supports RegularExpression header matching
+  # (Extended conformance: Envoy Gateway, Istio, Cilium, NGINX Gateway Fabric,
+  # Traefik ...). Gateway API has no "header absent" match, so the
+  # "Bearer token without a session cookie" rule is caddy-only: non-oct_
+  # bearer tokens must use the dedicated API paths.
+  # ---------------------------------------------------------------------------
+  httpRoute:
+    annotations: {}
+    parentRefs:
+      - name: gateway
+        sectionName: https
+    # -- Route /api/* with `Authorization: Bearer oct_*` or `X-API-Key` to the API.
+    apiKeyHeaderRouting: true
+
+  # ---------------------------------------------------------------------------
+  # mode: caddy  -- bundled Caddy (for clusters without an ingress controller).
+  # The Caddyfile is the same file the docker-compose deployment uses
+  # (files/gateway/). One replica: its certificates and internal CA live on a
+  # ReadWriteOnce volume.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image:
+      repository: caddy
+      tag: "2.11.4-alpine"
+      pullPolicy: IfNotPresent
+    tls:
+      # -- internal | acme | files | http
+      #   internal: certificates from Caddy's own CA (LAN / IP installs). Give
+      #             sensors and browsers the root (see NOTES after install).
+      #   acme:     Let's Encrypt (or acme.ca) for a public DNS name; needs 443
+      #             reachable from the Internet (TLS-ALPN-01), or enable
+      #             service.http for HTTP-01 and the HTTP->HTTPS redirect.
+      #   files:    your certificate: a kubernetes.io/tls Secret (files.secretName).
+      #   http:     plain HTTP on port 80, ONLY behind a proxy that terminates
+      #             TLS; refused unless allowPlainHttp=true.
+      mode: internal
+      acme:
+        email: ""
+        ca: "https://acme-v02.api.letsencrypt.org/directory"
+      files:
+        # -- kubernetes.io/tls Secret with tls.crt (full chain) and tls.key.
+        secretName: ""
+        certKey: tls.crt
+        keyKey: tls.key
+      # -- Must be true to use tls.mode=http (no encryption between the client
+      # and this gateway unless a TLS proxy sits in front).
+      allowPlainHttp: false
+    # -- CIDRs of proxies IN FRONT of Caddy whose X-Forwarded-For Caddy
+    # believes (tls.mode=http behind an L7 proxy). Empty: none.
+    frontProxies: []
+    # -- Largest request body (the API enforces the real per-route limits).
+    maxBodySize: 256MB
+    service:
+      # -- LoadBalancer | NodePort | ClusterIP
+      type: LoadBalancer
+      annotations: {}
+      httpsPort: 443
+      httpsNodePort:
+      # -- Also expose port 80 (acme: HTTP-01 + HTTP->HTTPS redirect). In
+      # tls.mode=http port 80 is the only port and is always exposed.
+      http:
+        enabled: false
+        port: 80
+        nodePort:
+      # -- Local keeps the client's source address (audit log, IP allowlists)
+      # for LoadBalancer/NodePort; Cluster SNATs it to a node address.
+      externalTrafficPolicy: Local
+      loadBalancerIP: ""
+      loadBalancerSourceRanges: []
+    persistence:
+      # -- PersistentVolumeClaim for /data (certificates, ACME account, the
+      # internal CA). Keep it: losing it re-issues the internal CA and every
+      # sensor and browser must trust the new root. false = emptyDir.
+      enabled: true
+      existingClaim: ""
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
+      size: 1Gi
+    # -- Caddy runs as a non-root user. The image's caddy binary carries the
+    # file capability cap_net_bind_service (to bind 443/80), so the container
+    # must keep NET_BIND_SERVICE: with every capability dropped the kernel
+    # refuses to execute it. Dropping ALL and adding back only
+    # NET_BIND_SERVICE is allowed by the "restricted" Pod Security Standard.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+        add:
+          - NET_BIND_SERVICE
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    podAnnotations: {}
+    podLabels: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    extraEnv: []
+
 database:
   # -- Settings in this section are used only when postgresql.enabled=false.
   host: ""

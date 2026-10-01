@@ -1,3 +1,38 @@
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- $apiRenamed := include "openctem.apiRenamedEnv" . | fromYaml -}}
+{{- $apiOldNames := list -}}
+{{- range $e := .Values.api.extraEnv -}}
+{{- if and (kindIs "map" $e) (hasKey $apiRenamed (toString ($e.name | default ""))) -}}
+{{- $apiOldNames = append $apiOldNames (toString $e.name) -}}
+{{- end -}}
+{{- end -}}
+{{- if or $sensor._legacy.used $apiOldNames }}
+!! DEPRECATED SETTINGS — agents were renamed to sensors (OpenCTEM v0.9.0, RFC-023)
+{{- if $sensor._legacy.used }}
+- Your values use the `agent:` block, renamed to `sensor:` in chart 0.5.0. It was
+  mapped onto sensor.* for this release:
+{{- if $sensor._legacy.mapped }}
+    mapped: {{ join ", " $sensor._legacy.mapped }}
+{{- end }}
+{{- if $sensor._legacy.dropped }}
+    ignored: {{ join ", " $sensor._legacy.dropped }} (the frozen agent image);
+             now running {{ $sensor.image.repository }}:{{ $sensor.image.tag }} — pin it with sensor.image.tag
+{{- end }}
+{{- range $sensor._legacy.notes }}
+    NOTE: {{ . }}
+{{- end }}
+  Rename `agent:` to `sensor:` in your values file; the mapping will be removed
+  in a future chart version.
+  On `helm upgrade` from chart <= 0.4.x, Helm deletes the old Deployment
+  `{{ include "openctem.componentFullname" (dict "context" . "component" "agent") }}` and its chart-made Secret `{{ include "openctem.componentFullname" (dict "context" . "component" "agent") }}-bootstrap`, and creates
+  `{{ include "openctem.sensorFullname" . }}`{{ if not $sensor.existingSecret }} with Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}`{{ else }}; your Secret `{{ $sensor.existingSecret }}` is used as is{{ end }}.
+{{- end }}
+{{- if $apiOldNames }}
+- api.extraEnv: {{ join ", " $apiOldNames }} {{ if eq (len $apiOldNames) 1 }}was{{ else }}were{{ end }} passed to the API as the SENSOR_* name.
+  Rename {{ if eq (len $apiOldNames) 1 }}it{{ else }}them{{ end }} in your values file.
+{{- end }}
+
+{{ end -}}
 1. Component services
 - API service: `{{ include "openctem.apiFullname" . }}` (port {{ .Values.api.service.port }}, type {{ .Values.api.service.type }})
 - UI service: `{{ include "openctem.uiFullname" . }}` (port {{ .Values.ui.service.port }}, type {{ .Values.ui.service.type }})
@@ -111,4 +146,18 @@
 9. NetworkPolicy is ENABLED — default-deny ingress + allowed OpenCTEM flows.
    Run OpenCTEM in a dedicated namespace (the default-deny selects every pod in
    the namespace). API egress allowAll={{ .Values.networkPolicy.api.egress.allowAll }}.
+{{- end }}
+{{- if $sensor.enabled }}
+
+10. Bundled sensor
+- Deployment `{{ include "openctem.sensorFullname" . }}`, image {{ $sensor.image.repository }}:{{ $sensor.image.tag }}
+{{- if eq $sensor.mode "platform" }}
+- Mode platform: self-registers with the bootstrap token in Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}`.
+  The OpenCTEM API does not serve /api/v1/platform/register; with it, use sensor.mode=daemon.
+{{- else }}
+- Mode daemon: authenticates with the API key in Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}` and runs the
+  scans the platform dispatches, with: {{ $sensor.tools | default "(no -tools)" }}. It shows under Settings → Sensors.
+{{- end }}
+- Private (RFC1918 / ULA) scan targets: {{ if eq $sensor.allowPrivateTargets "1" }}ALLOWED (sensor.allowPrivateTargets="1"){{ else }}blocked (set sensor.allowPrivateTargets="1" to allow){{ end }}.
+    kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "openctem.sensorFullname" . }}
 {{- end }}

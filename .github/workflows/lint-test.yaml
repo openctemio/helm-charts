@@ -54,6 +54,13 @@ jobs:
             fi
           done
 
+      - name: Sensor values migration (agent -> sensor)
+        run: |
+          # Old `agent:` values files keep rendering as the sensor, conflicts
+          # with `sensor:` fail, the API's AGENT_* settings are renamed, and
+          # the defaults copy in _helpers.tpl matches values.yaml.
+          tests/sensor-migration/run.sh
+
       - name: Render templates (production values)
         run: |
           # Production values file provides the required secrets -> must render.

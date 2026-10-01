@@ -573,48 +573,101 @@ extraManifests: []
 #         property: DB_USERNAME
 
 # =============================================================================
-# Bundled agent (optional, opt-in)
+# Bundled sensor (optional, opt-in)
 # =============================================================================
-# A co-located OpenCTEM agent that runs inside the same release and self-
-# registers with the in-cluster API using a bootstrap token. It lets the
-# platform work out-of-the-box for EXTERNAL-reachable work (public DAST/recon/
-# validate, enrichment) without deploying a separate remote agent.
+# A co-located OpenCTEM sensor (binary `openctemio-sensor`) in the same release,
+# talking to the in-cluster API. It lets the platform work out-of-the-box for
+# EXTERNAL-reachable work (public DAST/recon/validate, enrichment) without
+# deploying a separate remote sensor.
 #
-# IMPORTANT — reachability: a co-located agent can only reach what the cluster
+# IMPORTANT — reachability: a co-located sensor can only reach what the cluster
 # can route to. Scanning a customer's INTERNAL network still requires a remote
-# agent. Keep allowPrivateTargets=false unless you intend the agent to touch
+# sensor. Leave allowPrivateTargets empty unless you intend the sensor to touch
 # in-cluster/private ranges.
-agent:
-  # -- Enable the bundled co-located agent. Disabled by default (opt-in).
+#
+# UPGRADING FROM CHART <= 0.4.x: this block was called `agent:`. An old values
+# file with `agent:` keeps working — every agent.* key is mapped onto the same
+# sensor.* key and `helm upgrade` prints a deprecation notice. The render fails
+# only when agent.* and sensor.* set the same key to different values. A
+# sensor.* value equal to the chart default below counts as "not set". See the
+# chart README, "Upgrading to 0.5.0".
+#
+# NOTE for chart developers: templates/_helpers.tpl "openctem.sensorDefaults"
+# must list exactly these defaults (tests/sensor-migration/run.sh checks it).
+sensor:
+  # -- Enable the bundled co-located sensor. Disabled by default (opt-in).
   enabled: false
+  # -- How the sensor connects to the platform:
+  #    "daemon" (default) — an API-key sensor: create a sensor in the UI
+  #      (Settings → Sensors → Add), put its API key in apiKey or
+  #      existingSecret, and the sensor runs `-daemon -enable-commands`,
+  #      executing the scans the platform dispatches (protocol v1).
+  #    "platform" — the `-platform` self-registration with a bootstrap token,
+  #      which is what chart <= 0.4.x ran. It needs a platform that serves
+  #      /api/v1/platform/{register,lease,poll}; the OpenCTEM API (v0.9.0)
+  #      serves none of them, so this mode cannot register there. Kept so an
+  #      old values file renders unchanged; switch to "daemon".
+  mode: daemon
   replicaCount: 1
   image:
-    repository: ghcr.io/openctemio/agent
-    # -- Defaults to the chart's appVersion when empty.
-    tag: ""
+    repository: ghcr.io/openctemio/sensor
+    # -- Sensor image tag. The sensor is versioned separately from the
+    # platform, so this does NOT follow the chart appVersion. Images are
+    # published per variant as <version>-<variant> (there is no plain
+    # "v0.3.0" tag): "-default" carries semgrep, gitleaks, trivy and nuclei;
+    # the single-tool variants are -nuclei, -gitleaks, -semgrep and -trivy,
+    # and -ci is the CI image. latest-<variant> tags also exist; pin a
+    # version for reproducible installs.
+    tag: "v0.3.0-default"
     pullPolicy: IfNotPresent
-  # -- Display name for the registered agent. Defaults to the workload name.
+  # -- Display name the sensor registers with (platform mode: SENSOR_NAME).
+  #    Defaults to the workload name. In daemon mode the sensor's name is the
+  #    one given when it was created in the UI.
   name: ""
+  # -- REGION reported by the sensor.
   region: default
-  # -- Override the API base URL. Defaults to the in-cluster API service.
+  # -- Override the API base URL (API_URL). Defaults to the in-cluster API
+  #    service. It must reach the API directly: the sensor refuses redirects.
   apiUrl: ""
-  # -- Bootstrap token for self-registration (dev/quickstart). For production
-  #    provide it out-of-band via existingSecret instead of committing it here.
+  # -- daemon mode: the sensor's API key (API_KEY). For production provide it
+  #    out-of-band via existingSecret instead of committing it here.
+  apiKey: ""
+  # -- platform mode: bootstrap token for self-registration (BOOTSTRAP_TOKEN).
   bootstrapToken: ""
-  # -- Name of a pre-created Secret holding the bootstrap token. Takes
-  #    precedence over bootstrapToken; nothing secret is then rendered by Helm.
+  # -- Name of a pre-created Secret holding the credential (the API key in
+  #    daemon mode, the bootstrap token in platform mode). Takes precedence
+  #    over apiKey/bootstrapToken; nothing secret is then rendered by Helm.
   existingSecret: ""
-  # -- Key within the secret that holds the token.
-  existingSecretKey: "bootstrap-token"
-  # -- Auto-renew the platform API key before expiry.
-  keyAutoRenew: true
-  maxConcurrent: 5
+  # -- Key within the secret. Empty: "api-key" (daemon), "bootstrap-token"
+  #    (platform).
+  existingSecretKey: ""
+  # -- daemon mode: comma-separated scanners the sensor offers for dispatched
+  #    jobs (-tools). The default image carries semgrep, gitleaks, trivy and
+  #    nuclei.
+  tools: "nuclei"
+  # -- Renew the sensor API key before it expires and when the platform asks
+  #    (PLATFORM_KEY_AUTORENEW; takes effect when the API sets SENSOR_KEY_TTL).
+  #    The renewed key is written to the pod filesystem, not the Secret, so in
+  #    daemon mode a pod restart after a renewal starts with the revoked key —
+  #    leave this off unless the API key does not need to survive restarts.
+  keyAutoRenew: false
   verbose: false
-  # -- Keep private/internal targets blocked by default (co-located agents are
-  #    for external-reachable work; internal scanning belongs on a remote agent).
-  allowPrivateTargets: false
-  # Which executor capabilities this bundled agent advertises. Only enable what
-  # makes sense to run next to the platform; each maps to an agent capability.
+  # -- SENSOR_ALLOW_PRIVATE_TARGETS. Empty (default): RFC1918 / IPv6 ULA
+  #    targets are refused — co-located sensors are for external-reachable
+  #    work; internal scanning belongs on a remote sensor. "1": allow private
+  #    targets. Loopback, link-local/IMDS and CGNAT stay blocked either way.
+  #    The sensor only recognises "1", so any other value fails the render.
+  #    (Reaching the in-cluster API needs no setting: since sdk-go v0.7.2 the
+  #    sensor's API client allows the platform's private address.)
+  allowPrivateTargets: ""
+  # -- SENSOR_SCAN_ROOTS: ':'-separated directories that filesystem targets of
+  #    dispatched code scans (gitleaks, semgrep, trivy fs) must resolve inside.
+  #    Empty: the sensor's working directory (/scan in the image).
+  scanRoots: ""
+  # -- platform mode: maximum concurrent jobs (-max-concurrent).
+  maxConcurrent: 5
+  # -- platform mode: which executor capabilities the sensor advertises
+  #    (-enable-<name>).
   executors:
     recon: false
     vulnscan: true

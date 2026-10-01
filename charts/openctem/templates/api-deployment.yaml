@@ -132,7 +132,7 @@ spec:
                   key: {{ include "openctem.redisPasswordSecretKey" . }}
             # Extra environment variables
             {{- if .Values.api.extraEnv }}
-            {{- toYaml .Values.api.extraEnv | nindent 12 }}
+            {{- include "openctem.apiExtraEnv" . | nindent 12 }}
             {{- end }}
             # Extra environment variables from config maps and secrets
           {{- if .Values.api.extraEnvFrom }}

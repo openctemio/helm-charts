@@ -1,0 +1,11 @@
+# Half-way migration: the old agent: block is still there, and sensor: adds
+# the API key of a sensor created in the UI. The sensor runs in daemon mode
+# and still takes the other agent.* settings.
+api:
+  appEnv: development
+agent:
+  enabled: true
+  region: eu-west
+  bootstrapToken: "unused-bootstrap-token"
+sensor:
+  apiKey: "rda_test"

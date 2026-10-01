@@ -40,6 +40,8 @@
 		format console {
 			level_format upper
 		}
+		# The healthcheck polls the admin API every 30s; keep that out of the log.
+		exclude admin.api
 	}
 
 	servers {
@@ -88,6 +90,7 @@
 	# which win. These cover API responses.
 	header {
 		-Server
+		-Via
 		?X-Content-Type-Options nosniff
 		?X-Frame-Options DENY
 		?Referrer-Policy strict-origin-when-cross-origin

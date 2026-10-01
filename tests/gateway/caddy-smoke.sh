@@ -24,13 +24,18 @@ trap cleanup EXIT
 extra_mounts=()
 
 # Stub upstreams: answer with their own name and the client IP they were given.
+# The API stub sets its own HSTS (as the API does in production); the gateway's
+# HSTS is only a default, so the response must carry exactly one.
 for name in api ui; do
   mkdir -p "$tmp/$name"
+  hsts=""
+  [ "$name" = api ] && hsts='add_header Strict-Transport-Security "max-age=63072000" always;'
   cat > "$tmp/$name/default.conf" <<EOT
 server {
   listen 80;
   location / {
     default_type text/plain;
+    $hsts
     return 200 "$name realip=\$http_x_real_ip\n";
   }
 }
@@ -162,8 +167,10 @@ r=(--resolve "ctem.example.com:$hostport:127.0.0.1" --cacert "$ca")
 base="https://ctem.example.com:$hostport"
 wait_up "${r[@]}" "$base/" && pass "internal: HTTPS verified against the internal CA" || fail "internal: HTTPS did not come up"
 routes "$base" "${r[@]}"
-hsts="$(curl -s -D - -o /dev/null "${r[@]}" "$base/health" | tr -d '\r' | grep -i '^strict-transport-security' || true)"
-if [ -n "$hsts" ]; then pass "internal: HSTS"; else fail "internal: no HSTS header"; fi
+hdrs="$(curl -s -D - -o /dev/null "${r[@]}" "$base/health" | tr -d '\r')"
+if [ "$(grep -ci '^strict-transport-security:' <<<"$hdrs")" = 1 ]; then pass "internal: one HSTS header (the API's)"; else fail "internal: want exactly one HSTS header"; fi
+if grep -qi '^strict-transport-security:' <(curl -s -D - -o /dev/null "${r[@]}" "$base/"); then pass "internal: HSTS default on UI responses"; else fail "internal: no HSTS on UI responses"; fi
+if grep -qi '^via:' <<<"$hdrs"; then fail "internal: Via header not removed"; else pass "internal: no Via header"; fi
 mapfile -t live < "$d/liveness"
 if docker exec "$net-gw" "${live[@]}"; then pass "internal: liveness probe command succeeds"; else fail "internal: liveness probe fails"; fi
 if docker exec "$net-gw" id -u | grep -qx 1000; then pass "internal: runs as uid 1000"; else fail "internal: not uid 1000"; fi

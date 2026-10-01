@@ -73,8 +73,12 @@
     kubectl exec deploy/{{ include "openctem.apiFullname" . }} -- /app/bootstrap-tenant -email=you@example.com -password=... -team="Your Org" -slug=your-org
 {{- end }}
 {{- if .Values.api.bootstrapAdmin.enabled }}
-- A platform admin was bootstrapped for {{ .Values.api.bootstrapAdmin.email }}. Retrieve its API key:
+- Platform admins were bootstrapped for {{ .Values.api.bootstrapAdmin.email }}{{ if not .Values.api.bootstrapAdmin.noBackup }} and the break-glass backup {{ .Values.api.bootstrapAdmin.backupEmail }}{{ end }}.
+  Their temporary passwords are printed once in the Job log:
     kubectl logs job/{{ include "openctem.apiFullname" . }}-bootstrap-admin
+  Sign in on /login, open the admin console (/admin), enroll an authenticator and
+  change the temporary password. Keep the break-glass credentials offline; every
+  use of that account alerts the other admins (log field alert=break_glass_sign_in).
 {{- end }}
 
 6. Smoke-test this release

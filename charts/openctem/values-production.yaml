@@ -211,6 +211,26 @@ redisConfig:
     password: "<REQUIRED_REDIS_PASSWORD_32_PLUS_CHARS>"
 
 # -----------------------------------------------------------------------------
+# Optional: ONE host for the UI and the API instead of the two ingresses above
+# (chart >= 0.7.0). Disable api.ingress / ui.ingress, then uncomment. See the
+# chart README, "Single-port gateway", for the httpRoute and bundled-Caddy modes
+# (a plain Ingress cannot route API-key clients on generic /api/v1/* paths).
+# -----------------------------------------------------------------------------
+# gateway:
+#   mode: ingress
+#   host: ctem.example.com              # <-- your host
+#   trustedProxies: [10.244.0.0/16]     # <-- your cluster's pod CIDR
+#   ingress:
+#     className: nginx
+#     annotations:
+#       nginx.ingress.kubernetes.io/proxy-body-size: "256m"
+#       nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+#     tls:
+#       enabled: true
+#       secretName: openctem-tls
+#       clusterIssuer: letsencrypt-prod
+
+# -----------------------------------------------------------------------------
 # NetworkPolicy — recommended in production (requires a CNI that enforces it).
 # Default-deny ingress + allow only the real flows. Run OpenCTEM in a dedicated
 # namespace, since the default-deny selects every pod in the namespace.

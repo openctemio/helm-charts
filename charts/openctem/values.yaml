@@ -614,10 +614,12 @@ sensor:
     # -- Sensor image tag. The sensor is versioned separately from the
     # platform, so this does NOT follow the chart appVersion. Images are
     # published per variant as <version>-<variant> (there is no plain
-    # "v0.3.0" tag): "-default" carries semgrep, gitleaks, trivy and nuclei;
-    # the single-tool variants are -nuclei, -gitleaks, -semgrep and -trivy,
-    # and -ci is the CI image. latest-<variant> tags also exist; pin a
-    # version for reproducible installs.
+    # "v0.3.0" tag): "-default" carries semgrep, betterleaks, trivy and
+    # nuclei; the single-tool variants are -nuclei, -betterleaks, -semgrep
+    # and -trivy, and -ci is the CI image. latest-<variant> tags also exist;
+    # pin a version for reproducible installs. Betterleaks replaced gitleaks
+    # as the secret scanner after v0.3.0: v0.3.0 images carry gitleaks (and
+    # a semgrep that fails to start), so move to the first release after it.
     tag: "v0.3.0-default"
     pullPolicy: IfNotPresent
   # -- Display name the sensor registers with (platform mode: SENSOR_NAME).
@@ -642,8 +644,8 @@ sensor:
   #    (platform).
   existingSecretKey: ""
   # -- daemon mode: comma-separated scanners the sensor offers for dispatched
-  #    jobs (-tools). The default image carries semgrep, gitleaks, trivy and
-  #    nuclei.
+  #    jobs (-tools). The default image carries semgrep, betterleaks, trivy
+  #    and nuclei ("gitleaks" is still accepted and runs betterleaks).
   tools: "nuclei"
   # -- Renew the sensor API key before it expires and when the platform asks
   #    (PLATFORM_KEY_AUTORENEW; takes effect when the API sets SENSOR_KEY_TTL).
@@ -661,7 +663,7 @@ sensor:
   #    sensor's API client allows the platform's private address.)
   allowPrivateTargets: ""
   # -- SENSOR_SCAN_ROOTS: ':'-separated directories that filesystem targets of
-  #    dispatched code scans (gitleaks, semgrep, trivy fs) must resolve inside.
+  #    dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside.
   #    Empty: the sensor's working directory (/scan in the image).
   scanRoots: ""
   # -- platform mode: maximum concurrent jobs (-max-concurrent).

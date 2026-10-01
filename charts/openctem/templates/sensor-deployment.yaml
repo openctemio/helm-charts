@@ -1,5 +1,10 @@
 {{- $sensor := include "openctem.sensor" . | fromYaml -}}
 {{- if $sensor.enabled }}
+{{- $outbox := $sensor.outbox | default dict -}}
+{{- $persist := ($outbox.persistence | default dict) -}}
+{{- if and $persist.enabled (gt (int $sensor.replicaCount) 1) }}
+{{- fail "\n\nsensor.outbox.persistence.enabled needs sensor.replicaCount=1: an outbox belongs to one sensor process (the sensor locks it).\n" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,6 +16,12 @@ spec:
   # platform-mode sensor registers once and holds a lease; run a single
   # replica unless you deliberately want multiple co-located workers.
   replicas: {{ $sensor.replicaCount }}
+  {{- if $persist.enabled }}
+  # The outbox volume is ReadWriteOnce and locked by one sensor process: the
+  # old pod must stop before the new one starts.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "openctem.sensorSelectorLabels" . | nindent 6 }}
@@ -33,7 +44,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with $sensor.podSecurityContext }}
+      {{- $podSC := deepCopy ($sensor.podSecurityContext | default dict) }}
+      {{- if and $persist.enabled $persist.fsGroup (not (hasKey $podSC "fsGroup")) }}
+      {{- $_ := set $podSC "fsGroup" (int $persist.fsGroup) }}
+      {{- end }}
+      {{- with $podSC }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -105,12 +120,41 @@ spec:
             - name: SENSOR_SCAN_ROOTS
               value: {{ . | quote }}
             {{- end }}
+            # The outbox (results not yet accepted by the platform).
+            - name: SENSOR_OUTBOX_DIR
+              value: /var/lib/openctem/outbox
+            {{- with $outbox.maxBytes }}
+            - name: SENSOR_OUTBOX_MAX_BYTES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $outbox.maxAge }}
+            - name: SENSOR_OUTBOX_MAX_AGE
+              value: {{ . | quote }}
+            {{- end }}
             {{- with $sensor.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          volumeMounts:
+            - name: outbox
+              mountPath: /var/lib/openctem/outbox
           {{- with $sensor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: outbox
+          {{- if $persist.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $persist.existingClaim | default (printf "%s-outbox" (include "openctem.sensorFullname" .)) }}
+          {{- else if $outbox.emptyDirSizeLimit }}
+          # Survives a container restart, not a pod deletion: see
+          # sensor.outbox.persistence.
+          emptyDir:
+            sizeLimit: {{ $outbox.emptyDirSizeLimit }}
+          {{- else }}
+          # Survives a container restart, not a pod deletion: see
+          # sensor.outbox.persistence.
+          emptyDir: {}
           {{- end }}
       {{- with $sensor.nodeSelector }}
       nodeSelector:

@@ -158,6 +158,13 @@
 - Mode daemon: authenticates with the API key in Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}` and runs the
   scans the platform dispatches, with: {{ $sensor.tools | default "(no -tools)" }}. It shows under Settings → Sensors.
 {{- end }}
+{{- if (($sensor.outbox | default dict).persistence | default dict).enabled }}
+- Outbox: PersistentVolumeClaim {{ (($sensor.outbox).persistence).existingClaim | default (printf "%s-outbox" (include "openctem.sensorFullname" .)) }} at /var/lib/openctem/outbox.
+{{- else }}
+- WARNING: the sensor's outbox (/var/lib/openctem/outbox) is an emptyDir. Results not yet
+  accepted by the platform are LOST when the pod is deleted, rescheduled or upgraded.
+  Set sensor.outbox.persistence.enabled=true for a PersistentVolumeClaim.
+{{- end }}
 - Private (RFC1918 / ULA) scan targets: {{ if eq $sensor.allowPrivateTargets "1" }}ALLOWED (sensor.allowPrivateTargets="1"){{ else }}blocked (set sensor.allowPrivateTargets="1" to allow){{ end }}.
     kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "openctem.sensorFullname" . }}
 {{- end }}

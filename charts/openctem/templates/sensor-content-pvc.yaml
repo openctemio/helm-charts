@@ -1,0 +1,21 @@
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- $persist := ((($sensor.content | default dict).persistence) | default dict) -}}
+{{- if and $sensor.enabled $persist.enabled (not $persist.existingClaim) }}
+# Scanner content cache (trivy DB, nuclei templates, semgrep rules).
+# Disposable: deleting it only means the next pod downloads it again.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openctem.sensorFullname" . }}-content
+  labels:
+    {{- include "openctem.sensorLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml $persist.accessModes | nindent 4 }}
+  {{- with $persist.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $persist.size | quote }}
+{{- end }}

@@ -3,9 +3,9 @@ api:
   appEnv: development
 agent:
   enabled: true
-  bootstrapToken: "old-token"
-  maxConcurrent: 3
+  apiKey: "old-token"
+  tools: "nuclei"
 sensor:
   enabled: true
-  bootstrapToken: "new-token"
-  maxConcurrent: 8
+  apiKey: "new-token"
+  tools: "trivy"

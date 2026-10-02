@@ -4,7 +4,8 @@ api:
   appEnv: development
 agent:
   enabled: true
-  bootstrapToken: "test-bootstrap-token"
   image:
     repository: registry.example.com/openctemio/sensor
     tag: v0.3.0-default
+sensor:
+  apiKey: "rda_test"

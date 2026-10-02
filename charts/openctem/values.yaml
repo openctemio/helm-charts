@@ -833,16 +833,12 @@ extraManifests: []
 sensor:
   # -- Enable the bundled co-located sensor. Disabled by default (opt-in).
   enabled: false
-  # -- How the sensor connects to the platform:
-  #    "daemon" (default) — an API-key sensor: create a sensor in the UI
-  #      (Settings → Sensors → Add), put its API key in apiKey or
-  #      existingSecret, and the sensor runs `-daemon -enable-commands`,
-  #      executing the scans the platform dispatches (protocol v1).
-  #    "platform" — the `-platform` self-registration with a bootstrap token,
-  #      which is what chart <= 0.4.x ran. It needs a platform that serves
-  #      /api/v1/platform/{register,lease,poll}; the OpenCTEM API (v0.9.0)
-  #      serves none of them, so this mode cannot register there. Kept so an
-  #      old values file renders unchanged; switch to "daemon".
+  # -- How the sensor connects to the platform. Only "daemon": an API-key
+  #    sensor (create a sensor under Settings → Sensors, put its API key in
+  #    apiKey or existingSecret); it runs `-daemon -enable-commands`, executing
+  #    the scans the platform dispatches. "platform" (the bootstrap-token
+  #    self-registration chart <= 0.4.x ran) was removed in chart 0.9.0: no
+  #    OpenCTEM API serves /api/v1/platform/register, so it never registered.
   mode: daemon
   replicaCount: 1
   image:
@@ -858,37 +854,30 @@ sensor:
     # fails to start, so do not go back to them.
     tag: "v0.5.0"
     pullPolicy: IfNotPresent
-  # -- Display name the sensor registers with (platform mode: SENSOR_NAME).
-  #    Defaults to the workload name. In daemon mode the sensor's name is the
-  #    one given when it was created in the UI.
-  name: ""
   # -- REGION reported by the sensor.
   region: default
   # -- Override the API base URL (API_URL). Defaults to the in-cluster API
   #    service. It must reach the API directly: the sensor refuses redirects.
   apiUrl: ""
-  # -- daemon mode: the sensor's API key (API_KEY). For production provide it
-  #    out-of-band via existingSecret instead of committing it here.
+  # -- The sensor's API key (API_KEY). For production provide it out-of-band
+  #    via existingSecret instead of committing it here.
   apiKey: ""
-  # -- platform mode: bootstrap token for self-registration (BOOTSTRAP_TOKEN).
-  bootstrapToken: ""
-  # -- Name of a pre-created Secret holding the credential (the API key in
-  #    daemon mode, the bootstrap token in platform mode). Takes precedence
-  #    over apiKey/bootstrapToken; nothing secret is then rendered by Helm.
+  # -- Name of a pre-created Secret holding the API key. Takes precedence
+  #    over apiKey; nothing secret is then rendered by Helm.
   existingSecret: ""
-  # -- Key within the secret. Empty: "api-key" (daemon), "bootstrap-token"
-  #    (platform).
+  # -- Key within the secret. Empty: "api-key".
   existingSecretKey: ""
   # -- daemon mode: comma-separated scanners the sensor offers for dispatched
   #    jobs (-tools). The default image carries semgrep, betterleaks, trivy
   #    and nuclei ("gitleaks" is still accepted and runs betterleaks).
   tools: "nuclei"
   # -- Renew the sensor API key before it expires and when the platform asks
-  #    (PLATFORM_KEY_AUTORENEW; takes effect when the API sets SENSOR_KEY_TTL).
-  #    The renewed key is written to the pod filesystem, not the Secret, so in
-  #    daemon mode a pod restart after a renewal starts with the revoked key —
-  #    leave this off unless the API key does not need to survive restarts.
-  keyAutoRenew: false
+  #    (PLATFORM_KEY_AUTORENEW). The renewed key is kept in the state volume
+  #    (/var/lib/openctem/state/sensor-credentials.json), not the Secret: the
+  #    renewal retires the key in the Secret. Empty (default): on exactly when
+  #    state.persistence.enabled (a renewed key on an emptyDir is lost with
+  #    the pod, which then starts with the retired key). true / false force it.
+  keyAutoRenew: ""
   verbose: false
   # -- SENSOR_ALLOW_PRIVATE_TARGETS. Empty (default): RFC1918 / IPv6 ULA
   #    targets are refused — co-located sensors are for external-reachable
@@ -902,6 +891,39 @@ sensor:
   #    dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside.
   #    Empty: the sensor's working directory (/scan in the image).
   scanRoots: ""
+  # -- The sensor's state at /var/lib/openctem/state (SENSOR_STATE_DIR): the
+  #    API key it renews on its own (api RFC-032 Phase 0). Holds a credential:
+  #    back it up like one. With persistence off it is an emptyDir and key
+  #    auto-renewal stays off (keyAutoRenew).
+  state:
+    persistence:
+      # -- Back the state with a PersistentVolumeClaim (needs replicaCount 1;
+      #    switches the Deployment to Recreate).
+      enabled: true
+      # -- Use this pre-created claim instead of creating one.
+      existingClaim: ""
+      size: 128Mi
+      # -- Empty: the cluster's default StorageClass.
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
+  # -- Scanner content cache at /var/lib/openctem/content (SENSOR_CONTENT_DIR:
+  #    trivy DB, nuclei templates, semgrep rules), so a new pod does not
+  #    download it again. Disposable (it can be deleted), and kept apart from
+  #    the state on purpose.
+  content:
+    persistence:
+      # -- Back the content cache with a PersistentVolumeClaim (needs
+      #    replicaCount 1; switches the Deployment to Recreate). Off: an
+      #    emptyDir (emptyDirSizeLimit).
+      enabled: true
+      existingClaim: ""
+      size: 5Gi
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
+    # -- emptyDir size limit when persistence is off (empty: none).
+    emptyDirSizeLimit: ""
   # -- The sensor's outbox: results kept at /var/lib/openctem/outbox until the
   #    platform accepted them (sensor >= v0.4.0), so an API outage or a pod
   #    restart loses nothing. By default it is an emptyDir, which survives a
@@ -921,7 +943,8 @@ sensor:
       accessModes:
         - ReadWriteOnce
       # -- fsGroup given to the pod (unless podSecurityContext sets one) so
-      #    the image's user (uid/gid 999) can write the volume.
+      #    the image's user (uid/gid 999) can write the volumes (outbox, state,
+      #    content); applied when any of them is a PersistentVolumeClaim.
       fsGroup: 999
     # -- emptyDir size limit when persistence is off (empty: none).
     emptyDirSizeLimit: ""
@@ -930,16 +953,6 @@ sensor:
     maxBytes: ""
     # -- SENSOR_OUTBOX_MAX_AGE (empty: 168h).
     maxAge: ""
-  # -- platform mode: maximum concurrent jobs (-max-concurrent).
-  maxConcurrent: 5
-  # -- platform mode: which executor capabilities the sensor advertises
-  #    (-enable-<name>).
-  executors:
-    recon: false
-    vulnscan: true
-    secrets: false
-    assets: false
-    pipeline: false
   extraEnv: []
   podAnnotations: {}
   podLabels: {}

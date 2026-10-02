@@ -3,8 +3,8 @@ api:
   appEnv: development
 agent:
   enabled: true
-  bootstrapToken: "test-bootstrap-token"
-  maxConcurrent: 2
+  apiKey: "rda_test"
+  tools: "nuclei,trivy"
 sensor:
   enabled: true
-  maxConcurrent: 2
+  tools: "nuclei,trivy"

@@ -1,0 +1,22 @@
+# A chart <= 0.4.x agent: block, plus the API key of a sensor created in the
+# UI: renders as the daemon sensor and takes the other agent.* settings.
+api:
+  appEnv: development
+agent:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/openctemio/agent
+    tag: v0.2.2-default
+    pullPolicy: IfNotPresent
+  region: eu-west
+  bootstrapToken: "unused-bootstrap-token"
+  keyAutoRenew: true
+  verbose: true
+  allowPrivateTargets: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+sensor:
+  apiKey: "rda_test"

@@ -312,16 +312,44 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 
 | Value | Default | Meaning |
 |---|---|---|
-| `sensor.mode` | `daemon` | `daemon`: API-key sensor (`-daemon -enable-commands`) that runs the scans the platform dispatches. `platform`: the `-platform` bootstrap-token self-registration chart ≤ 0.4.x ran; it needs `/api/v1/platform/{register,lease,poll}`, which the OpenCTEM API does not serve. |
+| `sensor.mode` | `daemon` | The only mode: an API-key sensor (`-daemon -enable-commands`) that runs the scans the platform dispatches. `platform` (bootstrap-token self-registration) was removed in 0.9.0 and fails the render: no OpenCTEM API serves it. |
 | `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.5.0` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`. From v0.4.2 the plain tag (`v0.4.2`, `latest`) is the default image (semgrep, betterleaks, trivy, nuclei), the same as `v0.4.2-default`. Other variants: `<version>-nuclei`, `-betterleaks`, `-semgrep`, `-trivy`, `-ci`. v0.4.x adds the durable results outbox; v0.5.0 speaks protocol v2 for the whole sensor surface. Betterleaks replaced gitleaks after sensor v0.3.0 (whose images carry gitleaks and a semgrep that fails to start); `-gitleaks` tags are no longer published. |
-| `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | The credential: the API key (daemon) or bootstrap token (platform, key `bootstrap-token`). Prefer `existingSecret`. |
+| `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | The sensor's API key. Prefer `existingSecret`. |
 | `sensor.tools` | `nuclei` | Daemon: scanners offered for dispatched jobs (`-tools`), e.g. `nuclei,semgrep,betterleaks,trivy`. `gitleaks` is still accepted and runs betterleaks. |
 | `sensor.allowPrivateTargets` | empty | `"1"` sets `SENSOR_ALLOW_PRIVATE_TARGETS=1` (RFC1918 / ULA targets allowed). Empty keeps them blocked. Any other value fails the render: the sensor only recognises `1`. Reaching the in-cluster API needs nothing (the sensor's API client allows the platform's private address). |
 | `sensor.scanRoots` | empty | `SENSOR_SCAN_ROOTS` for dispatched code scans; empty = `/scan`. |
-| `sensor.keyAutoRenew` | `false` | `PLATFORM_KEY_AUTORENEW`. The renewed key is kept in the pod filesystem, not the Secret, so in daemon mode a restart after a renewal comes back with the revoked key. |
-| `sensor.maxConcurrent`, `sensor.executors.*` | `5`, vulnscan | Platform mode only. |
-| `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. |
+| `sensor.keyAutoRenew` | empty | `PLATFORM_KEY_AUTORENEW`, always rendered. Empty: on exactly when `sensor.state.persistence.enabled`; `true` / `false` force it. The renewed key is kept in the state volume (`-credentials=/var/lib/openctem/state/sensor-credentials.json`), not the Secret: the renewal retires the key in the Secret, so a pod without that volume would start with a dead key. The API issues expiring keys only with `SENSOR_KEY_TTL`. |
+| `sensor.state.persistence.enabled` | `true` | The sensor's state at `/var/lib/openctem/state` (`SENSOR_STATE_DIR`): the API key it renews on its own. A PersistentVolumeClaim `<release>-openctem-sensor-state` (`size` `128Mi`, `storageClass`, `accessModes`) or `existingClaim`. It holds a credential: back it up like one. `false`: an `emptyDir`, and key auto-renewal stays off. |
+| `sensor.content.persistence.enabled` | `true` | Scanner content cache at `/var/lib/openctem/content` (`SENSOR_CONTENT_DIR`: trivy DB, nuclei templates, semgrep rules), so a new pod does not download it again. A PersistentVolumeClaim `<release>-openctem-sensor-content` (`size` `5Gi`) or `existingClaim`. Disposable, and kept apart from the state. `false`: an `emptyDir` (`sensor.content.emptyDirSizeLimit`). |
+| `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. Any sensor PVC (outbox, state, content) requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`. |
 | `sensor.outbox.maxBytes` / `.maxAge` / `.emptyDirSizeLimit` | empty | `SENSOR_OUTBOX_MAX_BYTES` (default `1GiB`, at most half the free space; keep it below the volume), `SENSOR_OUTBOX_MAX_AGE` (default `168h`), and the `emptyDir` size limit. |
+
+## Upgrading to 0.9.0 (sensor state and content volumes, platform mode removed)
+
+- **The bundled sensor gets two PersistentVolumeClaims by default**:
+  `<release>-openctem-sensor-state` (128Mi, the API key the sensor renews on
+  its own) and `<release>-openctem-sensor-content` (5Gi, the scanner content
+  cache), and the Deployment switches to `Recreate`. The cluster needs a
+  default StorageClass (or set `storageClass` / `existingClaim`). To keep
+  emptyDirs, set `sensor.state.persistence.enabled=false` and
+  `sensor.content.persistence.enabled=false`. With more than one replica
+  both must be off (a sensor is one identity; replicas sharing a key are
+  flagged as a cloned identity by the platform).
+- **Key auto-renewal is on by default** (with the state volume):
+  `PLATFORM_KEY_AUTORENEW=true` and `-credentials` in the state volume. The
+  first renewal retires the key in the Secret; the pod keeps the renewed key
+  in the volume. If you regenerate the key under Settings → Sensors and put
+  it in the Secret, a sensor before the state-directory release still
+  prefers the file: delete `sensor-credentials.json` from the state volume
+  (newer sensors notice the changed key themselves). `sensor.keyAutoRenew:
+  false` keeps the old behaviour.
+- **`sensor.mode: platform` is removed** with `sensor.bootstrapToken`,
+  `sensor.name`, `sensor.maxConcurrent` and `sensor.executors`: it ran
+  bootstrap-token self-registration, which no OpenCTEM API serves, so it
+  never registered. The render fails while `sensor.mode=platform` is set,
+  and an old `agent:` block without an API key fails with the same pointer:
+  create a sensor under Settings → Sensors and set `sensor.apiKey` or
+  `sensor.existingSecret`.
 
 ## Upgrading to 0.8.0 (admin-only organizations, bootstrap-tenant removed)
 
@@ -357,7 +385,7 @@ change for the upgrade itself:
 | `agent.<key>` | `sensor.<key>` | Every key, same name. `helm upgrade` prints a deprecation notice listing them. |
 | `agent.image.repository: ghcr.io/openctemio/agent` (+ `tag`) | `sensor.image` (`ghcr.io/openctemio/sensor:v0.5.0`) | The frozen agent image and its tag are ignored (its `v0.2.x` tags do not exist on the sensor repository). A custom repository (mirror) is kept with its tag. |
 | `agent.allowPrivateTargets: true` / `false` | `sensor.allowPrivateTargets: "1"` / `""` | Note: chart ≤ 0.4.x rendered `"true"`, which the binary ignores, so `true` never took effect. It now does; the notice says so. |
-| (always `-platform` + bootstrap token) | `sensor.mode: platform` | Selected for an `agent:` block unless `sensor.mode` or `sensor.apiKey` is set. Switch to `daemon` (see above): the API does not serve platform registration. |
+| (always `-platform` + bootstrap token) | — | Removed in 0.9.0: an `agent:` block needs `sensor.apiKey` or `sensor.existingSecret` (the API key of a sensor created under Settings → Sensors), else the render fails. |
 | `agent.existingSecret` / `existingSecretKey` | `sensor.existingSecret` / `existingSecretKey` | Used unchanged. |
 | `api.extraEnv` `AGENT_*` (`AGENT_KEY_TTL`, `AGENT_PUBLIC_API_URL`, `AGENT_CONFIG_TEMPLATES_DIR`, `AGENT_LB_*`) | `SENSOR_*` | Passed to the API under the new name. |
 

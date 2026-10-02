@@ -856,7 +856,7 @@ sensor:
     # v0.4.x adds the durable outbox (results survive a platform outage) and
     # protocol v2 results; v0.3.0 images carry gitleaks and a semgrep that
     # fails to start, so do not go back to them.
-    tag: "v0.4.2"
+    tag: "v0.5.0"
     pullPolicy: IfNotPresent
   # -- Display name the sensor registers with (platform mode: SENSOR_NAME).
   #    Defaults to the workload name. In daemon mode the sensor's name is the
@@ -946,6 +946,10 @@ sensor:
   podSecurityContext: {}
   securityContext: {}
   resources: {}
+  # -- Seconds Kubernetes waits after SIGTERM. The sensor drains for up to 30s
+  #    and hands unfinished work back so the platform re-queues it at once;
+  #    the Kubernetes default (30) can cut that off.
+  terminationGracePeriodSeconds: 45
   nodeSelector: {}
   tolerations: []
   affinity: {}

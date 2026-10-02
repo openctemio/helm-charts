@@ -2,14 +2,20 @@ apiVersion: apps/v1
 kind: Deployment
 {{- $dbSecretChecksumSource := include "openctem.dbSecretChecksumSource" . | trim }}
 {{- $redisSecretChecksumSource := include "openctem.redisSecretChecksumSource" . | trim }}
+{{- include "openctem.apiAttachmentsValidate" . }}
 metadata:
   name: {{ include "openctem.apiFullname" . }}
   labels:
     {{- include "openctem.apiLabels" . | nindent 4 }}
 spec:
-  {{- with .Values.api.deploymentStrategy }}
+  {{- if .Values.api.deploymentStrategy }}
   strategy:
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml .Values.api.deploymentStrategy | nindent 4 }}
+  {{- else if include "openctem.apiAttachmentsRwoVolume" . }}
+  # The attachments volume is ReadWriteOnce: a rolling update could start the
+  # new pod on another node, where it cannot attach the volume.
+  strategy:
+    type: Recreate
   {{- end }}
   {{- if not .Values.api.autoscaling.enabled }}
   replicas: {{ .Values.api.replicaCount }}
@@ -139,6 +145,8 @@ spec:
             # Gateway (gateway.*): trusted proxy hops and the public origin
             {{- . | nindent 12 }}
             {{- end }}
+            # Attachment storage (api.attachments)
+            {{- include "openctem.apiAttachmentsEnv" . | nindent 12 }}
             # Extra environment variables
             {{- if .Values.api.extraEnv }}
             {{- include "openctem.apiExtraEnv" . | nindent 12 }}
@@ -164,13 +172,25 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.api.volumeMounts }}
+          {{- $mounts := include "openctem.apiAttachmentsVolumeMount" . }}
+          {{- if or $mounts .Values.api.volumeMounts }}
           volumeMounts:
+            {{- with $mounts }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.api.volumeMounts }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- with .Values.api.volumes }}
+      {{- $vols := include "openctem.apiAttachmentsVolume" . }}
+      {{- if or $vols .Values.api.volumes }}
       volumes:
+        {{- with $vols }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.api.volumes }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
       {{- with .Values.api.nodeSelector }}
       nodeSelector:

@@ -1,0 +1,21 @@
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- $persist := ((($sensor.state | default dict).persistence) | default dict) -}}
+{{- if and $sensor.enabled $persist.enabled (not $persist.existingClaim) }}
+# The sensor's state: the API key it renews on its own (api RFC-032 Phase 0).
+# Holds a credential; deleted with the release like the sensor itself.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openctem.sensorFullname" . }}-state
+  labels:
+    {{- include "openctem.sensorLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml $persist.accessModes | nindent 4 }}
+  {{- with $persist.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $persist.size | quote }}
+{{- end }}

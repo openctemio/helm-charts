@@ -106,6 +106,8 @@ owner link expires in 24h.
 | Value | Default | |
 |---|---|---|
 | `api.tenantCreationMode` | `admin_only` | `TENANT_CREATION_MODE`. `admin_only`: only the platform administrator creates organizations (admin console or the bootstrap-admin org flags). `self_service`: any signed-in user may create organizations (SaaS / trial opt-in). Any other value fails the render. A `TENANT_CREATION_MODE` in `api.extraEnv` wins. |
+| `api.sensorReleaseChannel.latestVersion` | `""` | `SENSOR_LATEST_VERSION`: the newest sensor release. The Sensors page shows "update available" for older sensors and its install commands pin this tag. Empty: `sensor.image.tag`. An entry in `api.extraEnv` wins (`none` turns the comparison off). |
+| `api.sensorReleaseChannel.minVersion` | `""` | `SENSOR_MIN_VERSION`: the oldest supported sensor release. A heartbeating sensor below it shows as degraded. Empty: no minimum. |
 | `api.bootstrapAdmin.enabled` | `false` | Run the post-install bootstrap Job. |
 | `api.bootstrapAdmin.email` / `name` / `role` | — / — / `super_admin` | The platform administrator. |
 | `api.bootstrapAdmin.backupEmail` / `backupName` | — | The break-glass backup administrator (required unless `noBackup: true`). |

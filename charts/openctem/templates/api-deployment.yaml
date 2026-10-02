@@ -131,6 +131,10 @@ spec:
                   name: {{ include "openctem.redisPasswordSecretName" . }}
                   key: {{ include "openctem.redisPasswordSecretKey" . }}
             {{- include "openctem.apiTenantCreationModeEnv" . | nindent 12 }}
+            {{- with include "openctem.apiSensorReleaseEnv" . }}
+            # Sensor release channel (api.sensorReleaseChannel)
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- with include "openctem.gatewayApiEnv" . }}
             # Gateway (gateway.*): trusted proxy hops and the public origin
             {{- . | nindent 12 }}

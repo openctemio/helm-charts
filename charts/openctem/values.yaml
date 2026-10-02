@@ -92,15 +92,35 @@ api:
         - ALL
     # readOnlyRootFilesystem: true
 
-  # -- Bootstrap the first PLATFORM administrators (RFC-022): the primary admin
-  # and a break-glass backup super admin, each a new sign-in account with a
-  # temporary password printed ONCE to the Job log. Both sign in on /login,
-  # enroll an authenticator when opening the admin console, and must change
-  # the temporary password first. The backup is local (never bound to the
-  # platform identity provider, exempt from "require IdP"); every sign-in with
-  # it is audited (high), logged with alert=break_glass_sign_in and emailed to
-  # the other admins (system SMTP). Store its credentials offline and test it
-  # at least every 90 days. Re-running is safe: existing admins are skipped.
+  # -- Who may create organizations (TENANT_CREATION_MODE).
+  #    admin_only    — only the platform administrator creates organizations:
+  #                    in the admin console (/admin -> Organizations) or with
+  #                    the bootstrap-admin org flags (api.bootstrapAdmin.org).
+  #                    The default, and the right setting for self-hosted and
+  #                    on-prem installs.
+  #    self_service  — any signed-in user may create organizations (and owns
+  #                    each one). SaaS / trial opt-in only.
+  #    A TENANT_CREATION_MODE entry in api.extraEnv takes precedence.
+  tenantCreationMode: admin_only
+
+  # -- Bootstrap the first PLATFORM administrators (RFC-022) and, optionally,
+  # the first organization. Runs /app/bootstrap-admin as a post-install hook
+  # Job after the migrations.
+  #
+  # The primary admin and a break-glass backup super admin are each created as
+  # a sign-in account with a temporary password printed ONCE to the Job log.
+  # Both sign in on /login, enroll an authenticator when opening the admin
+  # console (/admin), and must change the temporary password first. The backup
+  # is local (never bound to the platform identity provider, exempt from
+  # "require IdP"); every sign-in with it is audited (high), logged with
+  # alert=break_glass_sign_in and emailed to the other admins (system SMTP).
+  # Store its credentials offline and test it at least every 90 days.
+  #
+  # The completed Job (and its log) is KEPT until you delete it: read the
+  # credentials with `kubectl logs job/<fullname>-api-bootstrap-admin` (the
+  # exact command is in NOTES), store them, then `kubectl delete job/...`. Re-running is
+  # safe: existing admins are left unchanged and an existing organization slug
+  # is skipped; any other error fails the Job and the release.
   bootstrapAdmin:
     enabled: false
     email: ""
@@ -112,24 +132,30 @@ api:
     # -- Skip the break-glass backup (not recommended).
     noBackup: false
     force: false
-    backoffLimit: 2
+    # -- First organization (optional). Set name AND ownerEmail together.
+    #    Created through the normal, audited organization service. The owner
+    #    gets a one-time set-password link (valid 24h): emailed when SMTP is
+    #    configured (SMTP_* in api.extraEnv / api.extraEnvFrom; the link base
+    #    is SMTP_BASE_URL, set by gateway.* or api.extraEnv), otherwise
+    #    printed once to the Job log. The owner must not be one of the
+    #    platform admins (admins cannot be organization members).
+    org:
+      # -- Organization name, e.g. "Acme Security".
+      name: ""
+      # -- URL slug. Empty: derived from the name.
+      slug: ""
+      # -- Owner's email (a new sign-in account unless it already exists).
+      ownerEmail: ""
+      # -- Owner's display name. Empty: derived from the email.
+      ownerName: ""
+    # -- Retries. 0: a failure is reported once, never retried (each attempt
+    #    would print a new log the operator has to find).
+    backoffLimit: 0
     activeDeadlineSeconds: 300
 
-  # -- Bootstrap the first TENANT + OWNER user (the login the UI needs on day
-  # one). Password comes from passwordExistingSecret (preferred) or the inline
-  # password value below.
-  bootstrapTenant:
-    enabled: false
-    email: ""
-    name: ""
-    teamName: ""
-    teamSlug: ""
-    password: ""
-    passwordExistingSecret: ""
-    passwordSecretKey: TENANT_PASSWORD
-    force: false
-    backoffLimit: 2
-    activeDeadlineSeconds: 300
+  # NOTE: api.bootstrapTenant (the /app/bootstrap-tenant Job) was removed in
+  # chart 0.8.0. Use api.bootstrapAdmin.org.* to create the first organization;
+  # rendering fails while api.bootstrapTenant.enabled is true.
 
   deploymentStrategy: {}
     # type: RollingUpdate

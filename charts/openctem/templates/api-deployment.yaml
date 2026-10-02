@@ -130,6 +130,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.redisPasswordSecretName" . }}
                   key: {{ include "openctem.redisPasswordSecretKey" . }}
+            {{- include "openctem.apiTenantCreationModeEnv" . | nindent 12 }}
             {{- with include "openctem.gatewayApiEnv" . }}
             # Gateway (gateway.*): trusted proxy hops and the public origin
             {{- . | nindent 12 }}

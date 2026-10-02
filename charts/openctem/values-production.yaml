@@ -97,23 +97,26 @@ api:
         hosts:
           - api.example.com
 
-  # Give a fresh install a real UI login (first tenant + owner).
-  bootstrapTenant:
-    enabled: true
-    email: "admin@example.com"        # <-- first owner login
-    name: "Platform Owner"
-    teamName: "Example Org"
-    teamSlug: "example-org"
-    # Prefer an existing Secret over an inline password.
-    passwordExistingSecret: ""        # Secret with key passwordSecretKey
-    passwordSecretKey: TENANT_PASSWORD
-    password: "<REQUIRED_STRONG_PASSWORD_MIN_8>"
+  # Only the platform administrator creates organizations (the default).
+  tenantCreationMode: admin_only
 
-  # Optional: also create a platform admin (admin-cli / console API key).
+  # Give a fresh install its first logins: the platform admin + a break-glass
+  # backup (temporary passwords in the Job log), and the first organization,
+  # whose owner gets a one-time set-password link (emailed when SMTP is
+  # configured, otherwise printed in the Job log). Read the log once, store
+  # the credentials, then delete the Job (see NOTES).
   bootstrapAdmin:
-    enabled: false
-    email: "ops@example.com"
+    enabled: true
+    email: "admin@example.com"          # <-- platform administrator
+    name: "Platform Admin"
     role: super_admin
+    backupEmail: "breakglass@example.com"  # <-- break-glass backup admin
+    backupName: "Break-glass Admin"
+    org:
+      name: "Example Org"               # <-- first organization
+      slug: "example-org"
+      ownerEmail: "owner@example.com"   # <-- organization owner (not an admin)
+      ownerName: "Org Owner"
 
 ui:
   replicaCount: 2

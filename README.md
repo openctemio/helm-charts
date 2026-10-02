@@ -17,6 +17,14 @@ Then install a chart:
 helm install my-openctem openctem/openctem
 ```
 
+The OpenCTEM chart installs no login by default. For the first platform
+administrator (plus a break-glass backup) and the first organization, enable
+`api.bootstrapAdmin` with `api.bootstrapAdmin.org.*`; organizations are created
+by the platform administrator only (`api.tenantCreationMode: admin_only`, the
+default). See the
+[chart README](charts/openctem/README.md#first-install-platform-admin-and-first-organization)
+for the walkthrough.
+
 ## Repository Layout
 
 - `charts/`: chart source directories

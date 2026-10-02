@@ -3,6 +3,25 @@ entries:
   openctem:
   - apiVersion: v2
     appVersion: v0.9.0
+    created: "2026-10-02T08:46:29.044981623Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.5.6
+    - condition: redis.enabled
+      name: redis
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 25.3.2
+    description: A Helm chart for Kubernetes
+    digest: 16a3e312880e87719068b06523437d15a086d86098ae58d9c6b3df558fea4a43
+    name: openctem
+    type: application
+    urls:
+    - https://github.com/openctemio/helm-charts/releases/download/openctem-0.9.0/openctem-0.9.0.tgz
+    version: 0.9.0
+  - apiVersion: v2
+    appVersion: v0.9.0
     created: "2026-10-02T07:18:21.373551194Z"
     dependencies:
     - condition: postgresql.enabled
@@ -229,4 +248,4 @@ entries:
     urls:
     - https://github.com/openctemio/helm-charts/releases/download/openctem-0.1.1/openctem-0.1.1.tgz
     version: 0.1.1
-generated: "2026-10-02T07:18:21.373573507Z"
+generated: "2026-10-02T08:46:29.045100344Z"

@@ -253,6 +253,53 @@ api:
     minAvailable: 1
     maxUnavailable: ""
 
+  # -- Uploaded attachments and finding evidence. Without this, files were
+  # written to the pod's own filesystem: lost on every restart/upgrade, and
+  # split across pods with more than one replica.
+  attachments:
+    # -- local: files on a volume mounted at /app/data (persistence below).
+    #    s3:    an S3-compatible bucket (AWS S3, MinIO, ...; s3.* below).
+    #           Needs an API release with server-wide S3 storage
+    #           (STORAGE_PROVIDER=s3, openctemio/openctem#781); older APIs
+    #           ignore it and write to the pod's disk.
+    # More than one API replica (replicaCount > 1, or autoscaling with
+    # maxReplicas > 1) needs s3 or a ReadWriteMany volume: rendering fails
+    # otherwise. Switching storage later does not move existing files.
+    storage: local
+    persistence:
+      # -- PersistentVolumeClaim at /app/data. false = emptyDir (files are
+      # lost when the pod goes; single replica only).
+      enabled: true
+      # -- Use an existing claim instead of creating one. For more than one
+      # replica it must be ReadWriteMany: list ReadWriteMany in accessModes
+      # below to confirm it.
+      existingClaim: ""
+      storageClass: ""
+      # -- ReadWriteOnce (default) serves one replica, and the Deployment then
+      # uses the Recreate strategy unless api.deploymentStrategy is set (a
+      # rolling update could not attach the volume on another node).
+      # ReadWriteMany (NFS, CephFS, EFS, Azure Files, ...) allows several.
+      accessModes:
+        - ReadWriteOnce
+      size: 10Gi
+    s3:
+      # -- s3 or minio (path-style addressing when endpoint is set).
+      provider: s3
+      bucket: ""
+      # -- Empty: us-east-1.
+      region: ""
+      # -- Empty: AWS S3. Otherwise the S3 endpoint URL, e.g.
+      # http://minio.storage.svc:9000 (private addresses are allowed here:
+      # this is operator configuration, not tenant input).
+      endpoint: ""
+      # -- Secret holding the access key and secret key (keys below).
+      # Recommended; otherwise the chart creates one from accessKey/secretKey.
+      existingSecret: ""
+      accessKeyKey: STORAGE_ACCESS_KEY
+      secretKeyKey: STORAGE_SECRET_KEY
+      accessKey: ""
+      secretKey: ""
+
   volumes: []
   volumeMounts: []
 

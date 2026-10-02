@@ -1,0 +1,22 @@
+{{- $a := .Values.api.attachments -}}
+{{- if and (eq $a.storage "local") $a.persistence.enabled (not $a.persistence.existingClaim) }}
+# Uploaded attachments and finding evidence (api.attachments). Kept on
+# `helm uninstall` so files survive a reinstall; delete it by hand to remove them.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openctem.apiFullname" . }}-attachments
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml $a.persistence.accessModes | nindent 4 }}
+  {{- with $a.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $a.persistence.size | quote }}
+{{- end }}

@@ -67,6 +67,22 @@ api:
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
 
+  # REQUIRED with more than one API replica: attachments every pod can reach.
+  # Either an S3-compatible bucket (below), or a ReadWriteMany volume:
+  #   attachments: { storage: local, persistence: { accessModes: [ReadWriteMany], storageClass: <RWX_CLASS> } }
+  # The chart refuses to render several replicas on a ReadWriteOnce volume.
+  attachments:
+    storage: s3
+    s3:
+      provider: s3                    # minio for MinIO / S3-compatible stores
+      bucket: "<REQUIRED_ATTACHMENTS_BUCKET>"
+      region: ""                      # e.g. eu-west-1
+      endpoint: ""                    # empty = AWS S3; e.g. http://minio.storage.svc:9000
+      # Secret with keys STORAGE_ACCESS_KEY and STORAGE_SECRET_KEY:
+      #   kubectl -n openctem create secret generic openctem-attachments-s3 \
+      #     --from-literal=STORAGE_ACCESS_KEY=... --from-literal=STORAGE_SECRET_KEY=...
+      existingSecret: openctem-attachments-s3
+
   # With replicaCount/minReplicas = 2, keep 1 API pod serving through a node
   # drain or rolling upgrade.
   podDisruptionBudget:

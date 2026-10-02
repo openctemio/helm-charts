@@ -81,7 +81,7 @@ expect "sensor: state mounted" "mountPath: /var/lib/openctem/state" "$out"
 expect "sensor: content PVC" "name: t-openctem-sensor-content" "$out"
 expect "sensor: content PVC size" 'storage: "5Gi"' "$out"
 expect "sensor: content mounted" "mountPath: /var/lib/openctem/content" "$out"
-expect "sensor: Recreate with the PVCs" "type: Recreate" "$out"
+expect "sensor: Recreate with the PVCs" "type: Recreate" "$(render "${D[@]}" -s templates/sensor-deployment.yaml)"
 expect "sensor: fsGroup for the PVCs" "fsGroup: 999" "$out"
 expect "sensor: NOTES state" "Key auto-renewal: ON" "$out"
 reject "sensor: no SENSOR_NAME" "name: SENSOR_NAME" "$out"
@@ -105,7 +105,9 @@ expect "sensor: no state PVC: auto-renew off" 'name: PLATFORM_KEY_AUTORENEW
 reject "sensor: no state PVC object" "name: t-openctem-sensor-state" "$out"
 reject "sensor: no content PVC object" "name: t-openctem-sensor-content" "$out"
 expect "sensor: content emptyDir limit" "sizeLimit: 3Gi" "$out"
-reject "sensor: no Recreate without PVCs" "type: Recreate" "$out"
+# Only the sensor Deployment: the API's ReadWriteOnce attachments volume makes
+# the API Deployment Recreate on its own.
+reject "sensor: no Recreate without PVCs" "type: Recreate" "$(render "${D[@]}" -s templates/sensor-deployment.yaml --set sensor.state.persistence.enabled=false --set sensor.content.persistence.enabled=false --set sensor.content.emptyDirSizeLimit=3Gi)"
 expect "sensor: NOTES emptyDir state" "State is an emptyDir, so key auto-renewal is off" "$out"
 out="$(render "${D[@]}" --set sensor.state.persistence.enabled=false --set sensor.keyAutoRenew=true)"
 expect "sensor: keyAutoRenew=true forces it" 'name: PLATFORM_KEY_AUTORENEW

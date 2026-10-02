@@ -162,7 +162,7 @@ mode: daemon
 replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
-  tag: v0.4.2
+  tag: v0.5.0
   pullPolicy: IfNotPresent
 name: ""
 region: default
@@ -201,6 +201,7 @@ podLabels: {}
 podSecurityContext: {}
 securityContext: {}
 resources: {}
+terminationGracePeriodSeconds: 45
 nodeSelector: {}
 tolerations: []
 affinity: {}

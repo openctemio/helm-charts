@@ -61,6 +61,12 @@ jobs:
           # the defaults copy in _helpers.tpl matches values.yaml.
           tests/sensor-migration/run.sh
 
+      - name: Attachment storage (render checks)
+        run: |
+          # api.attachments: default RWO volume (Recreate), S3, RWX with
+          # several replicas, and the multi-replica-on-RWO/emptyDir refusals.
+          tests/attachments/run.sh
+
       - name: Organization bootstrap (render checks)
         run: |
           # api.tenantCreationMode, the bootstrap-admin Job (no shell, no

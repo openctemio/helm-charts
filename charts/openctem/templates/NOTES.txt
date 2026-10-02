@@ -154,19 +154,48 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 {{- end }}
 
 5. First login
-{{- if .Values.api.bootstrapTenant.enabled }}
-- A first tenant + owner login was bootstrapped for {{ .Values.api.bootstrapTenant.email }} (see the bootstrap-tenant Job).
+- Organization creation: api.tenantCreationMode={{ .Values.api.tenantCreationMode | default "admin_only" }}
+{{- if eq (toString (.Values.api.tenantCreationMode | default "admin_only")) "self_service" }}
+  (any signed-in user may create organizations; meant for SaaS / trial installs).
 {{- else }}
-- No UI login was bootstrapped. Enable api.bootstrapTenant (first tenant + owner) or run:
-    kubectl exec deploy/{{ include "openctem.apiFullname" . }} -- /app/bootstrap-tenant -email=you@example.com -password=... -team="Your Org" -slug=your-org
+  (only the platform administrator creates organizations: admin console or bootstrap-admin).
 {{- end }}
 {{- if .Values.api.bootstrapAdmin.enabled }}
+{{- $job := printf "%s-bootstrap-admin" (include "openctem.apiFullname" .) }}
 - Platform admins were bootstrapped for {{ .Values.api.bootstrapAdmin.email }}{{ if not .Values.api.bootstrapAdmin.noBackup }} and the break-glass backup {{ .Values.api.bootstrapAdmin.backupEmail }}{{ end }}.
-  Their temporary passwords are printed once in the Job log:
-    kubectl logs job/{{ include "openctem.apiFullname" . }}-bootstrap-admin
-  Sign in on /login, open the admin console (/admin), enroll an authenticator and
-  change the temporary password. Keep the break-glass credentials offline; every
-  use of that account alerts the other admins (log field alert=break_glass_sign_in).
+{{- with .Values.api.bootstrapAdmin.org }}{{ if .name }}
+- The first organization "{{ .name }}" was created; its owner is {{ .ownerEmail }}.
+{{- end }}{{ end }}
+  The temporary passwords are printed ONCE in the Job log{{ if (.Values.api.bootstrapAdmin.org | default dict).name }} (so is the owner's
+  one-time set-password link when SMTP is not configured){{ end }}. The Job is
+  kept until you delete it:
+    kubectl logs -n {{ .Release.Namespace }} job/{{ $job }}
+  Store the credentials (break-glass ones offline), then delete the Job:
+    kubectl delete -n {{ .Release.Namespace }} job/{{ $job }}
+  Admins: sign in on /login, open the admin console (/admin), enroll an
+  authenticator (TOTP) and change the temporary password. Every use of the
+  break-glass account alerts the other admins (log field alert=break_glass_sign_in).
+{{- if (.Values.api.bootstrapAdmin.org | default dict).name }}
+  Organization owner: set a password with the link (emailed when SMTP is
+  configured, valid 24h), sign in on /login, then invite users or configure
+  SSO for the organization.
+{{- else }}
+  Then create the first organization in the admin console (Organizations ->
+  Create, with the owner's email), or with the CLI (existing admins are left
+  unchanged):
+    kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "openctem.apiFullname" . }} -- /app/bootstrap-admin \
+      -email={{ .Values.api.bootstrapAdmin.email }}{{ if not .Values.api.bootstrapAdmin.noBackup }} -backup-email={{ .Values.api.bootstrapAdmin.backupEmail }}{{ else }} -no-backup{{ end }} \
+      -org-name="Your Org" -org-owner-email=owner@example.com
+{{- end }}
+{{- else }}
+- No login was bootstrapped. Either enable api.bootstrapAdmin (with
+  api.bootstrapAdmin.org.* for the first organization) on a fresh install, or run:
+    kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "openctem.apiFullname" . }} -- /app/bootstrap-admin \
+      -email=admin@example.com -backup-email=breakglass@example.com \
+      -org-name="Your Org" -org-owner-email=owner@example.com
+  It prints the admins' temporary passwords (and, without SMTP, the owner's
+  set-password link) once. Admins sign in on /login and enroll TOTP at /admin;
+  the owner sets a password with the link, then invites users / configures SSO.
 {{- end }}
 
 6. Smoke-test this release

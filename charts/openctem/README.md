@@ -38,6 +38,87 @@ Production checklist (the chart enforces / warns on most of these):
 - **Stable secrets** — see "Secrets & GitOps" below (required in production).
 - **NetworkPolicy** — enable `networkPolicy.enabled` on a CNI that enforces it.
 
+## First install: platform admin and first organization
+
+OpenCTEM has no self-registration and, by default, no self-service
+organizations: the **platform administrator** creates organizations, as in
+Tenable Security Center. The administrator is not a member of any
+organization (it cannot see organization data); each organization has its own
+owner, who invites users or configures SSO.
+
+Bootstrap the administrators and the first organization in the install itself:
+
+```yaml
+api:
+  tenantCreationMode: admin_only        # the default
+  bootstrapAdmin:
+    enabled: true
+    email: admin@acme.io                # platform administrator
+    backupEmail: breakglass@acme.io     # break-glass backup administrator
+    org:
+      name: "Acme Security"             # first organization
+      ownerEmail: owner@acme.io         # its owner (not one of the admins)
+```
+
+1. `helm install`. After the migrations, a post-install Job runs
+   `/app/bootstrap-admin`. It creates both administrators, each with a
+   temporary password printed **once** to the Job log, and creates the
+   organization through the normal, audited organization service. The owner
+   gets a one-time set-password link (valid 24h): emailed when SMTP is
+   configured (`SMTP_*` in `api.extraEnv` / `api.extraEnvFrom`; the link base
+   is `SMTP_BASE_URL`, which `gateway.*` sets), otherwise printed in the Job
+   log.
+2. Read the log once and store the credentials (the break-glass ones offline):
+
+   ```bash
+   kubectl logs -n <ns> job/<fullname>-api-bootstrap-admin
+   kubectl delete -n <ns> job/<fullname>-api-bootstrap-admin
+   ```
+
+   `<fullname>` is `<release>-openctem` (or just `<release>` when the release
+   name contains `openctem`); `helm install` prints the exact commands. The
+   Job is **kept** until you delete it (it is not deleted on success and has
+   no `ttlSecondsAfterFinished`), so the one-time credentials cannot vanish
+   before you read them.
+3. The administrators sign in on `/login`, open the admin console (`/admin`),
+   enroll an authenticator (TOTP) and change the temporary password.
+4. The owner sets a password with the link, signs in on `/login`, then invites
+   users or configures SSO for the organization.
+
+Further organizations: admin console → Organizations → Create. The Job fails
+the release on a real error. Re-running the CLI is safe (existing admins are
+left unchanged, an existing organization slug is skipped), e.g. to add the
+first organization to an install that skipped it:
+
+```bash
+kubectl exec -n <ns> deploy/<fullname>-api -- /app/bootstrap-admin \
+  -email=admin@acme.io -backup-email=breakglass@acme.io \
+  -org-name="Acme Security" -org-owner-email=owner@acme.io
+```
+
+**Why the pod log and not a Secret.** Writing the credentials to a Kubernetes
+Secret would need the Job's ServiceAccount (shared with the API pods) to get
+create/patch on Secrets, a namespace-wide write privilege, plus a Kubernetes
+client in the API image. The pod log is already protected by `pods/log` RBAC,
+the passwords are temporary (they must be changed at first sign-in) and the
+owner link expires in 24h.
+
+| Value | Default | |
+|---|---|---|
+| `api.tenantCreationMode` | `admin_only` | `TENANT_CREATION_MODE`. `admin_only`: only the platform administrator creates organizations (admin console or the bootstrap-admin org flags). `self_service`: any signed-in user may create organizations (SaaS / trial opt-in). Any other value fails the render. A `TENANT_CREATION_MODE` in `api.extraEnv` wins. |
+| `api.bootstrapAdmin.enabled` | `false` | Run the post-install bootstrap Job. |
+| `api.bootstrapAdmin.email` / `name` / `role` | — / — / `super_admin` | The platform administrator. |
+| `api.bootstrapAdmin.backupEmail` / `backupName` | — | The break-glass backup administrator (required unless `noBackup: true`). |
+| `api.bootstrapAdmin.noBackup` / `force` | `false` | `-no-backup` (not recommended) / `-force` (delete and re-create an existing admin). |
+| `api.bootstrapAdmin.org.name` / `ownerEmail` | — | The first organization and its owner. Set both or neither (the render fails otherwise). |
+| `api.bootstrapAdmin.org.slug` / `ownerName` | — | Optional. Empty: derived from the name / the email. |
+| `api.bootstrapAdmin.backoffLimit` / `activeDeadlineSeconds` | `0` / `300` | Job retries (0: a failure is reported once) and deadline. |
+
+The Job also gets the API's `api.extraEnv`, `api.extraEnvFrom` and gateway
+environment, so it sends the owner's email with the same SMTP settings as the
+API. It runs the binary without a shell, so values with spaces or quotes are
+passed verbatim.
+
 ## Single-port gateway (one HTTPS entry point)
 
 Chart 0.7.0 can serve the UI **and** the REST API on one hostname and one HTTPS
@@ -239,6 +320,23 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.maxConcurrent`, `sensor.executors.*` | `5`, vulnscan | Platform mode only. |
 | `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. |
 | `sensor.outbox.maxBytes` / `.maxAge` / `.emptyDirSizeLimit` | empty | `SENSOR_OUTBOX_MAX_BYTES` (default `1GiB`, at most half the free space; keep it below the volume), `SENSOR_OUTBOX_MAX_AGE` (default `168h`), and the `emptyDir` size limit. |
+
+## Upgrading to 0.8.0 (admin-only organizations, bootstrap-tenant removed)
+
+- **Behaviour change:** the API now gets `TENANT_CREATION_MODE=admin_only`
+  (`api.tenantCreationMode`). Signed-in users can no longer create
+  organizations; the platform administrator does, in the admin console.
+  Existing organizations and memberships are unaffected. To keep the old
+  behaviour set `api.tenantCreationMode: self_service`.
+- **`api.bootstrapTenant` is removed**, with its Job and its
+  `<fullname>-api-bootstrap-tenant` Secret (the `bootstrap-tenant` CLI is no
+  longer in the API image). The render fails while
+  `api.bootstrapTenant.enabled` is `true`; use `api.bootstrapAdmin.org.*`
+  instead (see "First install" above) and delete the `api.bootstrapTenant`
+  block from your values.
+- The bootstrap-admin Job no longer swallows failures, defaults to
+  `backoffLimit: 0`, and is kept after success until you delete it. It is a
+  `post-install` hook, so upgrades never re-run it.
 
 ## Upgrading to 0.5.0 (OpenCTEM v0.9.0: agents are now sensors)
 

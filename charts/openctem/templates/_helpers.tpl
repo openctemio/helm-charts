@@ -128,8 +128,7 @@ Create bundled sensor workload name
 {{- end }}
 
 {{/*
-Resolve the bundled sensor credential Secret name and key (the API key in
-daemon mode, the bootstrap token in platform mode).
+Resolve the bundled sensor credential Secret name and key (the API key).
 Call with: (dict "context" . "sensor" $sensor), $sensor = the resolved
 "openctem.sensor" values.
 */}}
@@ -143,8 +142,6 @@ Call with: (dict "context" . "sensor" $sensor), $sensor = the resolved
 {{- define "openctem.sensorSecretKey" -}}
 {{- if .sensor.existingSecretKey }}
 {{- .sensor.existingSecretKey }}
-{{- else if eq .sensor.mode "platform" }}
-{{- "bootstrap-token" }}
 {{- else }}
 {{- "api-key" }}
 {{- end }}
@@ -164,18 +161,33 @@ image:
   repository: ghcr.io/openctemio/sensor
   tag: v0.5.0
   pullPolicy: IfNotPresent
-name: ""
 region: default
 apiUrl: ""
 apiKey: ""
-bootstrapToken: ""
 existingSecret: ""
 existingSecretKey: ""
 tools: nuclei
-keyAutoRenew: false
+keyAutoRenew: ""
 verbose: false
 allowPrivateTargets: ""
 scanRoots: ""
+state:
+  persistence:
+    enabled: true
+    existingClaim: ""
+    size: 128Mi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+content:
+  persistence:
+    enabled: true
+    existingClaim: ""
+    size: 5Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  emptyDirSizeLimit: ""
 outbox:
   persistence:
     enabled: false
@@ -188,13 +200,6 @@ outbox:
   emptyDirSizeLimit: ""
   maxBytes: ""
   maxAge: ""
-maxConcurrent: 5
-executors:
-  recon: false
-  vulnscan: true
-  secrets: false
-  assets: false
-  pipeline: false
 extraEnv: []
 podAnnotations: {}
 podLabels: {}
@@ -238,9 +243,11 @@ Resolve the effective sensor values, as YAML (use with fromYaml):
       its tag;
     - agent.allowPrivateTargets true/false -> "1"/"" (the sensor only
       recognises "1");
-    - chart <= 0.4.x always ran `-platform` with a bootstrap token, so an
-      agent: block selects mode "platform" unless sensor.mode or an API key
-      (sensor.apiKey / agent.apiKey) says otherwise;
+    - chart <= 0.4.x always ran `-platform` with a bootstrap token, a mode
+      removed in chart 0.9.0 (no OpenCTEM API serves it): an agent: block
+      fails the render unless an API key (sensor.apiKey / agent.apiKey) or
+      sensor.existingSecret (a Secret holding the API key) says what to run
+      instead;
     - agent.X and sensor.X both set to different values -> the render fails,
       naming both keys but no values (the sensor binary applies the same rule
       to its AGENT_ and SENSOR_ variables).
@@ -282,7 +289,7 @@ Resolve the effective sensor values, as YAML (use with fromYaml):
 {{- end -}}
 {{- range $k, $v := $legacy -}}
 {{- $d := index $defaults $k -}}
-{{- if and (has $k (list "image" "executors")) (kindIs "map" $v) -}}
+{{- if and (eq $k "image") (kindIs "map" $v) -}}
 {{- $target := index $sensor $k -}}
 {{- if not (kindIs "map" $target) -}}
 {{- $target = dict -}}
@@ -298,14 +305,24 @@ Resolve the effective sensor values, as YAML (use with fromYaml):
 {{- if $state.conflicts -}}
 {{- fail (printf "\n\nThe values set both the legacy `agent:` block and `sensor:`, with different values:\n  - %s\n`agent:` was renamed to `sensor:` in chart 0.5.0 (OpenCTEM v0.9.0). Move these settings into `sensor:` and delete `agent:` (or make both agree).\n" (join "\n  - " $state.conflicts)) -}}
 {{- end -}}
-{{- if and $sensor.enabled (not (hasKey $legacy "mode")) (eq (toString $sensor.mode) (toString $defaults.mode)) (not $sensor.apiKey) -}}
-{{- $_ := set $sensor "mode" "platform" -}}
-{{- $_ := set $state "notes" (append $state.notes "sensor.mode=platform (what chart <= 0.4.x ran: -platform with the bootstrap token). The OpenCTEM API does not serve /api/v1/platform/register, so this mode cannot register. Switch to sensor.mode=daemon with the API key of a sensor created under Settings → Sensors (sensor.apiKey or sensor.existingSecret).") -}}
+{{- $ownSecret := (.Values.sensor | default dict).existingSecret -}}
+{{- if and $sensor.enabled (not $sensor.apiKey) (not $ownSecret) -}}
+{{- fail "\n\nThe `agent:` block (chart <= 0.4.x) ran the sensor with -platform and a bootstrap token. That mode was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered.\nCreate a sensor under Settings → Sensors and set sensor.apiKey, or sensor.existingSecret with its API key (key `api-key`, or sensor.existingSecretKey). sensor.existingSecret may name the Secret agent.existingSecret used, once it holds the API key.\n" -}}
 {{- end -}}
 {{- end -}}
-{{- if not (has (toString $sensor.mode) (list "daemon" "platform")) -}}
-{{- fail (printf "\n\nsensor.mode=%q is not supported. Use \"daemon\" (API key) or \"platform\" (bootstrap token).\n" (toString $sensor.mode)) -}}
+{{- if eq (toString $sensor.mode) "platform" -}}
+{{- fail "\n\nsensor.mode=platform was removed in chart 0.9.0: it ran -platform self-registration with a bootstrap token, and no OpenCTEM API serves /api/v1/platform/register, so it never registered.\nUse sensor.mode=daemon (the default) with the API key of a sensor created under Settings → Sensors (sensor.apiKey or sensor.existingSecret).\n" -}}
 {{- end -}}
+{{- if ne (toString $sensor.mode) "daemon" -}}
+{{- fail (printf "\n\nsensor.mode=%q is not supported. Use \"daemon\" (the API key of a sensor created under Settings → Sensors).\n" (toString $sensor.mode)) -}}
+{{- end -}}
+{{- $kar := toString $sensor.keyAutoRenew -}}
+{{- if has $kar (list "" "<nil>" "auto") -}}
+{{- $kar = ternary "true" "false" (and (hasKey $sensor "state") (($sensor.state | default dict).persistence | default dict).enabled) -}}
+{{- else if not (has $kar (list "true" "false")) -}}
+{{- fail (printf "\n\nsensor.keyAutoRenew=%q is not recognised. Use true, false, or leave it empty (on exactly when sensor.state.persistence.enabled).\n" $kar) -}}
+{{- end -}}
+{{- $_ := set $sensor "keyAutoRenew" $kar -}}
 {{- $apt := toString ($sensor.allowPrivateTargets | default "") -}}
 {{- if eq $apt "false" -}}
 {{- $apt = "" -}}

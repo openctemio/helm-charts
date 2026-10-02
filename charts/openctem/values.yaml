@@ -811,15 +811,15 @@ sensor:
   image:
     repository: ghcr.io/openctemio/sensor
     # -- Sensor image tag. The sensor is versioned separately from the
-    # platform, so this does NOT follow the chart appVersion. Images are
-    # published per variant as <version>-<variant> (there is no plain
-    # "v0.3.0" tag): "-default" carries semgrep, betterleaks, trivy and
-    # nuclei; the single-tool variants are -nuclei, -betterleaks, -semgrep
-    # and -trivy, and -ci is the CI image. latest-<variant> tags also exist;
-    # pin a version for reproducible installs. Betterleaks replaced gitleaks
-    # as the secret scanner after v0.3.0: v0.3.0 images carry gitleaks (and
-    # a semgrep that fails to start), so move to the first release after it.
-    tag: "v0.3.0-default"
+    # platform, so this does NOT follow the chart appVersion. The plain tag
+    # (v0.4.2, latest; from v0.4.2) is the default image: semgrep,
+    # betterleaks, trivy and nuclei, the same as <version>-default. Other
+    # variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep,
+    # -trivy, and -ci for CI. Pin a version for reproducible installs.
+    # v0.4.x adds the durable outbox (results survive a platform outage) and
+    # protocol v2 results; v0.3.0 images carry gitleaks and a semgrep that
+    # fails to start, so do not go back to them.
+    tag: "v0.4.2"
     pullPolicy: IfNotPresent
   # -- Display name the sensor registers with (platform mode: SENSOR_NAME).
   #    Defaults to the workload name. In daemon mode the sensor's name is the

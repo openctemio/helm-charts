@@ -22,8 +22,8 @@ api:
   replicaCount: 2
 
   image:
-    repository: openctemio/api
-    tag: ""                     # defaults to chart appVersion (v0.7.0)
+    repository: ghcr.io/openctemio/openctem-api
+    tag: ""                     # defaults to chart appVersion
 
   auth:
     provider: "local"           # built-in email/password (product default)
@@ -122,7 +122,7 @@ ui:
   replicaCount: 2
 
   image:
-    repository: openctemio/ui
+    repository: ghcr.io/openctemio/openctem-web
     tag: ""
 
   config:

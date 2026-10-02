@@ -61,7 +61,7 @@ spec:
               {{- end }}
             - name: NODE_ENV
               value: {{ .Values.ui.config.nodeEnv | quote }}
-            # -- The UI reads CSRF_SECRET (ui/src/lib/env.ts), not CSRF_TOKEN.
+            # -- The UI reads CSRF_SECRET (web/src/lib/env.ts), not CSRF_TOKEN.
             - name: CSRF_SECRET
               valueFrom:
                 secretKeyRef:

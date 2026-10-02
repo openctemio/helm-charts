@@ -233,12 +233,21 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 
 10. Bundled sensor
 - Deployment `{{ include "openctem.sensorFullname" . }}`, image {{ $sensor.image.repository }}:{{ $sensor.image.tag }}
-{{- if eq $sensor.mode "platform" }}
-- Mode platform: self-registers with the bootstrap token in Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}`.
-  The OpenCTEM API does not serve /api/v1/platform/register; with it, use sensor.mode=daemon.
-{{- else }}
-- Mode daemon: authenticates with the API key in Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}` and runs the
+- Authenticates with the API key in Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}` and runs the
   scans the platform dispatches, with: {{ $sensor.tools | default "(no -tools)" }}. It shows under Settings → Sensors.
+{{- $statePersist := ((($sensor.state | default dict).persistence) | default dict) }}
+{{- if $statePersist.enabled }}
+- State (the API key the sensor renews): PersistentVolumeClaim {{ $statePersist.existingClaim | default (printf "%s-state" (include "openctem.sensorFullname" .)) }} at /var/lib/openctem/state.
+  Key auto-renewal: {{ ternary "ON" "off" (eq $sensor.keyAutoRenew "true") }}. A renewal retires the key in the Secret: keep this volume (back it up like a credential).
+{{- else }}
+- State is an emptyDir, so key auto-renewal is {{ ternary "ON — WARNING: a renewed key is lost with the pod, which then starts with the retired key in the Secret" "off" (eq $sensor.keyAutoRenew "true") }}.
+  Set sensor.state.persistence.enabled=true to let the sensor renew its key.
+{{- end }}
+{{- $contentPersist := ((($sensor.content | default dict).persistence) | default dict) }}
+{{- if $contentPersist.enabled }}
+- Scanner content cache: PersistentVolumeClaim {{ $contentPersist.existingClaim | default (printf "%s-content" (include "openctem.sensorFullname" .)) }} at /var/lib/openctem/content.
+{{- else }}
+- Scanner content cache is an emptyDir: a new pod downloads the trivy DB, nuclei templates and semgrep rules again.
 {{- end }}
 {{- if (($sensor.outbox | default dict).persistence | default dict).enabled }}
 - Outbox: PersistentVolumeClaim {{ (($sensor.outbox).persistence).existingClaim | default (printf "%s-outbox" (include "openctem.sensorFullname" .)) }} at /var/lib/openctem/outbox.

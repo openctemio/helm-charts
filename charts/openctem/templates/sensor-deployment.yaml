@@ -2,8 +2,15 @@
 {{- if $sensor.enabled }}
 {{- $outbox := $sensor.outbox | default dict -}}
 {{- $persist := ($outbox.persistence | default dict) -}}
+{{- $content := $sensor.content | default dict -}}
+{{- $contentPersist := ($content.persistence | default dict) -}}
+{{- $statePersist := (($sensor.state | default dict).persistence | default dict) -}}
+{{- $anyPVC := or $persist.enabled $statePersist.enabled $contentPersist.enabled -}}
 {{- if and $persist.enabled (gt (int $sensor.replicaCount) 1) }}
 {{- fail "\n\nsensor.outbox.persistence.enabled needs sensor.replicaCount=1: an outbox belongs to one sensor process (the sensor locks it).\n" }}
+{{- end }}
+{{- if and (or $statePersist.enabled $contentPersist.enabled) (gt (int $sensor.replicaCount) 1) }}
+{{- fail "\n\nsensor.state.persistence and sensor.content.persistence need sensor.replicaCount=1: each is a ReadWriteOnce volume of one sensor process, and the state holds one sensor's API key (replicas sharing a key are flagged as a cloned identity). Run one release per sensor, or turn both off for a multi-replica Deployment (then key auto-renewal stays off).\n" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -12,13 +19,12 @@ metadata:
   labels:
     {{- include "openctem.sensorLabels" . | nindent 4 }}
 spec:
-  # A daemon-mode sensor is one sensor identity (one API key) and a
-  # platform-mode sensor registers once and holds a lease; run a single
-  # replica unless you deliberately want multiple co-located workers.
+  # A sensor is one identity (one API key): run a single replica. Replicas
+  # sharing a key are flagged by the platform as a cloned identity.
   replicas: {{ $sensor.replicaCount }}
-  {{- if $persist.enabled }}
-  # The outbox volume is ReadWriteOnce and locked by one sensor process: the
-  # old pod must stop before the new one starts.
+  {{- if $anyPVC }}
+  # The outbox, state and content volumes are ReadWriteOnce and belong to one
+  # sensor process: the old pod must stop before the new one starts.
   strategy:
     type: Recreate
   {{- end }}
@@ -46,7 +52,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- $podSC := deepCopy ($sensor.podSecurityContext | default dict) }}
-      {{- if and $persist.enabled $persist.fsGroup (not (hasKey $podSC "fsGroup")) }}
+      {{- if and $anyPVC $persist.fsGroup (not (hasKey $podSC "fsGroup")) }}
       {{- $_ := set $podSC "fsGroup" (int $persist.fsGroup) }}
       {{- end }}
       {{- with $podSC }}
@@ -65,15 +71,6 @@ spec:
           imagePullPolicy: {{ $sensor.image.pullPolicy }}
           # The image entrypoint is /usr/local/bin/openctemio-sensor.
           args:
-            {{- if eq $sensor.mode "platform" }}
-            - "-platform"
-            - "-enable-recon={{ $sensor.executors.recon }}"
-            - "-enable-vulnscan={{ $sensor.executors.vulnscan }}"
-            - "-enable-secrets={{ $sensor.executors.secrets }}"
-            - "-enable-assets={{ $sensor.executors.assets }}"
-            - "-enable-pipeline={{ $sensor.executors.pipeline }}"
-            - "-max-concurrent={{ $sensor.maxConcurrent }}"
-            {{- else }}
             # Server-controlled daemon: scans only what the platform
             # dispatches, with these scanners.
             - "-daemon"
@@ -81,34 +78,35 @@ spec:
             {{- with $sensor.tools }}
             - "-tools={{ . }}"
             {{- end }}
-            {{- end }}
+            # The renewed API key lives in the state volume. Explicit, so a
+            # sensor release from before the state directory keeps it there
+            # too, instead of in the pod's home directory.
+            - "-credentials=/var/lib/openctem/state/sensor-credentials.json"
             {{- if $sensor.verbose }}
             - "-verbose"
             {{- end }}
           env:
-            # Co-located: talk to the in-cluster API service. API_URL, API_KEY,
-            # BOOTSTRAP_TOKEN and REGION were not renamed.
+            # Co-located: talk to the in-cluster API service. API_URL, API_KEY
+            # and REGION were not renamed.
             - name: API_URL
               value: {{ $sensor.apiUrl | default (printf "http://%s:%v" (include "openctem.apiFullname" .) .Values.api.service.port) | quote }}
             - name: REGION
               value: {{ $sensor.region | quote }}
             # The credential comes from a Secret, never from args (which are
             # visible via `kubectl describe pod`).
-            {{- if eq $sensor.mode "platform" }}
-            - name: SENSOR_NAME
-              value: {{ $sensor.name | default (include "openctem.sensorFullname" .) | quote }}
-            - name: BOOTSTRAP_TOKEN
-            {{- else }}
             - name: API_KEY
-            {{- end }}
               valueFrom:
                 secretKeyRef:
                   name: {{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}
                   key: {{ include "openctem.sensorSecretKey" (dict "sensor" $sensor) }}
-            {{- if $sensor.keyAutoRenew }}
+            # Always explicit: the sensor's own check counts any volume as
+            # persistent, an emptyDir too, which is lost with the pod.
             - name: PLATFORM_KEY_AUTORENEW
-              value: "true"
-            {{- end }}
+              value: {{ $sensor.keyAutoRenew | quote }}
+            - name: SENSOR_STATE_DIR
+              value: /var/lib/openctem/state
+            - name: SENSOR_CONTENT_DIR
+              value: /var/lib/openctem/content
             {{- if eq $sensor.allowPrivateTargets "1" }}
             # Explicit opt-in: allow RFC1918 / ULA scan targets. Unset (the
             # default) keeps them blocked: co-located sensors are for
@@ -138,6 +136,10 @@ spec:
           volumeMounts:
             - name: outbox
               mountPath: /var/lib/openctem/outbox
+            - name: state
+              mountPath: /var/lib/openctem/state
+            - name: content
+              mountPath: /var/lib/openctem/content
           {{- with $sensor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -155,6 +157,26 @@ spec:
           {{- else }}
           # Survives a container restart, not a pod deletion: see
           # sensor.outbox.persistence.
+          emptyDir: {}
+          {{- end }}
+        - name: state
+          {{- if $statePersist.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $statePersist.existingClaim | default (printf "%s-state" (include "openctem.sensorFullname" .)) }}
+          {{- else }}
+          # Lost with the pod: key auto-renewal stays off (sensor.keyAutoRenew).
+          emptyDir: {}
+          {{- end }}
+        - name: content
+          {{- if $contentPersist.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $contentPersist.existingClaim | default (printf "%s-content" (include "openctem.sensorFullname" .)) }}
+          {{- else if $content.emptyDirSizeLimit }}
+          # A cache: downloaded again when the pod is replaced.
+          emptyDir:
+            sizeLimit: {{ $content.emptyDirSizeLimit }}
+          {{- else }}
+          # A cache: downloaded again when the pod is replaced.
           emptyDir: {}
           {{- end }}
       {{- with $sensor.nodeSelector }}

@@ -6,6 +6,36 @@ bundled PostgreSQL/Redis for dev/eval. This chart is **secure-by-default**:
 (DB TLS, Redis TLS + strong password, ≥64-char JWT secret, encryption key,
 secure cookies).
 
+## Versions
+
+`appVersion` is the default tag of the API, web console and migrations images,
+and must be a released [OpenCTEM](https://github.com/openctemio/openctem/releases)
+tag. The release workflow of `openctemio/openctem` opens the chart PR that
+bumps it after each release (OpenCTEM RFC-037). CI warns when it names a tag
+that does not exist (`tests/versions/check-published.sh`).
+
+| Chart | appVersion (OpenCTEM) | Default images |
+|---|---|---|
+| 0.4.1 | v0.8.0 | `openctemio/api`, `openctemio/ui`, `openctemio/migrations` (Docker Hub, never published) |
+| 0.5.0 – 0.10.x | v0.9.0 | `ghcr.io/openctemio/openctem-api`, `ghcr.io/openctemio/openctem-web`, `ghcr.io/openctemio/migrations` |
+
+> **OpenCTEM v0.9.0 is not released yet**, so no published chart installs
+> with its default image values today. Charts 0.5.0 to 0.10.x were published
+> ahead of v0.9.0 and pull `openctem-api:v0.9.0`, which does not exist yet.
+> Chart 0.4.1 (v0.8.0) names Docker Hub repositories that were never
+> published. Until v0.9.0 is tagged, deploy v0.8.0 with chart 0.4.1 and the
+> GHCR images:
+>
+> ```bash
+> helm install openctem openctem/openctem --version 0.4.1 \
+>   --set api.image.repository=ghcr.io/openctemio/api \
+>   --set ui.image.repository=ghcr.io/openctemio/ui \
+>   --set api.migrations.image.repository=ghcr.io/openctemio/migrations
+> ```
+>
+> Do not point chart 0.5.0+ at v0.8.0 images: those charts rename the agent
+> to the sensor, which needs the v0.9.0 API.
+
 ## Quick start (dev / eval)
 
 ```bash

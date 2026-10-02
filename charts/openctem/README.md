@@ -324,6 +324,25 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. Any sensor PVC (outbox, state, content) requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`. |
 | `sensor.outbox.maxBytes` / `.maxAge` / `.emptyDirSizeLimit` | empty | `SENSOR_OUTBOX_MAX_BYTES` (default `1GiB`, at most half the free space; keep it below the volume), `SENSOR_OUTBOX_MAX_AGE` (default `168h`), and the `emptyDir` size limit. |
 
+## Upgrading to 0.9.3 (image names from the openctem monorepo)
+
+The API and the web console now ship from one repository,
+[openctemio/openctem](https://github.com/openctemio/openctem) (`api/` and
+`web/`), and one `vX.Y.Z` tag publishes both. The default images follow the new
+names:
+
+| Value | Old default | New default |
+|---|---|---|
+| `api.image.repository` | `ghcr.io/openctemio/api` | `ghcr.io/openctemio/openctem-api` |
+| `ui.image.repository` | `ghcr.io/openctemio/ui` | `ghcr.io/openctemio/openctem-web` |
+
+`values-production.yaml` named the bare Docker Hub repositories `openctemio/api`
+and `openctemio/ui`, which were never published; it now uses the GHCR names
+too. The new names are published from OpenCTEM v0.9.0. The old GHCR names keep
+receiving identical copies for a transition window, and they are the ones to
+use when you pin `api.image.tag` / `ui.image.tag` to v0.8.0 or older.
+`api.migrations.image` (`ghcr.io/openctemio/migrations`) is unchanged.
+
 ## Upgrading to 0.9.0 (sensor state and content volumes, platform mode removed)
 
 - **The bundled sensor gets two PersistentVolumeClaims by default**:

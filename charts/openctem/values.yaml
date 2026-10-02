@@ -59,7 +59,10 @@ api:
     tlsSkipVerify: false
 
   image:
-    repository: ghcr.io/openctemio/api
+    # -- API image. Published by the openctemio/openctem monorepo from v0.9.0;
+    # releases up to v0.8.0 exist only as ghcr.io/openctemio/api, which keeps
+    # receiving identical copies for a transition window.
+    repository: ghcr.io/openctemio/openctem-api
     pullPolicy: IfNotPresent
     tag: ""
 
@@ -337,7 +340,9 @@ ui:
   replicaCount: 1
 
   image:
-    repository: ghcr.io/openctemio/ui
+    # -- Web console image (web/ in openctemio/openctem). Releases up to v0.8.0
+    # exist only as ghcr.io/openctemio/ui.
+    repository: ghcr.io/openctemio/openctem-web
     pullPolicy: IfNotPresent
     tag: ""
 
@@ -352,7 +357,7 @@ ui:
     # -- Create UI secret when existingSecret is not set.
     createSecret: true
     # -- Secret data key holding the CSRF secret. The UI reads it as the
-    # CSRF_SECRET env var (ui/src/lib/env.ts).
+    # CSRF_SECRET env var (web/src/lib/env.ts in openctemio/openctem).
     csrfTokenKey: CSRF_SECRET
     # -- Leave empty to auto-generate like `openssl rand -base64 32`.
     csrfToken: ""

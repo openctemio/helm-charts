@@ -760,3 +760,31 @@ Build checksum source for Redis-related secret refs.
 {{- end -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+TENANT_CREATION_MODE from api.tenantCreationMode (admin_only | self_service).
+The value is validated even when api.extraEnv sets TENANT_CREATION_MODE (the
+extraEnv entry then wins and this one is not rendered, so there is no
+duplicate env name).
+*/}}
+{{- define "openctem.apiTenantCreationModeEnv" -}}
+{{- $mode := toString (.Values.api.tenantCreationMode | default "admin_only") -}}
+{{- if not (has $mode (list "admin_only" "self_service")) -}}
+{{- fail (printf "\n\napi.tenantCreationMode=%q is not supported. Use \"admin_only\" (only the platform administrator creates organizations, the default) or \"self_service\" (any signed-in user may create organizations).\n" $mode) -}}
+{{- end -}}
+{{- $have := include "openctem.apiExtraEnvNames" . | fromJsonArray -}}
+{{- if not (has "TENANT_CREATION_MODE" $have) -}}
+{{- toYaml (list (dict "name" "TENANT_CREATION_MODE" "value" $mode)) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+api.bootstrapTenant (the /app/bootstrap-tenant Job) was removed in chart 0.8.0
+and the CLI is no longer in the API image. Fail loudly instead of silently
+skipping the first organization an existing values file still asks for.
+*/}}
+{{- define "openctem.validateRemovedValues" -}}
+{{- if dig "bootstrapTenant" "enabled" false (.Values.api | default dict) -}}
+{{- fail "\n\napi.bootstrapTenant was removed in chart 0.8.0 (the bootstrap-tenant CLI is no longer in the API image). Create the first organization with the platform-admin bootstrap instead:\n  api.bootstrapAdmin.enabled=true, api.bootstrapAdmin.email, api.bootstrapAdmin.backupEmail,\n  api.bootstrapAdmin.org.name and api.bootstrapAdmin.org.ownerEmail (org.slug / org.ownerName optional).\nThe owner gets a one-time set-password link (emailed with SMTP, otherwise in the Job log). Then remove api.bootstrapTenant from your values.\n" -}}
+{{- end -}}
+{{- end }}

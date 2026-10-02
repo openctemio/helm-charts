@@ -61,6 +61,13 @@ jobs:
           # the defaults copy in _helpers.tpl matches values.yaml.
           tests/sensor-migration/run.sh
 
+      - name: Organization bootstrap (render checks)
+        run: |
+          # api.tenantCreationMode, the bootstrap-admin Job (no shell, no
+          # failure swallowing, kept for its one-time credentials, org flags),
+          # and the removed api.bootstrapTenant failing with a pointer.
+          tests/bootstrap/run.sh
+
       - name: Single-port gateway (render checks)
         run: |
           # gateway.mode ingress | httpRoute | caddy: routes, refusals, the

@@ -263,6 +263,43 @@ never satisfy the production Redis boot gate.
 Subchart versions are **pinned** (Postgres 18.5.6, Redis 25.3.2) for
 reproducible builds; bump deliberately and re-run `helm dependency update`.
 
+## Attachment storage
+
+Uploaded attachments and finding evidence (`api.attachments`) live either on a
+volume or in an S3-compatible bucket. Before chart 0.10.0 they were written to
+the API pod's own filesystem: lost on every restart or upgrade, and split
+across pods when more than one API replica ran.
+
+| Setup | Values | Replicas |
+|---|---|---|
+| Volume, ReadWriteOnce (default) | `api.attachments.storage=local` (10Gi PVC at `/app/data`) | 1 (the Deployment uses `Recreate`) |
+| Volume, ReadWriteMany | `api.attachments.persistence.accessModes={ReadWriteMany}` + an RWX `storageClass` (NFS, CephFS, EFS, Azure Files, ...) | any |
+| S3 / MinIO | `api.attachments.storage=s3`, `s3.bucket`, `s3.existingSecret` (keys `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY`), `s3.endpoint` for MinIO | any |
+| No persistence | `api.attachments.persistence.enabled=false` (emptyDir) | 1, files lost with the pod |
+
+Rendering **fails** when the API can run more than one pod (`api.replicaCount > 1`,
+or `api.autoscaling.enabled` with `maxReplicas > 1`) and the storage is a
+ReadWriteOnce volume or an emptyDir: only one pod could mount it, or each pod
+would see different files. With `existingClaim`, list `ReadWriteMany` in
+`accessModes` to confirm the claim is RWX.
+
+```bash
+kubectl -n openctem create secret generic openctem-attachments-s3 \
+  --from-literal=STORAGE_ACCESS_KEY=... --from-literal=STORAGE_SECRET_KEY=...
+helm upgrade --install openctem openctemio/openctem -n openctem \
+  --set api.attachments.storage=s3 \
+  --set api.attachments.s3.bucket=openctem-attachments \
+  --set api.attachments.s3.existingSecret=openctem-attachments-s3
+# MinIO: --set api.attachments.s3.provider=minio --set api.attachments.s3.endpoint=http://minio.storage.svc:9000
+```
+
+S3 storage needs an API release with server-wide S3 support
+(`STORAGE_PROVIDER=s3`, openctemio/openctem#781); older API images ignore it
+and keep files on the pod's disk. The created PVC carries
+`helm.sh/resource-policy: keep`, so `helm uninstall` leaves the files; delete
+the claim by hand to remove them. Switching storage later does not move
+existing files. Back the volume or bucket up together with the database.
+
 ## Rollback & down-migration
 
 `helm rollback` reverts Kubernetes manifests **only** — it does **not**
@@ -323,6 +360,20 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.content.persistence.enabled` | `true` | Scanner content cache at `/var/lib/openctem/content` (`SENSOR_CONTENT_DIR`: trivy DB, nuclei templates, semgrep rules), so a new pod does not download it again. A PersistentVolumeClaim `<release>-openctem-sensor-content` (`size` `5Gi`) or `existingClaim`. Disposable, and kept apart from the state. `false`: an `emptyDir` (`sensor.content.emptyDirSizeLimit`). |
 | `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. Any sensor PVC (outbox, state, content) requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`. |
 | `sensor.outbox.maxBytes` / `.maxAge` / `.emptyDirSizeLimit` | empty | `SENSOR_OUTBOX_MAX_BYTES` (default `1GiB`, at most half the free space; keep it below the volume), `SENSOR_OUTBOX_MAX_AGE` (default `168h`), and the `emptyDir` size limit. |
+
+## Upgrading to 0.10.0 (attachments on a volume or S3)
+
+The API now keeps attachments on a 10Gi ReadWriteOnce PVC at `/app/data` by
+default (see [Attachment storage](#attachment-storage)); the cluster needs a
+default StorageClass, or set `api.attachments.persistence.storageClass`. With a
+ReadWriteOnce volume the API Deployment switches to the `Recreate` strategy
+(a short gap during upgrades) unless `api.deploymentStrategy` is set.
+
+**Several API replicas** (`api.replicaCount > 1` or autoscaling, as in
+`values-production.yaml`) no longer render on that default: choose
+`api.attachments.storage=s3` or a ReadWriteMany volume. Files written to the
+pod's filesystem by earlier chart versions are not migrated (they were lost on
+every pod restart anyway).
 
 ## Upgrading to 0.9.3 (image names from the openctem monorepo)
 

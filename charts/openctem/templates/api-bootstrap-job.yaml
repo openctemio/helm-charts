@@ -1,20 +1,44 @@
 {{/*
-Bootstrap Jobs (BL-5) — give a fresh install a working login.
+Bootstrap Job: give a fresh install its first logins.
 
-Both run as a post-install Helm hook AFTER the migration Job (hook-weight 5 >
-migrations -5) and are idempotent: the underlying CLIs refuse to clobber an
-existing record, and the sh wrapper swallows that "already exists" exit so a
-re-run never fails the release.
+api.bootstrapAdmin -> /app/bootstrap-admin (shipped in the API image):
+- creates the first PLATFORM admin and a break-glass backup super admin
+  (RFC-022), each with a sign-in account whose temporary password is printed
+  once to the Job log. Admins have no API keys: they sign in on /login and open
+  the console (/admin) with TOTP.
+- optionally (api.bootstrapAdmin.org.*) creates the first ORGANIZATION through
+  the normal, audited organization service. Its owner gets a one-time
+  set-password link: emailed when SMTP is configured, otherwise printed once
+  to the Job log.
 
-- api.bootstrapAdmin  -> /app/bootstrap-admin : creates the first PLATFORM
-  admin and a break-glass backup super admin (RFC-022), each with a sign-in
-  account whose temporary password is printed once to the Job log. Admins have
-  no API keys; they sign in on /login and open the console with TOTP.
-- api.bootstrapTenant -> /app/bootstrap-tenant : creates the first TENANT and an
-  OWNER user (email + password) — this is the login the UI needs on day one.
+It runs as a post-install hook AFTER the migration Job (hook-weight 5 >
+migrations -5). The CLI is idempotent (existing admins are left unchanged, an
+existing organization slug is skipped), so a non-zero exit is a real failure:
+it is NOT swallowed, and fails the hook and the release. backoffLimit defaults
+to 0 so a failure is reported once instead of being retried.
 
-Both binaries ship inside the API image (/app), so they reuse api.image.
+The completed Job is KEPT (hook-delete-policy before-hook-creation only, no
+ttlSecondsAfterFinished) so the one-time passwords/link in its log are not lost
+before the operator reads them. Operators read the log once with
+`kubectl logs job/<fullname>-api-bootstrap-admin`, store the credentials, then
+`kubectl delete job/<fullname>-api-bootstrap-admin`.
+
+Why the pod log and not a Kubernetes Secret: writing the credentials to a
+Secret would need the Job's ServiceAccount (shared with the API pods) to get
+create/patch on Secrets, a namespace-wide write privilege, plus a Kubernetes
+client in the API image. The pod log is already protected by `pods/log` RBAC,
+the passwords are temporary (they must be changed at first sign-in) and the
+owner link expires in 24h.
+
+No shell: the container runs the binary directly with an args list, so values
+with spaces or quotes (e.g. an organization name) are passed verbatim and can
+never be interpreted by a shell. Each "$" is doubled so Kubernetes' own $(VAR)
+expansion in args leaves the value unchanged.
+
+api.bootstrapTenant (/app/bootstrap-tenant) was removed; see
+openctem.validateRemovedValues.
 */}}
+{{- include "openctem.validateRemovedValues" . }}
 {{- define "openctem.bootstrapDbEnv" -}}
 - name: DB_HOST
   value: {{ include "openctem.databaseHost" . | quote }}
@@ -41,6 +65,33 @@ Both binaries ship inside the API image (/app), so they reuse api.image.
   value: {{ include "openctem.databaseSslMode" . | quote }}
 {{- end }}
 {{- if .Values.api.bootstrapAdmin.enabled }}
+{{- $ba := .Values.api.bootstrapAdmin }}
+{{- $org := $ba.org | default dict }}
+{{- if and $org.name (not $org.ownerEmail) }}
+{{- fail "\n\napi.bootstrapAdmin.org.name is set but api.bootstrapAdmin.org.ownerEmail is not. Set both to create the first organization, or neither.\n" }}
+{{- end }}
+{{- if and $org.ownerEmail (not $org.name) }}
+{{- fail "\n\napi.bootstrapAdmin.org.ownerEmail is set but api.bootstrapAdmin.org.name is not. Set both to create the first organization, or neither.\n" }}
+{{- end }}
+{{- if and (or $org.slug $org.ownerName) (not $org.name) }}
+{{- fail "\n\napi.bootstrapAdmin.org.slug / org.ownerName need api.bootstrapAdmin.org.name and api.bootstrapAdmin.org.ownerEmail.\n" }}
+{{- end }}
+{{- $args := list (printf "-email=%s" (required "api.bootstrapAdmin.email is required when api.bootstrapAdmin.enabled=true" $ba.email)) }}
+{{- with $ba.name }}{{ $args = append $args (printf "-name=%s" .) }}{{ end }}
+{{- $args = append $args (printf "-role=%s" ($ba.role | default "super_admin")) }}
+{{- if $ba.noBackup }}
+{{- $args = append $args "-no-backup" }}
+{{- else }}
+{{- $args = append $args (printf "-backup-email=%s" (required "api.bootstrapAdmin.backupEmail is required (a break-glass backup admin), or set api.bootstrapAdmin.noBackup=true" $ba.backupEmail)) }}
+{{- with $ba.backupName }}{{ $args = append $args (printf "-backup-name=%s" .) }}{{ end }}
+{{- end }}
+{{- if $ba.force }}{{ $args = append $args "-force" }}{{ end }}
+{{- if $org.name }}
+{{- $args = append $args (printf "-org-name=%s" $org.name) }}
+{{- $args = append $args (printf "-org-owner-email=%s" $org.ownerEmail) }}
+{{- with $org.slug }}{{ $args = append $args (printf "-org-slug=%s" .) }}{{ end }}
+{{- with $org.ownerName }}{{ $args = append $args (printf "-org-owner-name=%s" .) }}{{ end }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -51,11 +102,12 @@ metadata:
   annotations:
     "helm.sh/hook": post-install
     "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # Kept after success on purpose (see the comment at the top): the log holds
+    # the one-time credentials. Delete the Job once you have stored them.
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
-  backoffLimit: {{ .Values.api.bootstrapAdmin.backoffLimit | default 2 }}
-  activeDeadlineSeconds: {{ .Values.api.bootstrapAdmin.activeDeadlineSeconds | default 300 }}
-  ttlSecondsAfterFinished: 600
+  backoffLimit: {{ int (dig "backoffLimit" 0 $ba) }}
+  activeDeadlineSeconds: {{ $ba.activeDeadlineSeconds | default 300 }}
   template:
     metadata:
       labels:
@@ -80,97 +132,27 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          command: ["/bin/sh", "-ec"]
+          command: ["/app/bootstrap-admin"]
           args:
-            - |
-              /app/bootstrap-admin \
-                -email="{{ required "api.bootstrapAdmin.email is required when api.bootstrapAdmin.enabled=true" .Values.api.bootstrapAdmin.email }}" \
-                -name="{{ .Values.api.bootstrapAdmin.name }}" \
-                -role="{{ .Values.api.bootstrapAdmin.role | default "super_admin" }}" \
-              {{- if .Values.api.bootstrapAdmin.noBackup }}
-                -no-backup \
-              {{- else }}
-                -backup-email="{{ required "api.bootstrapAdmin.backupEmail is required (a break-glass backup admin), or set api.bootstrapAdmin.noBackup=true" .Values.api.bootstrapAdmin.backupEmail }}" \
-                -backup-name="{{ .Values.api.bootstrapAdmin.backupName }}" \
-              {{- end }}
-              {{- if .Values.api.bootstrapAdmin.force }}
-                -force \
-              {{- end }}
-              || echo "bootstrap-admin exited non-zero (admin may already exist); continuing"
+            {{- range $arg := $args }}
+            - {{ $arg | replace "$" "$$" | quote }}
+            {{- end }}
           env:
             {{- include "openctem.bootstrapDbEnv" . | nindent 12 }}
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 128Mi
-{{- end }}
-{{- if .Values.api.bootstrapTenant.enabled }}
-{{- if .Values.api.bootstrapAdmin.enabled }}
----
-{{- end }}
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: {{ include "openctem.apiFullname" . }}-bootstrap-tenant
-  labels:
-    {{- include "openctem.labels" . | nindent 4 }}
-    app.kubernetes.io/component: bootstrap-tenant
-  annotations:
-    "helm.sh/hook": post-install
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
-spec:
-  backoffLimit: {{ .Values.api.bootstrapTenant.backoffLimit | default 2 }}
-  activeDeadlineSeconds: {{ .Values.api.bootstrapTenant.activeDeadlineSeconds | default 300 }}
-  ttlSecondsAfterFinished: 600
-  template:
-    metadata:
-      labels:
-        {{- include "openctem.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: bootstrap-tenant
-    spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      restartPolicy: Never
-      serviceAccountName: {{ include "openctem.apiServiceAccountName" . }}
-      {{- with .Values.api.podSecurityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      containers:
-        - name: bootstrap-tenant
-          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
-          {{- with .Values.api.securityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
+            {{- include "openctem.apiTenantCreationModeEnv" . | nindent 12 }}
+            {{- with include "openctem.gatewayApiEnv" . }}
+            # Gateway (gateway.*): the public origin (APP_URL, SMTP_BASE_URL)
+            # used for the owner's set-password link
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.api.extraEnv }}
+            # api.extraEnv (e.g. SMTP_*), so the owner link can be emailed
+            {{- include "openctem.apiExtraEnv" . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.api.extraEnvFrom }}
+          envFrom:
+            {{- toYaml .Values.api.extraEnvFrom | nindent 12 }}
           {{- end }}
-          command: ["/bin/sh", "-ec"]
-          args:
-            - |
-              /app/bootstrap-tenant \
-                -email="{{ required "api.bootstrapTenant.email is required when api.bootstrapTenant.enabled=true" .Values.api.bootstrapTenant.email }}" \
-                -team="{{ required "api.bootstrapTenant.teamName is required when api.bootstrapTenant.enabled=true" .Values.api.bootstrapTenant.teamName }}" \
-                -slug="{{ required "api.bootstrapTenant.teamSlug is required when api.bootstrapTenant.enabled=true" .Values.api.bootstrapTenant.teamSlug }}" \
-                -name="{{ .Values.api.bootstrapTenant.name }}"{{ if .Values.api.bootstrapTenant.force }} -force{{ end }} \
-              || echo "bootstrap-tenant exited non-zero (tenant/user may already exist); continuing"
-          env:
-            {{- include "openctem.bootstrapDbEnv" . | nindent 12 }}
-            - name: TENANT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  {{- if .Values.api.bootstrapTenant.passwordExistingSecret }}
-                  name: {{ .Values.api.bootstrapTenant.passwordExistingSecret }}
-                  key: {{ .Values.api.bootstrapTenant.passwordSecretKey | default "TENANT_PASSWORD" }}
-                  {{- else }}
-                  name: {{ include "openctem.apiFullname" . }}-bootstrap-tenant
-                  key: TENANT_PASSWORD
-                  {{- end }}
           resources:
             requests:
               cpu: 50m

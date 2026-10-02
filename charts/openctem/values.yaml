@@ -308,8 +308,23 @@ api:
     sslMode: ""
 
     resources: {}
-    podSecurityContext: {}
-    securityContext: {}
+    # -- Pod-level security context of the migration Jobs (up and down).
+    # migrate only reads the SQL files baked into the image and talks to
+    # Postgres, so it runs unprivileged under the "restricted" Pod Security
+    # Standard. Empty ({}) used to run it as the image's user: root.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      seccompProfile:
+        type: RuntimeDefault
+    # -- Container-level security context of the migration Jobs.
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
     nodeSelector: {}
     tolerations: []
     affinity: {}

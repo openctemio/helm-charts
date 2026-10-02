@@ -87,6 +87,15 @@ jobs:
           # of stub API/UI upstreams and checks the routing over real HTTPS.
           tests/gateway/caddy-smoke.sh
 
+      - name: Default image tags are released
+        run: |
+          # appVersion (API, web and migrations images) must be a released
+          # OpenCTEM tag and sensor.image.tag a released sensor tag. Warning
+          # only while chart 0.5.0+ waits for OpenCTEM v0.9.0; set STRICT=1
+          # once it is tagged (openctemio/openctem RFC-037).
+          tests/versions/run.sh
+          tests/versions/check-published.sh
+
       - name: Render templates (production values)
         run: |
           # Production values file provides the required secrets -> must render.

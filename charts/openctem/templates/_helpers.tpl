@@ -788,3 +788,27 @@ skipping the first organization an existing values file still asks for.
 {{- fail "\n\napi.bootstrapTenant was removed in chart 0.8.0 (the bootstrap-tenant CLI is no longer in the API image). Create the first organization with the platform-admin bootstrap instead:\n  api.bootstrapAdmin.enabled=true, api.bootstrapAdmin.email, api.bootstrapAdmin.backupEmail,\n  api.bootstrapAdmin.org.name and api.bootstrapAdmin.org.ownerEmail (org.slug / org.ownerName optional).\nThe owner gets a one-time set-password link (emailed with SMTP, otherwise in the Job log). Then remove api.bootstrapTenant from your values.\n" -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+SENSOR_LATEST_VERSION / SENSOR_MIN_VERSION for the API (api.sensorReleaseChannel):
+the latest release defaults to the bundled sensor's image tag. A name set in
+api.extraEnv wins.
+*/}}
+{{- define "openctem.apiSensorReleaseEnv" -}}
+{{- $ch := .Values.api.sensorReleaseChannel | default dict -}}
+{{- $sensor := .Values.sensor | default dict -}}
+{{- $image := $sensor.image | default dict -}}
+{{- $latest := toString ($ch.latestVersion | default $image.tag | default "") -}}
+{{- $min := toString ($ch.minVersion | default "") -}}
+{{- $have := include "openctem.apiExtraEnvNames" . | fromJsonArray -}}
+{{- $env := list -}}
+{{- if and $latest (not (has "SENSOR_LATEST_VERSION" $have)) -}}
+{{- $env = append $env (dict "name" "SENSOR_LATEST_VERSION" "value" $latest) -}}
+{{- end -}}
+{{- if and $min (not (has "SENSOR_MIN_VERSION" $have)) -}}
+{{- $env = append $env (dict "name" "SENSOR_MIN_VERSION" "value" $min) -}}
+{{- end -}}
+{{- if $env -}}
+{{- toYaml $env -}}
+{{- end -}}
+{{- end }}

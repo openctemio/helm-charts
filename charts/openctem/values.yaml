@@ -103,6 +103,17 @@ api:
   #    A TENANT_CREATION_MODE entry in api.extraEnv takes precedence.
   tenantCreationMode: admin_only
 
+  # -- The sensor release channel the Sensors page compares each sensor's
+  #    version with, and the tag the page's install commands pin.
+  #    latestVersion (SENSOR_LATEST_VERSION): empty = sensor.image.tag, so the
+  #    bundled sensor and the install commands run the same release.
+  #    minVersion (SENSOR_MIN_VERSION): empty = no minimum; a heartbeating
+  #    sensor below it shows as degraded ("version unsupported").
+  #    An entry for either name in api.extraEnv takes precedence.
+  sensorReleaseChannel:
+    latestVersion: ""
+    minVersion: ""
+
   # -- Bootstrap the first PLATFORM administrators (RFC-022) and, optionally,
   # the first organization. Runs /app/bootstrap-admin as a post-install hook
   # Job after the migrations.

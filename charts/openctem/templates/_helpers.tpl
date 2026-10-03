@@ -830,3 +830,19 @@ api.extraEnv wins.
 {{- toYaml $env -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+openctem.apiReplicasValidate: refuse more than one API replica unless the
+operator opts in. The API's schedulers and controllers are not yet safe with
+several replicas (duplicate scheduled scans, forked audit chain).
+*/}}
+{{- define "openctem.apiReplicasValidate" -}}
+{{- $api := .Values.api | default dict -}}
+{{- $replicas := int ($api.replicaCount | default 1) -}}
+{{- $as := $api.autoscaling | default dict -}}
+{{- $max := 1 -}}
+{{- if $as.enabled -}}{{- $max = int ($as.maxReplicas | default 1) -}}{{- end -}}
+{{- if and (or (gt $replicas 1) (gt $max 1)) (not $api.allowMultipleReplicas) -}}
+{{- fail (printf "\n\napi: %d replica(s) / autoscaling up to %d requested, but the API is not yet safe with more than one replica: its schedulers and background controllers run in every replica, so scheduled scans fire twice and the audit hash chain forks.\nSet api.replicaCount=1 and api.autoscaling.maxReplicas=1 (or autoscaling.enabled=false).\nOnly if the API version you deploy documents multi-replica support, set api.allowMultipleReplicas=true.\n" $replicas $max) -}}
+{{- end -}}
+{{- end -}}

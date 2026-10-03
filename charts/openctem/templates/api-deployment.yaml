@@ -3,6 +3,7 @@ kind: Deployment
 {{- $dbSecretChecksumSource := include "openctem.dbSecretChecksumSource" . | trim }}
 {{- $redisSecretChecksumSource := include "openctem.redisSecretChecksumSource" . | trim }}
 {{- include "openctem.apiAttachmentsValidate" . }}
+{{- include "openctem.apiReplicasValidate" . }}
 metadata:
   name: {{ include "openctem.apiFullname" . }}
   labels:

@@ -17,10 +17,10 @@ that does not exist (`tests/versions/check-published.sh`).
 | Chart | appVersion (OpenCTEM) | Default images |
 |---|---|---|
 | 0.4.1 | v0.8.0 | `openctemio/api`, `openctemio/ui`, `openctemio/migrations` (Docker Hub, never published) |
-| 0.5.0 – 0.10.x | v0.9.0 | `ghcr.io/openctemio/openctem-api`, `ghcr.io/openctemio/openctem-web`, `ghcr.io/openctemio/migrations` |
+| 0.5.0 – 0.11.x | v0.9.0 | `ghcr.io/openctemio/openctem-api`, `ghcr.io/openctemio/openctem-web`, `ghcr.io/openctemio/migrations` |
 
 > **OpenCTEM v0.9.0 is not released yet**, so no published chart installs
-> with its default image values today. Charts 0.5.0 to 0.10.x were published
+> with its default image values today. Charts 0.5.0 to 0.11.x were published
 > ahead of v0.9.0 and pull `openctem-api:v0.9.0`, which does not exist yet.
 > Chart 0.4.1 (v0.8.0) names Docker Hub repositories that were never
 > published. Until v0.9.0 is tagged, deploy v0.8.0 with chart 0.4.1 and the
@@ -390,6 +390,32 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.content.persistence.enabled` | `true` | Scanner content cache at `/var/lib/openctem/content` (`SENSOR_CONTENT_DIR`: trivy DB, nuclei templates, semgrep rules), so a new pod does not download it again. A PersistentVolumeClaim `<release>-openctem-sensor-content` (`size` `5Gi`) or `existingClaim`. Disposable, and kept apart from the state. `false`: an `emptyDir` (`sensor.content.emptyDirSizeLimit`). |
 | `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. Any sensor PVC (outbox, state, content) requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`. |
 | `sensor.outbox.maxBytes` / `.maxAge` / `.emptyDirSizeLimit` | empty | `SENSOR_OUTBOX_MAX_BYTES` (default `1GiB`, at most half the free space; keep it below the volume), `SENSOR_OUTBOX_MAX_AGE` (default `168h`), and the `emptyDir` size limit. |
+| `sensor.localPolicy.enabled` | `false` | The sensor-local policy ([RFC-040 §5.7](https://github.com/openctemio/openctem/blob/develop/api/docs/rfcs/RFC-040-platform-sensor-mutual-distrust.md)): a read-only file set by the network owner, mounted at `/etc/openctem/sensor-policy.yaml` (`SENSOR_LOCAL_POLICY`, ConfigMap `defaultMode 0444`). The sensor refuses every job outside it (targets, ports, tools, job types, custom templates, interactsh, rate, kill switch) whatever the platform sends, and does not start when the policy is invalid. Off by default so an upgrade keeps today's behavior (the sensor reports `local_policy: absent`); **new installs should turn it on.** Keys: [`docs/LOCAL_POLICY.md`](https://github.com/openctemio/sensor/blob/main/docs/LOCAL_POLICY.md). Older sensor images ignore the file. |
+| `sensor.localPolicy.policy` | example | The policy document (rendered into `<release>-openctem-sensor-policy`; changing it rolls the pod). The default mirrors the sensor's `docs/sensor-policy.example.yaml` with a documentation range (`203.0.113.0/24`): replace it. Custom templates and interactsh are off. The render fails when it is not a `openctem.io/sensor-policy/v1` document. |
+| `sensor.localPolicy.existingConfigMap` / `.existingConfigMapKey` | — / `sensor-policy.yaml` | Use a ConfigMap the network owner manages (keep its RBAC away from the platform's operators) instead of `policy`. |
+| `sensor.localPolicy.killSwitchFile` | empty | `SENSOR_KILL_SWITCH_FILE`: while the file exists the sensor runs no job and heartbeats "paused by local policy". Put it on a volume the host owner can write (`sensor.extraVolumes` / `extraVolumeMounts`); in-cluster, `kill_switch: true` in the policy plus a rollout does the same. |
+| `sensor.podSecurityContext` | `runAsNonRoot`, uid/gid/fsGroup `999`, seccomp `RuntimeDefault` | The default image runs as uid/gid 999. The single-tool images (`-nuclei`, `-trivy`, `-semgrep`, `-betterleaks`) use 1001: set `runAsUser`, `runAsGroup` and `fsGroup` to 1001 for them. `runAsNonRoot` needs the numeric `runAsUser` (the image's `USER` is a name). |
+| `sensor.securityContext` | no privilege escalation, read-only root filesystem, `drop: [ALL]` | Container hardening (RFC-040 §5.10). Set a key to `null` to drop it. |
+| `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
+| `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp`, `/home/openctem`, `/scan`, `/cache`, `/config` / empty | `emptyDir`s mounted over the read-only root filesystem where the sensor and its tools write (the state, content and outbox directories are volumes already). |
+| `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.11.0 (hardened sensor, sensor-local policy)
+
+The bundled sensor now runs hardened by default: as uid/gid 999 with
+`runAsNonRoot`, seccomp `RuntimeDefault`, no privilege escalation, no
+capabilities and a read-only root filesystem, with `emptyDir`s for the
+directories it writes (`sensor.writableDirs`). The default image (uid 999)
+needs nothing. With a single-tool image (`-nuclei`, `-trivy`, `-semgrep`,
+`-betterleaks`, uid 1001) set `sensor.podSecurityContext.runAsUser`,
+`runAsGroup` and `fsGroup` to `1001`. A tool that writes somewhere else needs
+that directory in `sensor.writableDirs`, or
+`sensor.securityContext.readOnlyRootFilesystem: false`. Naabu SYN scans need
+`sensor.netRaw: true`.
+
+`sensor.localPolicy` adds the sensor-local policy (off by default, so nothing
+changes until you enable it). Enable it with ranges of your own: see the
+values table above.
 
 ## Upgrading to 0.10.0 (attachments on a volume or S3)
 

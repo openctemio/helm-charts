@@ -6,6 +6,7 @@
 {{- $contentPersist := ($content.persistence | default dict) -}}
 {{- $statePersist := (($sensor.state | default dict).persistence | default dict) -}}
 {{- $anyPVC := or $persist.enabled $statePersist.enabled $contentPersist.enabled -}}
+{{- $lp := $sensor.localPolicy | default dict -}}
 {{- if and $persist.enabled (gt (int $sensor.replicaCount) 1) }}
 {{- fail "\n\nsensor.outbox.persistence.enabled needs sensor.replicaCount=1: an outbox belongs to one sensor process (the sensor locks it).\n" }}
 {{- end }}
@@ -37,6 +38,10 @@ spec:
         {{- if not $sensor.existingSecret }}
         checksum/credentials-secret: {{ include (print $.Template.BasePath "/sensor-secret.yaml") . | sha256sum }}
         {{- end }}
+        {{- if and $lp.enabled (not $lp.existingConfigMap) }}
+        # The sensor reads its policy once at start: a changed policy rolls the pod.
+        checksum/local-policy: {{ include (print $.Template.BasePath "/sensor-policy-configmap.yaml") . | sha256sum }}
+        {{- end }}
         {{- with $sensor.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -61,7 +66,13 @@ spec:
       {{- end }}
       containers:
         - name: sensor
-          {{- with $sensor.securityContext }}
+          {{- $sc := deepCopy ($sensor.securityContext | default dict) }}
+          {{- if $sensor.netRaw }}
+          {{- $caps := deepCopy ($sc.capabilities | default dict) }}
+          {{- $_ := set $caps "add" (append ($caps.add | default list) "NET_RAW" | uniq) }}
+          {{- $_ := set $sc "capabilities" $caps }}
+          {{- end }}
+          {{- with $sc }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -130,6 +141,15 @@ spec:
             - name: SENSOR_OUTBOX_MAX_AGE
               value: {{ . | quote }}
             {{- end }}
+            {{- if $lp.enabled }}
+            # The sensor-local policy (read-only mount below).
+            - name: SENSOR_LOCAL_POLICY
+              value: /etc/openctem/sensor-policy.yaml
+            {{- end }}
+            {{- with $lp.killSwitchFile }}
+            - name: SENSOR_KILL_SWITCH_FILE
+              value: {{ . | quote }}
+            {{- end }}
             {{- with $sensor.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -140,6 +160,20 @@ spec:
               mountPath: /var/lib/openctem/state
             - name: content
               mountPath: /var/lib/openctem/content
+            # Writable over the read-only root filesystem (sensor.writableDirs).
+            {{- range $i, $d := $sensor.writableDirs }}
+            - name: writable-{{ $i }}
+              mountPath: {{ $d }}
+            {{- end }}
+            {{- if $lp.enabled }}
+            - name: local-policy
+              mountPath: /etc/openctem/sensor-policy.yaml
+              subPath: sensor-policy.yaml
+              readOnly: true
+            {{- end }}
+            {{- with $sensor.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- with $sensor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -179,6 +213,27 @@ spec:
           # A cache: downloaded again when the pod is replaced.
           emptyDir: {}
           {{- end }}
+        {{- range $i, $d := $sensor.writableDirs }}
+        - name: writable-{{ $i }}
+          {{- if $sensor.writableDirsSizeLimit }}
+          emptyDir:
+            sizeLimit: {{ $sensor.writableDirsSizeLimit }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        {{- if $lp.enabled }}
+        - name: local-policy
+          configMap:
+            name: {{ $lp.existingConfigMap | default (printf "%s-policy" (include "openctem.sensorFullname" .)) }}
+            defaultMode: 0444
+            items:
+              - key: {{ ternary ($lp.existingConfigMapKey | default "sensor-policy.yaml") "sensor-policy.yaml" (not (empty $lp.existingConfigMap)) }}
+                path: sensor-policy.yaml
+        {{- end }}
+        {{- with $sensor.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with $sensor.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

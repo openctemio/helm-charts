@@ -61,6 +61,13 @@ jobs:
           # the defaults copy in _helpers.tpl matches values.yaml.
           tests/sensor-migration/run.sh
 
+      - name: Sensor hardening and local policy (render checks)
+        run: |
+          # The bundled sensor runs non-root with a read-only root filesystem,
+          # no capabilities and seccomp; sensor.localPolicy renders the
+          # read-only policy mount (OpenCTEM RFC-040).
+          tests/sensor-hardening/run.sh
+
       - name: Attachment storage (render checks)
         run: |
           # api.attachments: default RWO volume (Recreate), S3, RWX with

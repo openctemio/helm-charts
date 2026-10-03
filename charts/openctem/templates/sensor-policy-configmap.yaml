@@ -1,0 +1,20 @@
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- $lp := $sensor.localPolicy | default dict -}}
+{{- if and $sensor.enabled $lp.enabled (not $lp.existingConfigMap) }}
+{{- if not (contains "openctem.io/sensor-policy/v1" ($lp.policy | default "")) }}
+{{- fail "\n\nsensor.localPolicy.policy must be a sensor-local policy document (apiVersion: openctem.io/sensor-policy/v1); see docs/LOCAL_POLICY.md in openctemio/sensor. Or set sensor.localPolicy.existingConfigMap.\n" }}
+{{- end }}
+# The sensor-local policy (api RFC-040 §5.7), mounted read-only into the
+# sensor. The sensor refuses every job outside it; the platform cannot change
+# it. Whoever can edit this ConfigMap decides what the sensor may scan: keep
+# that RBAC with the network owner.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openctem.sensorFullname" . }}-policy
+  labels:
+    {{- include "openctem.sensorLabels" . | nindent 4 }}
+data:
+  sensor-policy.yaml: |
+    {{- $lp.policy | nindent 4 }}
+{{- end }}

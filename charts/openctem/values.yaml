@@ -1025,11 +1025,92 @@ sensor:
     maxBytes: ""
     # -- SENSOR_OUTBOX_MAX_AGE (empty: 168h).
     maxAge: ""
+  # -- The sensor-local policy (api RFC-040 §5.7): a read-only file the
+  #    network owner writes, mounted at /etc/openctem/sensor-policy.yaml.
+  #    The sensor refuses every job outside it (targets, ports, tools, job
+  #    types, custom templates, interactsh, rate, kill switch) whatever the
+  #    platform sends; a policy it cannot load stops it. Off by default so an
+  #    upgrade keeps today's behavior (the sensor then reports
+  #    local_policy "absent"); new installs should turn it on and replace the
+  #    example ranges. Keys: docs/LOCAL_POLICY.md in openctemio/sensor. Needs
+  #    sensor >= the release that ships the local policy (older images ignore
+  #    the file).
+  localPolicy:
+    enabled: false
+    # -- A pre-created ConfigMap holding sensor-policy.yaml (kept out of this
+    #    release so whoever installs the platform need not own the policy).
+    #    Takes precedence over policy.
+    existingConfigMap: ""
+    # -- Key of the policy in existingConfigMap.
+    existingConfigMapKey: sensor-policy.yaml
+    # -- The policy document, rendered into a ConfigMap when
+    #    existingConfigMap is empty. Mirrors the sensor's
+    #    docs/sensor-policy.example.yaml (custom templates and interactsh off).
+    policy: |
+      apiVersion: openctem.io/sensor-policy/v1
+      # What this sensor may scan (CIDRs, IPs, host names, *.domain).
+      # Replace with the network owner's ranges before enabling.
+      targets:
+        allow: ["203.0.113.0/24"]
+        deny: []
+        allow_private: false
+      ports:
+        allow: "80,443,8000-8999"
+      checks:
+        allow: [scan, validate, refresh_content]
+      # Platform-supplied custom templates and out-of-band callbacks: off.
+      allow_custom_templates: false
+      allow_interactsh: false
+      rate:
+        max_rps: 100
+        max_job_seconds: 14400
+    # -- SENSOR_KILL_SWITCH_FILE: while this file exists the sensor runs no
+    #    job and heartbeats "paused by local policy". It must sit on a volume
+    #    the host owner can write (extraVolumes/extraVolumeMounts); empty: none.
+    #    kill_switch: true in the policy plus a rollout is the in-cluster way.
+    killSwitchFile: ""
   extraEnv: []
+  # -- Extra volumes and mounts for the sensor container (for example a
+  #    host directory holding the kill switch file).
+  extraVolumes: []
+  extraVolumeMounts: []
   podAnnotations: {}
   podLabels: {}
-  podSecurityContext: {}
-  securityContext: {}
+  # -- Pod security context. The sensor image runs as uid/gid 999 (the
+  #    single-tool -nuclei/-trivy/-semgrep/-betterleaks images use 1001: set
+  #    runAsUser/runAsGroup/fsGroup to 1001 for them). runAsNonRoot needs a
+  #    numeric runAsUser because the image's USER is a name.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container security context: no privilege escalation, a read-only root
+  #    filesystem (the directories the sensor and its tools write are
+  #    emptyDirs or the state/content/outbox volumes: see writableDirs) and
+  #    no capabilities (netRaw adds NET_RAW back).
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # -- Add the NET_RAW capability (naabu SYN scans, ICMP). Off: port scans
+  #    use TCP connect.
+  netRaw: false
+  # -- Writable emptyDirs mounted over the read-only root filesystem: /tmp,
+  #    the home directory (tool configs and caches), the scan workspace and
+  #    the image's cache and config directories.
+  writableDirs:
+    - /tmp
+    - /home/openctem
+    - /scan
+    - /cache
+    - /config
+  # -- emptyDir size limit of each writable directory (empty: none).
+  writableDirsSizeLimit: ""
   resources: {}
   # -- Seconds Kubernetes waits after SIGTERM. The sensor drains for up to 30s
   #    and hands unfinished work back so the platform re-queues it at once;

@@ -200,11 +200,55 @@ outbox:
   emptyDirSizeLimit: ""
   maxBytes: ""
   maxAge: ""
+localPolicy:
+  enabled: false
+  existingConfigMap: ""
+  existingConfigMapKey: sensor-policy.yaml
+  policy: |
+    apiVersion: openctem.io/sensor-policy/v1
+    # What this sensor may scan (CIDRs, IPs, host names, *.domain).
+    # Replace with the network owner's ranges before enabling.
+    targets:
+      allow: ["203.0.113.0/24"]
+      deny: []
+      allow_private: false
+    ports:
+      allow: "80,443,8000-8999"
+    checks:
+      allow: [scan, validate, refresh_content]
+    # Platform-supplied custom templates and out-of-band callbacks: off.
+    allow_custom_templates: false
+    allow_interactsh: false
+    rate:
+      max_rps: 100
+      max_job_seconds: 14400
+  killSwitchFile: ""
 extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []
 podAnnotations: {}
 podLabels: {}
-podSecurityContext: {}
-securityContext: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+netRaw: false
+writableDirs:
+  - /tmp
+  - /home/openctem
+  - /scan
+  - /cache
+  - /config
+writableDirsSizeLimit: ""
 resources: {}
 terminationGracePeriodSeconds: 45
 nodeSelector: {}

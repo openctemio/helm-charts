@@ -8,11 +8,16 @@ fullnameOverride: ""
 imagePullSecrets: []
 
 api:
-  # -- Replica count. Default 1 for dev/eval. PRODUCTION should run >= 2 for HA
-  # (see values-production.yaml) so a node drain / rolling upgrade keeps the API
-  # serving. With >= 2 replicas also enable podDisruptionBudget and set
-  # topologySpreadConstraints (below) so the replicas don't co-locate.
+  # -- Replica count. Keep 1 for now. The API runs its schedulers and background
+  # controllers in every replica and is not yet safe with more than one: with 2+
+  # replicas scheduled scans fire twice, the audit hash chain forks and report
+  # emails are sent twice (measured 2026-10-03; fixed by the scans P1 HA work).
+  # The chart refuses more than 1 replica (replicaCount or autoscaling
+  # maxReplicas) unless allowMultipleReplicas is true.
   replicaCount: 1
+  # -- Opt in to more than one API replica. Only set this once the deployed
+  # API version documents multi-replica support.
+  allowMultipleReplicas: false
 
   # -- Application environment. "production" (the secure default) turns
   # validateProduction() into a HARD BOOT GATE: it requires DB TLS, Redis TLS +

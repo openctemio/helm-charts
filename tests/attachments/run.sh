@@ -13,6 +13,7 @@ pass() { echo "ok   - $1"; }
 fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 
 render() { helm template t "$chart" --set api.appEnv=development "$@" 2>&1; }
+multi=(--set api.allowMultipleReplicas=true)
 
 expect() { # expect <description> <pattern> <output>
   if grep -qF -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: $2)"; fi
@@ -53,7 +54,7 @@ reject "no persistence: no Recreate" "type: Recreate" "$dep"
 
 # 4. S3: env from a chart Secret, no volume, no PVC.
 s3=(--set api.attachments.storage=s3 --set api.attachments.s3.bucket=att --set api.attachments.s3.endpoint=http://minio:9000 --set api.attachments.s3.provider=minio --set api.attachments.s3.accessKey=AK --set api.attachments.s3.secretKey=SK)
-out="$(render "${s3[@]}" --set api.replicaCount=3)"
+out="$(render "${s3[@]}" "${multi[@]}" --set api.replicaCount=3)"
 expect "s3: provider" 'value: "minio"' "$out"
 expect "s3: bucket" 'value: "att"' "$out"
 expect "s3: endpoint" 'value: "http://minio:9000"' "$out"
@@ -66,9 +67,9 @@ expect "s3 existingSecret: referenced" "name: mys3" "$out"
 reject "s3 existingSecret: no chart Secret" "name: t-openctem-api-storage" "$out"
 
 # 5. Several replicas on a ReadWriteMany volume.
-out="$(render --set api.replicaCount=3 --set 'api.attachments.persistence.accessModes={ReadWriteMany}')"
+out="$(render "${multi[@]}" --set api.replicaCount=3 --set 'api.attachments.persistence.accessModes={ReadWriteMany}')"
 expect "rwx: PVC is ReadWriteMany" "- ReadWriteMany" "$out"
-reject "rwx: no Recreate" "type: Recreate" "$(render -s templates/api-deployment.yaml --set api.replicaCount=3 --set 'api.attachments.persistence.accessModes={ReadWriteMany}')"
+reject "rwx: no Recreate" "type: Recreate" "$(render -s templates/api-deployment.yaml "${multi[@]}" --set api.replicaCount=3 --set 'api.attachments.persistence.accessModes={ReadWriteMany}')"
 
 # 6. Refused.
 must_fail "3 replicas on a RWO volume" "only one pod (one node) can mount it" --set api.replicaCount=3
@@ -78,6 +79,11 @@ must_fail "s3 without bucket" "needs api.attachments.s3.bucket" --set api.attach
 must_fail "s3 without credentials" "needs credentials" --set api.attachments.storage=s3 --set api.attachments.s3.bucket=att
 must_fail "unknown storage" 'api.attachments.storage="gcs" is not supported' --set api.attachments.storage=gcs
 must_fail "unknown s3 provider" 'api.attachments.s3.provider="gcs" is not supported' "${s3[@]}" --set api.attachments.s3.provider=gcs
+
+# API replica guard: more than one API replica needs an explicit opt-in.
+must_fail "2 replicas without opt-in" "not yet safe with more than one replica" "${s3[@]}" --set api.replicaCount=2
+must_fail "autoscaling to 4 without opt-in" "not yet safe with more than one replica" "${s3[@]}" --set api.autoscaling.enabled=true --set api.autoscaling.maxReplicas=4
+out="$(render "${s3[@]}" "${multi[@]}" --set api.replicaCount=2)" || fail "2 replicas with opt-in should render"
 
 if [ "$fails" -gt 0 ]; then
   echo "$fails check(s) failed"

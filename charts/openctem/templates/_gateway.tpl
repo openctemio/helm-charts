@@ -1,7 +1,10 @@
 {{/*
 Gateway: one public HTTPS entry point for the UI and the REST API.
-The routing mirrors files/gateway/Caddyfile (the docker-compose gateway);
-tests/gateway/run.sh fails when the path lists below drift from it.
+files/gateway/ is the OpenCTEM gateway (openctemio/openctem api/deploy/gateway,
+copied by scripts/sync-gateway.sh, checked by tests/gateway/upstream.sh). The
+Ingress and HTTPRoute path lists are read from its planes.caddy, which the
+monorepo generates from the API's plane table (RFC-041), so every gateway mode
+routes the same paths.
 */}}
 
 {{- define "openctem.gatewayFullname" -}}
@@ -20,25 +23,26 @@ app.kubernetes.io/component: gateway
 
 {{/*
 API path prefixes (element-wise prefix match: /api/v1/mcp matches /api/v1/mcp
-and /api/v1/mcp/..., never /api/v1/mcpx).
+and /api/v1/mcp/..., never /api/v1/mcpx): every path of the `@plane_*`
+matchers in files/gateway/planes.caddy, which Caddy matches as `P` and `P/*`.
+The `@edge_internal` matcher (/metrics, /ready) is never routed to the API.
 */}}
 {{- define "openctem.gatewayApiPrefixes" -}}
-- /api/v1/agent
-- /api/v2/sensor
-- /api/v1/platform
-- /scim/v2
-- /api/v1/mcp
-- /api/v1/webhooks/incoming
-- /api/v1/auth/saml
-{{- end }}
-
-{{/* API exact paths. */}}
-{{- define "openctem.gatewayApiExactPaths" -}}
-- /api/v1/auth/backchannel-logout
-- /api/v1/ws
-- /health
-- /openapi.yaml
-- /docs
+{{- $seen := dict -}}
+{{- range $line := splitList "\n" (.Files.Get "files/gateway/planes.caddy") -}}
+{{- $words := splitList " " (trim $line) -}}
+{{- if and (gt (len $words) 2) (hasPrefix "@plane_" (first $words)) (eq (index $words 1) "path") -}}
+{{- range $p := rest (rest $words) -}}
+{{- if and (not (hasSuffix "/*" $p)) (not (hasKey $seen $p)) -}}
+{{- $_ := set $seen $p true }}
+- {{ $p }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not $seen -}}
+{{- fail "files/gateway/planes.caddy has no @plane_* path matchers: re-run scripts/sync-gateway.sh" -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -49,6 +53,8 @@ the volume's items.
 {{- define "openctem.gatewayCaddyConfigData" -}}
 Caddyfile: |-
 {{ .Files.Get "files/gateway/Caddyfile" | indent 2 }}
+planes.caddy: |-
+{{ .Files.Get "files/gateway/planes.caddy" | indent 2 }}
 entrypoint.sh: |-
 {{ .Files.Get "files/gateway/entrypoint.sh" | indent 2 }}
 {{- range $path, $_ := .Files.Glob "files/gateway/modes/*" }}

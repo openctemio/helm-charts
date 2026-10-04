@@ -770,6 +770,22 @@ database:
     passwordKey: DB_PASSWORD
     username: ""
     password: ""
+  # -- Least-privilege split (owner decision D-6; openctem
+  # api/docs/deployment/database-roles.md). When `username` (or an existing
+  # secret) is set, the migration Jobs connect as this schema owner
+  # (openctem_migrator) and only the API keeps `database.auth` above, which
+  # should then be the DML-only role (openctem_app). Run the openctem
+  # api/deploy/postgres/least-privilege-roles.sql once as the Postgres
+  # superuser before the first install. Empty = migrations use database.auth
+  # (the old single-role layout). External databases only.
+  migrator:
+    # -- Existing secret holding the migrator user and password keys. Empty =
+    # the database.auth secret (created with these keys when createSecret).
+    existingSecret: ""
+    userKey: DB_MIGRATE_USER
+    passwordKey: DB_MIGRATE_PASSWORD
+    username: ""
+    password: ""
 
 # =============================================================================
 # Bundled Bitnami PostgreSQL — DEV / EVAL ONLY.

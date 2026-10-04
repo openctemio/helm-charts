@@ -87,6 +87,14 @@ jobs:
           # and the removed api.bootstrapTenant failing with a pointer.
           tests/bootstrap/run.sh
 
+      - name: Gateway files are the OpenCTEM gateway's (upstream sync)
+        run: |
+          # files/gateway/{Caddyfile,planes.caddy,entrypoint.sh} must equal
+          # openctemio/openctem api/deploy/gateway at the commit pinned in
+          # files/gateway/UPSTREAM (scripts/sync-gateway.sh writes both), and
+          # a warning says when that commit is behind openctem develop.
+          LATEST_REF=develop tests/gateway/upstream.sh
+
       - name: Least-privilege database roles (render checks)
         run: |
           # database.migrator: migration Jobs use the schema owner, the API
@@ -97,7 +105,7 @@ jobs:
         run: |
           # gateway.mode ingress | httpRoute | caddy: routes, refusals, the
           # API/UI settings, NetworkPolicy, and that the chart's API path list
-          # matches files/gateway/Caddyfile.
+          # is files/gateway/planes.caddy's.
           tests/gateway/run.sh
 
       - name: Single-port gateway (bundled Caddy in Docker)

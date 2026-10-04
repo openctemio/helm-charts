@@ -293,6 +293,32 @@ never satisfy the production Redis boot gate.
 Subchart versions are **pinned** (Postgres 18.5.6, Redis 25.3.2) for
 reproducible builds; bump deliberately and re-run `helm dependency update`.
 
+### Least-privilege database roles
+
+The API should never connect as the Postgres superuser. With an external
+database, use two roles (OpenCTEM `api/docs/deployment/database-roles.md`):
+
+- `openctem_migrator` owns the schema; the migration Jobs (up and down) connect
+  as it (`database.migrator.*`).
+- `openctem_app` may only read and write rows; the API connects as it
+  (`database.auth.*`).
+
+Create both once, as the superuser, with the bootstrap script from the
+OpenCTEM repository (idempotent; re-run it after restoring a dump):
+
+```bash
+psql "postgres://postgres@db.internal:5432/openctem" -v ON_ERROR_STOP=1 \
+  -v app_password="$APP_PW" -v migrator_password="$MIGRATOR_PW" \
+  -f api/deploy/postgres/least-privilege-roles.sql
+```
+
+then set `database.auth.username=openctem_app` and
+`database.migrator.username=openctem_migrator` (or point
+`database.migrator.existingSecret` at a Secret with `DB_MIGRATE_USER` /
+`DB_MIGRATE_PASSWORD`). `values-production.yaml` does this by default. Leaving
+`database.migrator` empty keeps the single-role layout, where migrations use
+`database.auth`. The bundled dev Postgres has one user and ignores it.
+
 ## Attachment storage
 
 Uploaded attachments and finding evidence (`api.attachments`) live either on a

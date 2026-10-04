@@ -674,6 +674,55 @@ Resolve secret key containing DB password.
 {{- end }}
 
 {{/*
+True when the migration Jobs use a separate schema-owner role (D-6).
+*/}}
+{{- define "openctem.dbMigratorEnabled" -}}
+{{- if and (not .Values.postgresql.enabled) (or .Values.database.migrator.username .Values.database.migrator.existingSecret) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Secret holding the migrator credentials.
+*/}}
+{{- define "openctem.dbMigratorSecretName" -}}
+{{- default (include "openctem.dbCredentialsSecretName" .) .Values.database.migrator.existingSecret -}}
+{{- end }}
+
+{{/*
+DB_USER / DB_PASSWORD env for the migration Jobs: the migrator when the
+least-privilege split is configured, otherwise the API's credentials.
+*/}}
+{{- define "openctem.migrationsDbCredentialsEnv" -}}
+{{- if include "openctem.dbMigratorEnabled" . }}
+- name: DB_USER
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openctem.dbMigratorSecretName" . }}
+      key: {{ .Values.database.migrator.userKey }}
+- name: DB_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openctem.dbMigratorSecretName" . }}
+      key: {{ .Values.database.migrator.passwordKey }}
+{{- else }}
+{{- if .Values.postgresql.enabled }}
+- name: DB_USER
+  value: {{ include "openctem.databaseUser" . | quote }}
+{{- else }}
+- name: DB_USER
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openctem.dbCredentialsSecretName" . }}
+      key: {{ .Values.database.auth.userKey }}
+{{- end }}
+- name: DB_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openctem.dbCredentialsSecretName" . }}
+      key: {{ include "openctem.dbPasswordSecretKey" . }}
+{{- end }}
+{{- end }}
+
+{{/*
 Resolve Redis service name when subchart is enabled.
 */}}
 {{- define "openctem.redisHost" -}}

@@ -35,15 +35,6 @@ spec:
     - host: {{ $g.host | quote }}
       http:
         paths:
-          {{- range include "openctem.gatewayApiExactPaths" . | fromYamlArray }}
-          - path: {{ . }}
-            pathType: Exact
-            backend:
-              service:
-                name: {{ $api }}
-                port:
-                  number: {{ $apiPort }}
-          {{- end }}
           {{- range include "openctem.gatewayApiPrefixes" . | fromYamlArray }}
           - path: {{ . }}
             pathType: Prefix

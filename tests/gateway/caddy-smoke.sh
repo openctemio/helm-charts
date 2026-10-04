@@ -132,12 +132,16 @@ routes() { # routes <base url> <curl args...>
   check "Bearer oct_ key with session cookie -> api" "api " "$@" -H 'Cookie: auth_token=abc' -H 'Authorization: Bearer oct_abc' "$u/api/v1/findings"
   check "X-API-Key -> api" "api " "$@" -H 'X-API-Key: k' "$u/api/v1/assets"
   check "Bearer token without session cookie -> api" "api " "$@" -H 'Authorization: Bearer eyJ' "$u/api/v1/findings"
-  for p in /health /openapi.yaml /docs /api/v1/ws /api/v1/agent/heartbeat /api/v2/sensor/x /api/v1/platform/x \
-           /scim/v2/Users /api/v1/mcp /api/v1/webhooks/incoming/jira /api/v1/auth/saml/metadata \
-           /api/v1/auth/backchannel-logout; do
+  for p in /health /openapi.yaml /docs /api/v1/ws /api/v1/agent/heartbeat /api/v2/sensor/x \
+           /api/v1/validation/evidence /scim/v2/Users /api/v1/mcp /api/v1/webhooks/incoming/jira /hooks/github \
+           /api/v1/auth/saml/acme/metadata /api/v1/auth/backchannel-logout; do
     check "$p -> api" "api " "$@" "$u$p"
   done
-  for p in /metrics /metrics/x /ready /debug/pprof/; do
+  # Browser planes reach the API only by credential, never by path.
+  for p in /api/v1/platform/x /api/v1/validation/coverage /api/v1/admin/tenants /api/v1/me/permissions; do
+    check "$p (no credential) -> ui" "ui " "$@" "$u$p"
+  done
+  for p in /metrics /metrics/x /ready /ready/x /debug/pprof/; do
     check "$p -> 404" " 404" "$@" "$u$p"
   done
   local got
@@ -167,6 +171,21 @@ r=(--resolve "ctem.example.com:$hostport:127.0.0.1" --cacert "$ca")
 base="https://ctem.example.com:$hostport"
 wait_up "${r[@]}" "$base/" && pass "internal: HTTPS verified against the internal CA" || fail "internal: HTTPS did not come up"
 routes "$base" "${r[@]}"
+# The access log never records a credential from a URL: invitation tokens in a
+# legacy path (OpenCTEM RFC-041) or a WebSocket ?ticket= (older APIs).
+tok="Zm9vYmFyYmF6cXV4cXV1eGNvcmdlZ3JhdWx0Z2FycGx5d2FsZG8"
+for p in "/invitations/$tok" "/api/v1/invitations/$tok/preview" "/api/v1/ws?ticket=$tok&x=1"; do
+  curl -s -o /dev/null "${r[@]}" "$base$p" || true
+done
+sleep 1
+gwlog="$(docker logs "$net-gw" 2>&1)"
+if grep -q "$tok" <<<"$gwlog"; then fail "internal: a URL credential reached the access log"; else pass "internal: no URL credential in the access log"; fi
+if grep -q "/invitations/REDACTED" <<<"$gwlog" && grep -q "/api/v1/invitations/REDACTED/preview" <<<"$gwlog" \
+  && grep -q "ticket=REDACTED&x=1" <<<"$gwlog"; then
+  pass "internal: token paths and ticket logged as REDACTED"
+else
+  fail "internal: token paths or ticket not logged as REDACTED"
+fi
 hdrs="$(curl -s -D - -o /dev/null "${r[@]}" "$base/health" | tr -d '\r')"
 if [ "$(grep -ci '^strict-transport-security:' <<<"$hdrs")" = 1 ]; then pass "internal: one HSTS header (the API's)"; else fail "internal: want exactly one HSTS header"; fi
 if grep -qi '^strict-transport-security:' <(curl -s -D - -o /dev/null "${r[@]}" "$base/"); then pass "internal: HSTS default on UI responses"; else fail "internal: no HSTS on UI responses"; fi

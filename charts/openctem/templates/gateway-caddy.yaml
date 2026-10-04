@@ -9,8 +9,8 @@
 {{- end -}}
 {{- $fullName := include "openctem.gatewayFullname" . -}}
 {{- $claim := $c.persistence.existingClaim | default (printf "%s-data" $fullName) -}}
-# The Caddyfile and TLS mode files are the docker-compose gateway's, unchanged
-# (charts/openctem/files/gateway/).
+# The Caddyfile, planes.caddy and entrypoint are the OpenCTEM gateway's,
+# unchanged (charts/openctem/files/gateway/, see UPSTREAM there).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -212,6 +212,8 @@ spec:
             items:
               - key: Caddyfile
                 path: Caddyfile
+              - key: planes.caddy
+                path: planes.caddy
               - key: entrypoint.sh
                 path: entrypoint.sh
               {{- range $path, $_ := .Files.Glob "files/gateway/modes/*" }}

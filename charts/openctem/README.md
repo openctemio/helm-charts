@@ -165,14 +165,22 @@ renders exactly what 0.6.0 did, and the per-component `api.ingress` /
 | `httpRoute` | one Gateway API `HTTPRoute` | the parent Gateway's listener | `Bearer oct_*` and `X-API-Key` (header matches) |
 | `caddy` | Caddy `Deployment` + `Service` + `ConfigMap` + `PVC` | `internal` / `acme` / `files` / `http` | all rules |
 
-**Routing** (the same in every mode; `caddy` uses the docker-compose
-gateway's Caddyfile, copied verbatim into `files/gateway/`, and
-`tests/gateway/run.sh` fails if the chart's path list drifts from it):
+**Routing** (the same in every mode). `files/gateway/` holds the OpenCTEM
+gateway's `Caddyfile`, `planes.caddy` and `entrypoint.sh`, byte for byte from
+openctemio/openctem `api/deploy/gateway/` at the commit in
+`files/gateway/UPSTREAM`. `planes.caddy` is generated there from the API's
+plane table (OpenCTEM RFC-041), and the `ingress` and `httpRoute` path lists
+are read from it at render time, so every mode routes the same paths. Do not
+edit the copies: run `scripts/sync-gateway.sh <ref>` (default `develop`). CI
+(`tests/gateway/upstream.sh`) fails when a copy differs from the pinned commit
+and warns when that commit is behind `develop`. The TLS mode files
+(`files/gateway/modes/`) stay chart-owned.
 
-- to the API: `/api/v1/agent/`, `/api/v2/sensor/`, `/api/v1/platform/`
-  (sensors), `/scim/v2/`, `/api/v1/mcp`, `/api/v1/webhooks/incoming/`,
-  `/api/v1/auth/saml/`, and exactly `/api/v1/auth/backchannel-logout`,
-  `/api/v1/ws`, `/health`, `/openapi.yaml`, `/docs`;
+- to the API, by plane (prefix match): sensor `/api/v2/sensor/`,
+  `/api/v1/agent/`, `/api/v1/validation/evidence`; inbound `/hooks/`,
+  `/api/v1/webhooks/incoming/`; `/scim/v2/`; `/api/v1/mcp`; ops `/health`,
+  `/openapi.yaml`, `/docs`; the IdP-facing `/api/v1/auth/saml/` and
+  `/api/v1/auth/backchannel-logout`; the browser WebSocket `/api/v1/ws`;
 - to the API as well: `/api/*` with `Authorization: Bearer oct_*` or an
   `X-API-Key` header (`httpRoute`, `caddy`), and `/api/*` with
   `Authorization: Bearer *` but no `auth_token` session cookie (`caddy` only:

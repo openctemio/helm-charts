@@ -21,14 +21,10 @@ spec:
   hostnames:
     - {{ $g.host | quote }}
   rules:
-    # Dedicated API paths: sensors, SCIM, MCP, webhooks, SAML/OIDC callbacks,
-    # the browser WebSocket, liveness and the API reference.
+    # The API planes (files/gateway/planes.caddy): sensors, inbound webhooks,
+    # SCIM, MCP, liveness and the API reference, the IdP-facing SAML/OIDC
+    # callbacks and the browser WebSocket.
     - matches:
-        {{- range include "openctem.gatewayApiExactPaths" . | fromYamlArray }}
-        - path:
-            type: Exact
-            value: {{ . }}
-        {{- end }}
         {{- range include "openctem.gatewayApiPrefixes" . | fromYamlArray }}
         - path:
             type: PathPrefix

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render checks for the single-port gateway (chart 0.7.0): gateway.mode
 # ingress | httpRoute | caddy, the API/UI settings it implies, the refusals,
-# and that the chart's API path list matches files/gateway/Caddyfile.
+# and that the chart's API path list is files/gateway/planes.caddy's.
 # Usage: tests/gateway/run.sh  (needs helm; dependencies built)
 set -euo pipefail
 
@@ -60,16 +60,25 @@ ingress_routes() {
   '
 }
 
-# 0. The chart's API paths are the Caddyfile's (compose and chart route alike).
-caddy_paths="$(grep -m1 '@api_paths path' "$chart/files/gateway/Caddyfile" \
-  | sed 's/.*@api_paths path //' | tr ' ' '\n' | sed 's#/\*$##' | sort -u)"
+# 0. The chart's API paths are planes.caddy's (compose and chart route alike):
+#    every path of the @plane_* matchers, and nothing else.
+caddy_paths="$(grep -E '^[[:space:]]*@plane_[a-z]+ path ' "$chart/files/gateway/planes.caddy" \
+  | sed -E 's/.*@plane_[a-z]+ path //' | tr ' ' '\n' | grep -v '/\*$' | sort -u)"
 chart_paths="$(only gateway-ingress.yaml "${GW[@]}" --set gateway.mode=ingress \
   | ingress_routes | awk '$4 == "t-openctem-api" { print $1 }' | sort -u)"
 if [ -n "$caddy_paths" ] && [ "$caddy_paths" = "$chart_paths" ]; then
-  pass "API path list matches files/gateway/Caddyfile"
+  pass "API path list is files/gateway/planes.caddy's"
 else
-  fail "API path list drifted from files/gateway/Caddyfile"
+  fail "API path list differs from files/gateway/planes.caddy"
   diff <(echo "$caddy_paths") <(echo "$chart_paths") || true
+fi
+route_paths="$(only gateway-httproute.yaml "${GW[@]}" --set gateway.mode=httpRoute \
+  | awk '/type: PathPrefix/ { getline; print $2 }' | grep -vx '/' | grep -vx '/api' | sort -u)"
+if [ "$caddy_paths" = "$route_paths" ]; then
+  pass "HTTPRoute API paths are files/gateway/planes.caddy's"
+else
+  fail "HTTPRoute API paths differ from files/gateway/planes.caddy"
+  diff <(echo "$caddy_paths") <(echo "$route_paths") || true
 fi
 
 # 1. Default (mode none): nothing gateway-related is rendered or set.
@@ -132,12 +141,15 @@ expect "ingress: one host" 'host: "ctem.example.com"' "$out"
 expect "ingress: class" "ingressClassName: nginx" "$out"
 expect "ingress: TLS secret" "secretName: t-openctem-gateway-tls" "$out"
 expect "ingress: cert-manager annotation" "cert-manager.io/cluster-issuer: letsencrypt-prod" "$out"
-for r in "/api/v1/agent Prefix" "/api/v2/sensor Prefix" "/api/v1/platform Prefix" "/scim/v2 Prefix" \
-         "/api/v1/mcp Prefix" "/api/v1/webhooks/incoming Prefix" "/api/v1/auth/saml Prefix" \
-         "/api/v1/auth/backchannel-logout Exact" "/api/v1/ws Exact" "/health Exact" \
-         "/openapi.yaml Exact" "/docs Exact"; do
+for r in "/api/v1/agent Prefix" "/api/v2/sensor Prefix" "/api/v1/validation/evidence Prefix" "/scim/v2 Prefix" \
+         "/api/v1/mcp Prefix" "/hooks Prefix" "/api/v1/webhooks/incoming Prefix" "/api/v1/auth/saml Prefix" \
+         "/api/v1/auth/backchannel-logout Prefix" "/api/v1/ws Prefix" "/health Prefix" \
+         "/openapi.yaml Prefix" "/docs Prefix"; do
   expect "ingress: $r -> api" "$r -> t-openctem-api" "$routes"
 done
+# The stale protocol-v0 rule is gone (OpenCTEM RFC-041): the API serves none of it.
+reject "ingress: no /api/v1/platform" "/api/v1/platform " "$routes"
+reject "ingress: no Exact paths" " Exact -> " "$routes"
 expect "ingress: / -> ui" "/ Prefix -> t-openctem-ui" "$routes"
 reject "ingress: no /api catch-all to the api" "/api Prefix -> t-openctem-api" "$routes"
 for p in /metrics /ready /debug; do
@@ -155,8 +167,9 @@ reject "ingress: no HTTPRoute" "kind: HTTPRoute" "$out"
 out="$(only gateway-httproute.yaml "${GW[@]}" --set gateway.mode=httpRoute)"
 expect "httpRoute: hostname" '- "ctem.example.com"' "$out"
 expect "httpRoute: parentRef" "sectionName: https" "$out"
-expect "httpRoute: exact /health" 'type: Exact
+expect "httpRoute: prefix /health" 'type: PathPrefix
             value: /health' "$out"
+reject "httpRoute: no Exact paths" "type: Exact" "$out"
 expect "httpRoute: prefix /api/v2/sensor" 'type: PathPrefix
             value: /api/v2/sensor' "$out"
 expect "httpRoute: oct_ bearer header match" 'headers:
@@ -197,7 +210,10 @@ expect "caddy: UI upstream" 'name: OPENCTEM_WEB_UPSTREAM
               value: "t-openctem-ui:80"' "$out"
 expect "caddy: plain HTTP not allowed" 'name: OPENCTEM_ALLOW_PLAIN_HTTP
               value: "false"' "$out"
-expect "caddy: Caddyfile in ConfigMap" "@api_paths path" "$out"
+expect "caddy: Caddyfile in ConfigMap" "import planes.caddy" "$out"
+expect "caddy: planes.caddy in ConfigMap" "@plane_sensor path" "$out"
+expect "caddy: planes.caddy mounted" 'key: planes.caddy
+                path: planes.caddy' "$out"
 expect "caddy: mode files mapped" "path: modes/internal.global" "$out"
 expect "caddy: entrypoint" 'command: ["/bin/sh", "/etc/caddy/entrypoint.sh"]' "$out"
 expect "caddy: PVC" "kind: PersistentVolumeClaim" "$out"
@@ -214,10 +230,14 @@ expect "caddy: only NET_BIND_SERVICE" 'capabilities:
 reject "caddy: no /certs in internal mode" "mountPath: /certs" "$out"
 reject "caddy: no ACME env in internal mode" "name: ACME_EMAIL" "$out"
 expect "caddy: config checksum" "checksum/config:" "$out"
-diff <(sed -n '/^  Caddyfile: |-$/,/^  entrypoint.sh: |-$/p' <<<"$out" | sed '1d;$d' | sed 's/^    //' | grep -v '^[[:space:]]*$') \
+diff <(sed -n '/^  Caddyfile: |-$/,/^  planes.caddy: |-$/p' <<<"$out" | sed '1d;$d' | sed 's/^    //' | grep -v '^[[:space:]]*$') \
   <(grep -v '^[[:space:]]*$' "$chart/files/gateway/Caddyfile") >/dev/null \
   && pass "caddy: ConfigMap Caddyfile is files/gateway/Caddyfile verbatim" \
   || fail "caddy: ConfigMap Caddyfile differs from files/gateway/Caddyfile"
+diff <(sed -n '/^  planes.caddy: |-$/,/^  entrypoint.sh: |-$/p' <<<"$out" | sed '1d;$d' | sed 's/^    //' | grep -v '^[[:space:]]*$') \
+  <(grep -v '^[[:space:]]*$' "$chart/files/gateway/planes.caddy") >/dev/null \
+  && pass "caddy: ConfigMap planes.caddy is files/gateway/planes.caddy verbatim" \
+  || fail "caddy: ConfigMap planes.caddy differs from files/gateway/planes.caddy"
 out="$(render "${GW[@]}" --set gateway.mode=caddy)"
 expect "caddy: NOTES root CA command" "exec deploy/t-openctem-gateway -- cat /data/caddy/pki/authorities/local/root.crt" "$out"
 expect "caddy: NOTES URL" "URL: https://ctem.example.com" "$out"

@@ -6,15 +6,21 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Actions are pinned to commit SHAs
+        run: bash .github/scripts/check-action-pins.sh
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4.3.1
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.1.3
       
@@ -88,6 +94,12 @@ jobs:
           # files/gateway/UPSTREAM (scripts/sync-gateway.sh writes both), and
           # a warning says when that commit is behind openctem develop.
           LATEST_REF=develop tests/gateway/upstream.sh
+
+      - name: Least-privilege database roles (render checks)
+        run: |
+          # database.migrator: migration Jobs use the schema owner, the API
+          # keeps the DML-only database.auth role (D-6).
+          tests/least-privilege/run.sh
 
       - name: Single-port gateway (render checks)
         run: |

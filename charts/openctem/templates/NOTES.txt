@@ -258,4 +258,7 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 {{- end }}
 - Private (RFC1918 / ULA) scan targets: {{ if eq $sensor.allowPrivateTargets "1" }}ALLOWED (sensor.allowPrivateTargets="1"){{ else }}blocked (set sensor.allowPrivateTargets="1" to allow){{ end }}.
     kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "openctem.sensorFullname" . }}
+- Setup problems (missing volume, unreadable CA file, a tool that cannot run): open the sensor under
+  Settings → Sensors; its Setup & health checklist lists each one with the fix (needs a sensor that
+  sends a config report; older ones show a checklist derived from the heartbeat).
 {{- end }}

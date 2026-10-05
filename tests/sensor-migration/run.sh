@@ -216,16 +216,20 @@ else
   reject "conflict: never prints values (new token)" "new-token" "$out"
 fi
 
-# 6. API settings renamed in api.extraEnv.
-out="$(render -f "$here/api-env-values.yaml")"
-expect "api env: AGENT_KEY_TTL -> SENSOR_KEY_TTL" "name: SENSOR_KEY_TTL" "$out"
-reject "api env: no AGENT_ names left" "name: AGENT_" "$out"
-expect "api env: others unchanged" "name: LOG_LEVEL" "$out"
-if out="$(render -f "$here/api-env-conflict-values.yaml")"; then
-  fail "api env conflict must fail"
+# 6. The API's retired AGENT_* names in api.extraEnv fail the render
+# (the API refuses to start with them; silently dropping AGENT_KEY_TTL
+# would leave sensor keys non-expiring).
+if out="$(render -f "$here/api-env-values.yaml")"; then
+  fail "api env: retired AGENT_* names must fail the render"
 else
-  expect "api env conflict: message" "api.extraEnv sets both AGENT_KEY_TTL" "$out"
+  expect "api env: message" "api.extraEnv uses retired pre-sensor names" "$out"
+  expect "api env: names the replacement" "AGENT_KEY_TTL -> SENSOR_KEY_TTL" "$out"
+  expect "api env: names every retired key" "AGENT_PUBLIC_API_URL -> SENSOR_PUBLIC_API_URL" "$out"
+  reject "api env: never prints values" "24h" "$out"
 fi
+out="$(render -f "$here/api-env-new-values.yaml")"
+expect "api env: SENSOR_* passed through" "name: SENSOR_KEY_TTL" "$out"
+expect "api env: others unchanged" "name: LOG_LEVEL" "$out"
 
 echo
 if [ "$fails" -gt 0 ]; then

@@ -537,8 +537,8 @@ first: migration `000230` renames tables and columns, so **scale the API (and
 UI) to zero before `helm upgrade`** — the migration Job is a `pre-upgrade`
 hook and old API pods fail on the renamed schema while it runs.
 
-**Values.** An old values file with `agent:` keeps working; nothing has to
-change for the upgrade itself:
+**Values.** An old values file with `agent:` keeps working (only retired `AGENT_*`
+names in `api.extraEnv` must be renamed, see the last row):
 
 | Old (chart ≤ 0.4.x) | New | Automatic mapping |
 |---|---|---|
@@ -547,12 +547,12 @@ change for the upgrade itself:
 | `agent.allowPrivateTargets: true` / `false` | `sensor.allowPrivateTargets: "1"` / `""` | Note: chart ≤ 0.4.x rendered `"true"`, which the binary ignores, so `true` never took effect. It now does; the notice says so. |
 | (always `-platform` + bootstrap token) | — | Removed in 0.9.0: an `agent:` block needs `sensor.apiKey` or `sensor.existingSecret` (the API key of a sensor created under Settings → Sensors), else the render fails. |
 | `agent.existingSecret` / `existingSecretKey` | `sensor.existingSecret` / `existingSecretKey` | Used unchanged. |
-| `api.extraEnv` `AGENT_*` (`AGENT_KEY_TTL`, `AGENT_PUBLIC_API_URL`, `AGENT_CONFIG_TEMPLATES_DIR`, `AGENT_LB_*`) | `SENSOR_*` | Passed to the API under the new name. |
+| `api.extraEnv` `AGENT_*` (`AGENT_KEY_TTL`, `AGENT_PUBLIC_API_URL`, `AGENT_CONFIG_TEMPLATES_DIR`, `AGENT_LB_*`) | `SENSOR_*` | **None since chart 0.13.0:** the API no longer reads the old names and refuses to start with them, so the render fails and names each replacement. Rename them in your values. |
 
 The render **fails**, naming the keys (never the values), only when `agent:`
-and `sensor:` set the same key to different values, or `api.extraEnv` sets an
-`AGENT_*` and its `SENSOR_*` name to different values — the same rule the
-sensor and the API apply to their environment variables. A `sensor.*` value
+and `sensor:` set the same key to different values (the same rule the sensor
+applies to its environment variables), or when `api.extraEnv` uses a retired
+`AGENT_*` name. A `sensor.*` value
 equal to the chart default counts as unset.
 
 **What happens to the old objects.** The `<fullname>-agent` Deployment and its

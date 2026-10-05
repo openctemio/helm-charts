@@ -1,12 +1,5 @@
 {{- $sensor := include "openctem.sensor" . | fromYaml -}}
-{{- $apiRenamed := include "openctem.apiRenamedEnv" . | fromYaml -}}
-{{- $apiOldNames := list -}}
-{{- range $e := .Values.api.extraEnv -}}
-{{- if and (kindIs "map" $e) (hasKey $apiRenamed (toString ($e.name | default ""))) -}}
-{{- $apiOldNames = append $apiOldNames (toString $e.name) -}}
-{{- end -}}
-{{- end -}}
-{{- if or $sensor._legacy.used $apiOldNames }}
+{{- if $sensor._legacy.used }}
 !! DEPRECATED SETTINGS — agents were renamed to sensors (OpenCTEM v0.9.0, RFC-023)
 {{- if $sensor._legacy.used }}
 - Your values use the `agent:` block, renamed to `sensor:` in chart 0.5.0. It was
@@ -26,10 +19,6 @@
   On `helm upgrade` from chart <= 0.4.x, Helm deletes the old Deployment
   `{{ include "openctem.componentFullname" (dict "context" . "component" "agent") }}` and its chart-made Secret `{{ include "openctem.componentFullname" (dict "context" . "component" "agent") }}-bootstrap`, and creates
   `{{ include "openctem.sensorFullname" . }}`{{ if not $sensor.existingSecret }} with Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}`{{ else }}; your Secret `{{ $sensor.existingSecret }}` is used as is{{ end }}.
-{{- end }}
-{{- if $apiOldNames }}
-- api.extraEnv: {{ join ", " $apiOldNames }} {{ if eq (len $apiOldNames) 1 }}was{{ else }}were{{ end }} passed to the API as the SENSOR_* name.
-  Rename {{ if eq (len $apiOldNames) 1 }}it{{ else }}them{{ end }} in your values file.
 {{- end }}
 
 {{ end -}}

@@ -560,8 +560,9 @@ ui:
 # =============================================================================
 # Gateway: one public HTTPS entry point for the UI AND the REST API
 # =============================================================================
-# One hostname fronts both services (like Tenable.sc). Requests are routed by
-# path (and, where the router can, by credential):
+# One hostname fronts both services, so operators expose a single port and one
+# certificate. Requests are routed by path (and, where the router can, by
+# credential):
 #
 #   to the API service
 #     /api/v1/agent/  /api/v2/sensor/  /api/v1/platform/   sensors

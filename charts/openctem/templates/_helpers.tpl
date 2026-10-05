@@ -380,13 +380,11 @@ Resolve the effective sensor values, as YAML (use with fromYaml):
 {{- end }}
 
 {{/*
-api.extraEnv with the API's renamed settings (RFC-023 §9.5) moved to their
-new names: AGENT_<X> -> SENSOR_<X>. The API still reads the old names (with a
-startup WARN) and refuses to start when both are set to different values, so
-the same conflict fails the render here; an identical duplicate is dropped.
-Entries with other names are passed through unchanged.
+The API's pre-rename settings (AGENT_<X>, renamed SENSOR_<X> in RFC-023 §9.5).
+The API no longer reads them and refuses to start while one is set, so the
+render fails first, naming the replacement.
 */}}
-{{- define "openctem.apiRenamedEnv" -}}
+{{- define "openctem.apiRetiredEnv" -}}
 AGENT_CONFIG_TEMPLATES_DIR: SENSOR_CONFIG_TEMPLATES_DIR
 AGENT_PUBLIC_API_URL: SENSOR_PUBLIC_API_URL
 AGENT_KEY_TTL: SENSOR_KEY_TTL
@@ -400,33 +398,20 @@ AGENT_LB_MAX_NETWORK_THROUGHPUT_MBPS: SENSOR_LB_MAX_NETWORK_THROUGHPUT_MBPS
 {{- end }}
 
 {{- define "openctem.apiExtraEnv" -}}
-{{- $renamed := include "openctem.apiRenamedEnv" . | fromYaml -}}
-{{- $byName := dict -}}
+{{- $retired := include "openctem.apiRetiredEnv" . | fromYaml -}}
+{{- $bad := list -}}
 {{- range $e := .Values.api.extraEnv -}}
-{{- if and (kindIs "map" $e) $e.name -}}
-{{- $_ := set $byName (toString $e.name) $e -}}
-{{- end -}}
-{{- end -}}
-{{- $out := list -}}
-{{- range $e := .Values.api.extraEnv -}}
-{{- $name := "" -}}
 {{- if kindIs "map" $e -}}
-{{- $name = toString ($e.name | default "") -}}
-{{- end -}}
-{{- if hasKey $renamed $name -}}
-{{- $new := index $renamed $name -}}
-{{- if hasKey $byName $new -}}
-{{- if ne (toYaml (omit $e "name")) (toYaml (omit (index $byName $new) "name")) -}}
-{{- fail (printf "\n\napi.extraEnv sets both %s (the pre-rename name) and %s to different values. The API refuses to start with both; keep only %s.\n" $name $new $new) -}}
-{{- end -}}
-{{- else -}}
-{{- $out = append $out (merge (dict "name" $new) (omit $e "name")) -}}
-{{- end -}}
-{{- else -}}
-{{- $out = append $out $e -}}
+{{- $name := toString ($e.name | default "") -}}
+{{- if hasKey $retired $name -}}
+{{- $bad = append $bad (printf "%s -> %s" $name (index $retired $name)) -}}
 {{- end -}}
 {{- end -}}
-{{- toYaml $out -}}
+{{- end -}}
+{{- if $bad -}}
+{{- fail (printf "\n\napi.extraEnv uses retired pre-sensor names that the API no longer reads (it refuses to start with them). Rename:\n  - %s\n" (join "\n  - " $bad)) -}}
+{{- end -}}
+{{- toYaml (.Values.api.extraEnv | default list) -}}
 {{- end }}
 
 {{/*

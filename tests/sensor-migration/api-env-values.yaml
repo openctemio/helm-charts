@@ -1,4 +1,4 @@
-# The API's pre-rename settings in api.extraEnv are passed as SENSOR_*.
+# The API's retired pre-sensor settings in api.extraEnv fail the render.
 api:
   appEnv: development
   extraEnv:
@@ -7,6 +7,4 @@ api:
     - name: AGENT_KEY_TTL
       value: 24h
     - name: AGENT_PUBLIC_API_URL
-      value: https://api.example.com
-    - name: SENSOR_PUBLIC_API_URL
       value: https://api.example.com

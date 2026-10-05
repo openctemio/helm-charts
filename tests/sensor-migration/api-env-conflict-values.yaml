@@ -1,7 +1,0 @@
-api:
-  appEnv: development
-  extraEnv:
-    - name: AGENT_KEY_TTL
-      value: 24h
-    - name: SENSOR_KEY_TTL
-      value: 48h

@@ -940,7 +940,7 @@ sensor:
     # v0.4.x adds the durable outbox (results survive a platform outage) and
     # protocol v2 results; v0.3.0 images carry gitleaks and a semgrep that
     # fails to start, so do not go back to them.
-    tag: "v0.6.3"
+    tag: "v0.9.1"
     pullPolicy: IfNotPresent
   # -- REGION reported by the sensor.
   region: default

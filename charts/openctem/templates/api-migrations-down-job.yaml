@@ -59,7 +59,7 @@ spec:
               value: {{ include "openctem.databasePort" . | quote }}
             - name: DB_NAME
               value: {{ include "openctem.databaseName" . | quote }}
-            # The schema owner when database.migrator is set (D-6), else the API's role.
+            # The schema owner when database.migrator is set, else the API's role.
             {{- include "openctem.migrationsDbCredentialsEnv" . | trim | nindent 12 }}
             - name: DB_SSLMODE
               value: {{ include "openctem.databaseSslMode" . | quote }}

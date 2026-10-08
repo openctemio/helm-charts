@@ -24,9 +24,11 @@ Then install the chart:
 helm install openctem openctem/openctem -n openctem --create-namespace
 ```
 
-Read the [chart README](charts/openctem/README.md) first: the chart is
-secure by default (`api.appEnv: production` refuses to boot without TLS
-datastores and stable secrets), and its
+Read the [chart README](charts/openctem/README.md) first: the chart's
+defaults fail closed (`api.appEnv: production` refuses to render without
+stable secrets and the API refuses to boot without TLS datastores, so a bare
+install with the bundled datastores does not start) and are not a production
+configuration by themselves, and its
 [Versions](charts/openctem/README.md#versions) section says which OpenCTEM
 release each chart version installs.
 

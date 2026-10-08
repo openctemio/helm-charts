@@ -1,8 +1,9 @@
 {{- $sensor := include "openctem.sensor" . | fromYaml -}}
 {{- $persist := ((($sensor.state | default dict).persistence) | default dict) -}}
 {{- if and $sensor.enabled $persist.enabled (not $persist.existingClaim) }}
-# The sensor's state: the API key it renews on its own (api RFC-032 Phase 0).
-# Holds a credential; deleted with the release like the sensor itself.
+# The sensor's state: its paired identity (private key and sensor ID), or
+# the API key it renews on its own. Holds a credential; deleted with the
+# release like the sensor itself.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

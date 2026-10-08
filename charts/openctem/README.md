@@ -1,10 +1,26 @@
 # OpenCTEM Helm chart
 
 Deploys the OpenCTEM API + UI, with an optional bundled sensor and optional
-bundled PostgreSQL/Redis for dev/eval. This chart is **secure-by-default**:
-`api.appEnv` defaults to `production`, which turns the API's `validateProduction()` into a hard boot gate
-(DB TLS, Redis TLS + strong password, ≥64-char JWT secret, encryption key,
-secure cookies).
+bundled PostgreSQL/Redis for dev/eval.
+
+The defaults **fail closed** rather than run an insecure platform:
+`api.appEnv` defaults to `production`, which makes the render refuse to run
+without a stable encryption key and JWT secret, and turns the API's
+`validateProduction()` into a hard boot gate (DB TLS, Redis TLS + strong
+password, ≥64-char JWT secret, encryption key, secure cookies).
+
+The defaults are **not a production configuration** by themselves:
+
+- the bundled PostgreSQL and Redis are on (`postgresql.enabled`,
+  `redis.enabled`). They have no TLS, so an API in production mode does not
+  boot against them: production uses external datastores (see
+  [Datastores](#datastores-bundled--deveval-only));
+- the UI's CSRF secret is generated at render time unless `ui.secret.csrfToken`
+  or `ui.secret.existingSecret` is set (see
+  [Secrets & GitOps](#secrets--gitops-important--data-loss-footgun));
+- `networkPolicy.enabled` is off.
+
+Start production installs from `values-production.yaml`.
 
 ## Versions
 
@@ -445,36 +461,79 @@ the UI `/`. Toggle with `tests.enabled`.
 next to the API, for work the cluster can reach (public DAST, recon,
 validation). Scanning an internal network still needs a remote sensor.
 
+By default the sensor **pairs** with the platform: it has no API key, makes
+its own Ed25519 key in its state volume, and logs a code and a fingerprint.
+An administrator enters the code under **Sensors > Pair a sensor**, checks
+that the console shows the same fingerprint, and approves it; from then on
+the sensor signs every request with its key. Nothing secret goes through Helm
+values or a Secret.
+
 ```bash
-# 1. In the web console: Settings > Sensors > Add sensor; copy its API key.
+# 1. Enable it.
+helm upgrade openctem charts/openctem -n openctem -f values.yaml \
+  --set sensor.enabled=true
+# 2. Read the pairing code and fingerprint, then approve it in the console
+#    (Sensors > Pair a sensor). A request that expires is replaced by a new one.
+kubectl -n openctem logs deploy/openctem-openctem-sensor
+```
+
+Keep the state volume (`sensor.state.persistence`, on by default; the render
+fails without it while the sensor pairs): it holds the sensor's identity, and
+a pod without it has to be paired again.
+
+An organization that still allows API-key sensors can use a key instead:
+
+```bash
 kubectl -n openctem create secret generic openctem-sensor --from-literal=api-key=<key>
-# 2. Enable it.
 helm upgrade openctem charts/openctem -n openctem -f values.yaml \
   --set sensor.enabled=true --set sensor.existingSecret=openctem-sensor
 ```
 
 | Value | Default | Meaning |
 |---|---|---|
-| `sensor.mode` | `daemon` | The only mode: an API-key sensor (`-daemon -enable-commands`) that runs the scans the platform dispatches. `platform` (bootstrap-token self-registration) was removed in 0.9.0 and fails the render: no OpenCTEM API serves it. |
-| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.9.1` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. The plain tag is the default image (`<version>-default`). In v0.9.1 it carries semgrep, betterleaks, trivy, nuclei and the recon tools (subfinder, dnsx, naabu, httpx, katana); from sensor v0.11.0 it carries nuclei and the recon tools only, and semgrep, trivy and betterleaks run from the single-tool images (`<version>-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). The `-ci` and `-gitleaks` images are no longer published. See the [sensor README](https://github.com/openctemio/sensor#install). |
-| `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | The sensor's API key. Prefer `existingSecret`. |
-| `sensor.tools` | `nuclei` | Daemon: the scanners the sensor offers for dispatched jobs (`-tools`), an allowlist of what the image carries, e.g. `nuclei,httpx,subfinder,dnsx,naabu,katana`. Empty: every installed scanner. `gitleaks` is still accepted and runs betterleaks. |
+| `sensor.mode` | `daemon` | The only mode (`-daemon -enable-commands`): the sensor runs the scans the platform dispatches. `platform` (bootstrap-token self-registration) was removed in 0.9.0 and fails the render: no OpenCTEM API serves it. |
+| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.11.0` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). semgrep, trivy and betterleaks run from the single-tool images (`<version>-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
+| `sensor.name` | empty | `SENSOR_NAME`: the name the sensor proposes when it pairs (the approving administrator may change it). Empty: the Deployment name, `<release>-openctem-sensor`. |
+| `sensor.caFingerprint` / `sensor.platformKey` | empty | Pairing pins from the platform's pairing instructions (public values): `SENSOR_CA_FINGERPRINT`, the SHA-256 of the platform CA the sensor must see in the TLS chain (needs an `https` `sensor.apiUrl` with a host name), and `SENSOR_PLATFORM_KEY`, the thumbprint of the platform's pairing key. |
+| `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | An API key, for an organization that allows API-key sensors. Empty (the default): the sensor pairs. Prefer `existingSecret`. |
+| `sensor.tools` | empty | Optional allowlist of the scanners the sensor offers (`-tools`), e.g. `nuclei,httpx`. Empty: every scanner installed in the image, which the sensor detects at start and reports on its heartbeat. |
 | `sensor.allowPrivateTargets` | empty | `"1"` sets `SENSOR_ALLOW_PRIVATE_TARGETS=1` (RFC1918 / ULA targets allowed). Empty keeps them blocked. Any other value fails the render: the sensor only recognises `1`. Reaching the in-cluster API needs nothing (the sensor's API client allows the platform's private address). |
 | `sensor.scanRoots` | empty | `SENSOR_SCAN_ROOTS` for dispatched code scans; empty = `/scan`. |
-| `sensor.keyAutoRenew` | empty | `PLATFORM_KEY_AUTORENEW`, always rendered. Empty: on exactly when `sensor.state.persistence.enabled`; `true` / `false` force it. The renewed key is kept in the state volume (`-credentials=/var/lib/openctem/state/sensor-credentials.json`), not the Secret: the renewal retires the key in the Secret, so a pod without that volume would start with a dead key. The API issues expiring keys only with `SENSOR_KEY_TTL`. |
-| `sensor.state.persistence.enabled` | `true` | The sensor's state at `/var/lib/openctem/state` (`SENSOR_STATE_DIR`): the API key it renews on its own. A PersistentVolumeClaim `<release>-openctem-sensor-state` (`size` `128Mi`, `storageClass`, `accessModes`) or `existingClaim`. It holds a credential: back it up like one. `false`: an `emptyDir`, and key auto-renewal stays off. |
+| `sensor.keyAutoRenew` | empty | API key only. `PLATFORM_KEY_AUTORENEW`, always rendered. Empty: on exactly when `sensor.state.persistence.enabled`; `true` / `false` force it. The renewed key is kept in the state volume (`-credentials=/var/lib/openctem/state/sensor-credentials.json`), not the Secret: the renewal retires the key in the Secret, so a pod without that volume would start with a dead key. The API issues expiring keys only with `SENSOR_KEY_TTL`. |
+| `sensor.state.persistence.enabled` | `true` | The sensor's state at `/var/lib/openctem/state` (`SENSOR_STATE_DIR`): its paired identity (`identity/`: private key and sensor ID), or the API key it renews on its own. A PersistentVolumeClaim `<release>-openctem-sensor-state` (`size` `128Mi`, `storageClass`, `accessModes`) or `existingClaim`. It holds a credential: back it up like one. Required while the sensor pairs. With an API key, `false` gives an `emptyDir` and key auto-renewal stays off. |
 | `sensor.content.persistence.enabled` | `true` | Scanner content cache at `/var/lib/openctem/content` (`SENSOR_CONTENT_DIR`: trivy DB, nuclei templates, semgrep rules), so a new pod does not download it again. A PersistentVolumeClaim `<release>-openctem-sensor-content` (`size` `5Gi`) or `existingClaim`. Disposable, and kept apart from the state. `false`: an `emptyDir` (`sensor.content.emptyDirSizeLimit`). |
-| `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. Any sensor PVC (outbox, state, content) requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`. |
+| `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. Any sensor PVC (outbox, state, content) requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`, with `fsGroupChangePolicy: OnRootMismatch` unless `podSecurityContext` sets a policy. |
 | `sensor.outbox.maxBytes` / `.maxAge` / `.emptyDirSizeLimit` | empty | `SENSOR_OUTBOX_MAX_BYTES` (default `1GiB`, at most half the free space; keep it below the volume), `SENSOR_OUTBOX_MAX_AGE` (default `168h`), and the `emptyDir` size limit. |
 | `sensor.localPolicy.enabled` | `false` | The sensor-local policy ([RFC-040 §5.7](https://github.com/openctemio/openctem/blob/develop/api/docs/rfcs/RFC-040-platform-sensor-mutual-distrust.md)): a read-only file set by the network owner, mounted at `/etc/openctem/sensor-policy.yaml` (`SENSOR_LOCAL_POLICY`, ConfigMap `defaultMode 0444`). The sensor refuses every job outside it (targets, ports, tools, job types, custom templates, interactsh, rate, kill switch) whatever the platform sends, and does not start when the policy is invalid. Off by default so an upgrade keeps today's behavior (the sensor reports `local_policy: absent`); **new installs should turn it on.** Keys: [`docs/LOCAL_POLICY.md`](https://github.com/openctemio/sensor/blob/main/docs/LOCAL_POLICY.md). Older sensor images ignore the file. |
 | `sensor.localPolicy.policy` | example | The policy document (rendered into `<release>-openctem-sensor-policy`; changing it rolls the pod). The default mirrors the sensor's `docs/sensor-policy.example.yaml` with a documentation range (`203.0.113.0/24`): replace it. Custom templates and interactsh are off. The render fails when it is not a `openctem.io/sensor-policy/v1` document. |
 | `sensor.localPolicy.existingConfigMap` / `.existingConfigMapKey` | — / `sensor-policy.yaml` | Use a ConfigMap the network owner manages (keep its RBAC away from the platform's operators) instead of `policy`. |
 | `sensor.localPolicy.killSwitchFile` | empty | `SENSOR_KILL_SWITCH_FILE`: while the file exists the sensor runs no job and heartbeats "paused by local policy". Put it on a volume the host owner can write (`sensor.extraVolumes` / `extraVolumeMounts`); in-cluster, `kill_switch: true` in the policy plus a rollout does the same. |
-| `sensor.podSecurityContext` | `runAsNonRoot`, uid/gid/fsGroup `999`, seccomp `RuntimeDefault` | The default image runs as uid/gid 999. The single-tool images (`-nuclei`, `-trivy`, `-semgrep`, `-betterleaks`) use 1001: set `runAsUser`, `runAsGroup` and `fsGroup` to 1001 for them. `runAsNonRoot` needs the numeric `runAsUser` (the image's `USER` is a name). |
+| `sensor.podSecurityContext` | `runAsNonRoot`, uid/gid/fsGroup `999`, `fsGroupChangePolicy: OnRootMismatch`, seccomp `RuntimeDefault` | The default image runs as uid/gid 999. The single-tool images (`-nuclei`, `-trivy`, `-semgrep`, `-betterleaks`) use 1001: set `runAsUser`, `runAsGroup` and `fsGroup` to 1001 for them. `runAsNonRoot` needs the numeric `runAsUser` (the image's `USER` is a name). Keep `OnRootMismatch`: with `Always` the kubelet makes every file group-readable at each mount, and the sensor refuses an identity key its group can read, so a paired sensor would not start after its pod is replaced. |
 | `sensor.securityContext` | no privilege escalation, read-only root filesystem, `drop: [ALL]` | Container hardening (RFC-040 §5.10). Set a key to `null` to drop it. |
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
-| `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp`, `/home/openctem`, `/scan`, `/cache`, `/config` / empty | `emptyDir`s mounted over the read-only root filesystem where the sensor and its tools write (the state, content and outbox directories are volumes already). |
+| `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.15.0 (sensor pairing, sensor v0.11.0)
+
+- **The bundled sensor pairs by default.** With no `sensor.apiKey` or
+  `sensor.existingSecret` the render no longer fails: the sensor pairs (see
+  [Bundled sensor](#bundled-sensor-optional)). Releases that set an API key
+  keep using it. Pairing needs `sensor.state.persistence.enabled` (the
+  default).
+- **Default image `v0.11.0`** (nuclei and the recon tools), and
+  **`sensor.tools` defaults to empty**: the sensor offers every scanner in the
+  image instead of nuclei only. Set `sensor.tools: nuclei` to keep the old
+  allowlist.
+- **`sensor.writableDirs` defaults to `/tmp` only.** The old default also
+  mounted empty directories over `/home/openctem`, `/scan`, `/cache` and
+  `/config`, which hid the nuclei-templates release baked into the image. A
+  values file that lists `/home/openctem` keeps hiding it: remove it.
+- **`fsGroupChangePolicy: OnRootMismatch`** is set whenever the sensor pod has
+  an `fsGroup` (unless `sensor.podSecurityContext` sets a policy): the kubelet
+  no longer makes the files of the sensor volumes group-readable at every
+  mount, which would make the sensor refuse its identity key after a pod
+  replacement.
 
 ## Upgrading to 0.11.0 (hardened sensor, sensor-local policy)
 
@@ -716,7 +775,7 @@ description from its `# --` comment (generated with
 | `database.auth.userKey` | string | `"DB_USER"` |  |
 | `database.auth.username` | string | `""` |  |
 | `database.host` | string | `""` | Settings in this section are used only when postgresql.enabled=false. |
-| `database.migrator` | object | see `values.yaml` | Least-privilege split (OpenCTEM api/docs/deployment/database-roles.md). When `username` (or an existing secret) is set, the migration Jobs connect as this schema owner (openctem_migrator) and only the API keeps `database.auth` above, which should then be the DML-only role (openctem_app). Run the openctem api/deploy/postgres/least-privilege-roles.sql once as the Postgres superuser before the first install. Empty = migrations use database.auth (the old single-role layout). External databases only. |
+| `database.migrator` | object | see `values.yaml` | Least-privilege split (openctem api/docs/deployment/database-roles.md): the API cannot change the schema. When `username` (or an existing secret) is set, the migration Jobs connect as this schema owner (openctem_migrator) and only the API keeps `database.auth` above, which should then be the DML-only role (openctem_app). Run the openctem api/deploy/postgres/least-privilege-roles.sql once as the Postgres superuser before the first install. Empty = migrations use database.auth (the old single-role layout). External databases only. |
 | `database.migrator.existingSecret` | string | `""` | Existing secret holding the migrator user and password keys. Empty = the database.auth secret (created with these keys when createSecret). |
 | `database.name` | string | `"openctem"` |  |
 | `database.port` | int | `5432` |  |
@@ -783,8 +842,9 @@ description from its `# --` comment (generated with
 | `redisConfig.port` | int | `6379` |  |
 | `sensor.affinity` | object | `{}` |  |
 | `sensor.allowPrivateTargets` | string | `""` | SENSOR_ALLOW_PRIVATE_TARGETS. Empty (default): RFC1918 / IPv6 ULA targets are refused — co-located sensors are for external-reachable work; internal scanning belongs on a remote sensor. "1": allow private targets. Loopback, link-local/IMDS and CGNAT stay blocked either way. The sensor only recognises "1", so any other value fails the render. (Reaching the in-cluster API needs no setting: since sdk-go v0.7.2 the sensor's API client allows the platform's private address.) |
-| `sensor.apiKey` | string | `""` | The sensor's API key (API_KEY). For production provide it out-of-band via existingSecret instead of committing it here. |
+| `sensor.apiKey` | string | `""` | The sensor's API key (API_KEY), for organizations that allow API-key sensors. Empty, with no existingSecret (the default): the sensor pairs. It makes its own key in the state volume and logs a code; an administrator enters the code under Sensors > Pair a sensor, compares the fingerprint and approves it. For production put a key in existingSecret, not here. |
 | `sensor.apiUrl` | string | `""` | Override the API base URL (API_URL). Defaults to the in-cluster API service. It must reach the API directly: the sensor refuses redirects. |
+| `sensor.caFingerprint` | string | `""` | SENSOR_CA_FINGERPRINT, from the platform's pairing instructions (a public value): the SHA-256 of the platform CA the sensor must see in the TLS chain. Needs an https apiUrl with a host name. Empty: not pinned. |
 | `sensor.content` | object | see `values.yaml` | Scanner content cache at /var/lib/openctem/content (SENSOR_CONTENT_DIR: trivy DB, nuclei templates, semgrep rules), so a new pod does not download it again. Disposable (it can be deleted), and kept apart from the state on purpose. |
 | `sensor.content.emptyDirSizeLimit` | string | `""` | emptyDir size limit when persistence is off (empty: none). |
 | `sensor.content.persistence.enabled` | bool | `true` | Back the content cache with a PersistentVolumeClaim (needs replicaCount 1; switches the Deployment to Recreate). Off: an emptyDir (emptyDirSizeLimit). |
@@ -796,14 +856,15 @@ description from its `# --` comment (generated with
 | `sensor.extraVolumes` | list | `[]` | Extra volumes and mounts for the sensor container (for example a host directory holding the kill switch file). |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
-| `sensor.image.tag` | string | `"v0.9.1"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag (v0.4.2, latest; from v0.4.2) is the default image: semgrep, betterleaks, trivy and nuclei, the same as <version>-default. Other variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy, and -ci for CI. Pin a version for reproducible installs. v0.4.x adds the durable outbox (results survive a platform outage) and protocol v2 results; v0.3.0 images carry gitleaks and a semgrep that fails to start, so do not go back to them. |
+| `sensor.image.tag` | string | `"v0.11.0"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
 | `sensor.keyAutoRenew` | string | `""` | Renew the sensor API key before it expires and when the platform asks (PLATFORM_KEY_AUTORENEW). The renewed key is kept in the state volume (/var/lib/openctem/state/sensor-credentials.json), not the Secret: the renewal retires the key in the Secret. Empty (default): on exactly when state.persistence.enabled (a renewed key on an emptyDir is lost with the pod, which then starts with the retired key). true / false force it. |
 | `sensor.localPolicy` | object | see `values.yaml` | The sensor-local policy (api RFC-040 §5.7): a read-only file the network owner writes, mounted at /etc/openctem/sensor-policy.yaml. The sensor refuses every job outside it (targets, ports, tools, job types, custom templates, interactsh, rate, kill switch) whatever the platform sends; a policy it cannot load stops it. Off by default so an upgrade keeps today's behavior (the sensor then reports local_policy "absent"); new installs should turn it on and replace the example ranges. Keys: docs/LOCAL_POLICY.md in openctemio/sensor. Needs sensor >= the release that ships the local policy (older images ignore the file). |
 | `sensor.localPolicy.existingConfigMap` | string | `""` | A pre-created ConfigMap holding sensor-policy.yaml (kept out of this release so whoever installs the platform need not own the policy). Takes precedence over policy. |
 | `sensor.localPolicy.existingConfigMapKey` | string | `"sensor-policy.yaml"` | Key of the policy in existingConfigMap. |
 | `sensor.localPolicy.killSwitchFile` | string | `""` | SENSOR_KILL_SWITCH_FILE: while this file exists the sensor runs no job and heartbeats "paused by local policy". It must sit on a volume the host owner can write (extraVolumes/extraVolumeMounts); empty: none. kill_switch: true in the policy plus a rollout is the in-cluster way. |
 | `sensor.localPolicy.policy` | string | see `values.yaml` | The policy document, rendered into a ConfigMap when existingConfigMap is empty. Mirrors the sensor's docs/sensor-policy.example.yaml (custom templates and interactsh off). |
-| `sensor.mode` | string | `"daemon"` | How the sensor connects to the platform. Only "daemon": an API-key sensor (create a sensor under Settings → Sensors, put its API key in apiKey or existingSecret); it runs `-daemon -enable-commands`, executing the scans the platform dispatches. "platform" (the bootstrap-token self-registration chart <= 0.4.x ran) was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered. |
+| `sensor.mode` | string | `"daemon"` | How the sensor runs. Only "daemon": `-daemon -enable-commands`, running the scans the platform dispatches. It authenticates with its own key (pairing, the default) or with an API key (apiKey / existingSecret). "platform" (the bootstrap-token self-registration chart <= 0.4.x ran) was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered. |
+| `sensor.name` | string | `""` | Name the sensor proposes when it pairs (SENSOR_NAME); the administrator who approves it may change it. Empty: the sensor's Deployment name (<release>-openctem-sensor). |
 | `sensor.netRaw` | bool | `false` | Add the NET_RAW capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.nodeSelector` | object | `{}` |  |
 | `sensor.outbox` | object | see `values.yaml` | The sensor's outbox: results kept at /var/lib/openctem/outbox until the platform accepted them (sensor >= v0.4.0), so an API outage or a pod restart loses nothing. By default it is an emptyDir, which survives a container restart but NOT a pod deletion, reschedule or upgrade: results still queued then are lost. Enable persistence for a PVC. |
@@ -812,25 +873,26 @@ description from its `# --` comment (generated with
 | `sensor.outbox.maxBytes` | string | `""` | SENSOR_OUTBOX_MAX_BYTES (empty: the sensor's default, 1GiB and at most half of the free space). Keep it below the volume size. |
 | `sensor.outbox.persistence.enabled` | bool | `false` | Back the outbox with a PersistentVolumeClaim. Needs replicaCount 1 (one sensor process per outbox) and switches the Deployment to the Recreate strategy (a ReadWriteOnce volume). |
 | `sensor.outbox.persistence.existingClaim` | string | `""` | Use this pre-created claim instead of creating one. |
-| `sensor.outbox.persistence.fsGroup` | int | `999` | fsGroup given to the pod (unless podSecurityContext sets one) so the image's user (uid/gid 999) can write the volumes (outbox, state, content); applied when any of them is a PersistentVolumeClaim. |
+| `sensor.outbox.persistence.fsGroup` | int | `999` | fsGroup given to the pod (unless podSecurityContext sets one) so the image's user (uid/gid 999) can write the volumes (outbox, state, content); applied when any of them is a PersistentVolumeClaim, with fsGroupChangePolicy OnRootMismatch (see podSecurityContext). |
 | `sensor.outbox.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |
+| `sensor.platformKey` | string | `""` | SENSOR_PLATFORM_KEY, from the platform's pairing instructions (a public value): the thumbprint of the platform's pairing key; pairing refuses another key. Empty: not pinned. |
 | `sensor.podAnnotations` | object | `{}` |  |
 | `sensor.podLabels` | object | `{}` |  |
-| `sensor.podSecurityContext` | object | see `values.yaml` | Pod security context. The sensor image runs as uid/gid 999 (the single-tool -nuclei/-trivy/-semgrep/-betterleaks images use 1001: set runAsUser/runAsGroup/fsGroup to 1001 for them). runAsNonRoot needs a numeric runAsUser because the image's USER is a name. |
+| `sensor.podSecurityContext` | object | see `values.yaml` | Pod security context. The sensor image runs as uid/gid 999 (the single-tool -nuclei/-trivy/-semgrep/-betterleaks images use 1001: set runAsUser/runAsGroup/fsGroup to 1001 for them). runAsNonRoot needs a numeric runAsUser because the image's USER is a name. Keep fsGroupChangePolicy OnRootMismatch: the kubelet then sets the group of a volume's files only while the volume's root lacks it (a new volume). With the default, Always, every mount makes each file group-readable, and the sensor refuses an identity key its group can read: a paired sensor would not start after its pod is replaced. |
 | `sensor.region` | string | `"default"` | REGION reported by the sensor. |
 | `sensor.replicaCount` | int | `1` |  |
 | `sensor.resources` | object | `{}` |  |
 | `sensor.scanRoots` | string | `""` | SENSOR_SCAN_ROOTS: ':'-separated directories that filesystem targets of dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside. Empty: the sensor's working directory (/scan in the image). |
 | `sensor.securityContext` | object | see `values.yaml` | Container security context: no privilege escalation, a read-only root filesystem (the directories the sensor and its tools write are emptyDirs or the state/content/outbox volumes: see writableDirs) and no capabilities (netRaw adds NET_RAW back). |
-| `sensor.state` | object | see `values.yaml` | The sensor's state at /var/lib/openctem/state (SENSOR_STATE_DIR): the API key it renews on its own (api RFC-032 Phase 0). Holds a credential: back it up like one. With persistence off it is an emptyDir and key auto-renewal stays off (keyAutoRenew). |
+| `sensor.state` | object | see `values.yaml` | The sensor's state at /var/lib/openctem/state (SENSOR_STATE_DIR): its paired identity (identity/: its private key and sensor ID), or the API key it renews on its own. Holds a credential: back it up like one. Pairing needs it persistent (the render fails otherwise: a new pod would have to be paired again). With an API key and persistence off it is an emptyDir and key auto-renewal stays off (keyAutoRenew). |
 | `sensor.state.persistence.enabled` | bool | `true` | Back the state with a PersistentVolumeClaim (needs replicaCount 1; switches the Deployment to Recreate). |
 | `sensor.state.persistence.existingClaim` | string | `""` | Use this pre-created claim instead of creating one. |
 | `sensor.state.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |
 | `sensor.terminationGracePeriodSeconds` | int | `45` | Seconds Kubernetes waits after SIGTERM. The sensor drains for up to 30s and hands unfinished work back so the platform re-queues it at once; the Kubernetes default (30) can cut that off. |
 | `sensor.tolerations` | list | `[]` |  |
-| `sensor.tools` | string | `"nuclei"` | daemon mode: comma-separated scanners the sensor offers for dispatched jobs (-tools). The default image carries semgrep, betterleaks, trivy and nuclei ("gitleaks" is still accepted and runs betterleaks). |
+| `sensor.tools` | string | `""` | Optional comma-separated allowlist of the scanners the sensor offers (-tools). Empty (default): every scanner installed in the image, which the sensor detects at start and reports on its heartbeat. |
 | `sensor.verbose` | bool | `false` |  |
-| `sensor.writableDirs` | list | `["/tmp","/home/openctem","/scan","/cache","/config"]` | Writable emptyDirs mounted over the read-only root filesystem: /tmp, the home directory (tool configs and caches), the scan workspace and the image's cache and config directories. |
+| `sensor.writableDirs` | list | `["/tmp"]` | Writable emptyDirs mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only /tmp: each scan runs with its own home directory there, and the tools' configuration and cache go there too (XDG_CONFIG_HOME, XDG_CACHE_HOME). Do not mount over /home/openctem: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good when it cannot download one). |
 | `sensor.writableDirsSizeLimit` | string | `""` | emptyDir size limit of each writable directory (empty: none). |
 | `tests.enabled` | bool | `true` |  |
 | `tests.image.pullPolicy` | string | `"IfNotPresent"` |  |

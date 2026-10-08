@@ -12,6 +12,21 @@
 {{- if and $pairing (not $statePersist.enabled) }}
 {{- fail "\n\nThe sensor pairs (no sensor.apiKey or sensor.existingSecret), so its identity must survive the pod: set sensor.state.persistence.enabled=true (the default), or give it an API key.\n" }}
 {{- end }}
+{{- $sandbox := $sensor.sandbox | default dict -}}
+{{- if not (has ($sandbox.network | default "auto") (list "auto" "required" "off")) }}
+{{- fail "\n\nsensor.sandbox.network must be auto, required or off.\n" }}
+{{- end }}
+{{- if not (has ($sandbox.seccompProfile | default "runtime-default") (list "runtime-default" "openctem")) }}
+{{- fail "\n\nsensor.sandbox.seccompProfile must be runtime-default or openctem.\n" }}
+{{- end }}
+{{- $ownSeccomp := eq $sandbox.seccompProfile "openctem" -}}
+{{- $userSeccomp := ((($sensor.podSecurityContext | default dict).seccompProfile | default dict).type | default "RuntimeDefault") -}}
+{{- if and (eq $sandbox.network "required") (not $ownSeccomp) (eq $userSeccomp "RuntimeDefault") }}
+{{- fail "\n\nsensor.sandbox.network=required cannot work under the runtime's default seccomp profile, which blocks the namespaces confinement needs: set sensor.sandbox.seccompProfile=openctem (or your own Localhost profile in sensor.podSecurityContext.seccompProfile).\n" }}
+{{- end }}
+{{- if and (eq $userSeccomp "Unconfined") }}
+{{- fail "\n\nsensor.podSecurityContext.seccompProfile Unconfined is refused: use sensor.sandbox.seccompProfile=openctem for confinement.\n" }}
+{{- end }}
 {{- if and $persist.enabled (gt (int $sensor.replicaCount) 1) }}
 {{- fail "\n\nsensor.outbox.persistence.enabled needs sensor.replicaCount=1: an outbox belongs to one sensor process (the sensor locks it).\n" }}
 {{- end }}
@@ -71,6 +86,11 @@ spec:
              group-readable at every mount, and the sensor then refuses it. */}}
       {{- if and (hasKey $podSC "fsGroup") (not (hasKey $podSC "fsGroupChangePolicy")) }}
       {{- $_ := set $podSC "fsGroupChangePolicy" "OnRootMismatch" }}
+      {{- end }}
+      {{- if $ownSeccomp }}
+      {{- /* The sensor's own profile (installed on the node): the runtime's
+             default plus clone/unshare of new namespaces. */}}
+      {{- $_ := set $podSC "seccompProfile" (dict "type" "Localhost" "localhostProfile" (include "openctem.sensorSeccompFile" .)) }}
       {{- end }}
       {{- with $podSC }}
       securityContext:
@@ -149,6 +169,9 @@ spec:
               value: /var/lib/openctem/state
             - name: SENSOR_CONTENT_DIR
               value: /var/lib/openctem/content
+            # Per-task network confinement (RFC-060).
+            - name: SENSOR_SANDBOX_NETWORK
+              value: {{ $sandbox.network | default "auto" | quote }}
             # The home directory stays the image's (read-only): it holds the
             # baked nuclei-templates release. Tools write their configuration
             # and cache under /tmp instead.

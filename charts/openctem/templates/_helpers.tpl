@@ -936,3 +936,21 @@ several replicas (duplicate scheduled scans, forked audit chain).
 {{- fail (printf "\n\napi: %d replica(s) / autoscaling up to %d requested, but the API is not yet safe with more than one replica: its schedulers and background controllers run in every replica, so scheduled scans fire twice and the audit hash chain forks.\nSet api.replicaCount=1 and api.autoscaling.maxReplicas=1 (or autoscaling.enabled=false).\nOnly if the API version you deploy documents multi-replica support, set api.allowMultipleReplicas=true.\n" $replicas $max) -}}
 {{- end -}}
 {{- end -}}
+
+
+{{/*
+Sensor protocol v3 (OpenCTEM RFC-059): the sensor host name without a port,
+validated when the transport is on.
+*/}}
+{{- define "openctem.sensorPublicHostname" -}}
+{{- $st := .Values.api.sensorTransport -}}
+{{- if not $st.publicHost -}}
+{{- fail "\n\napi.sensorTransport.publicHost is required with api.sensorTransport.enabled and a gRPC binding (e.g. sensors.example.com:443).\n" -}}
+{{- end -}}
+{{- (split ":" $st.publicHost)._0 -}}
+{{- end }}
+
+{{/* The sensor CA secret name (existing or chart-made). */}}
+{{- define "openctem.sensorCASecret" -}}
+{{- .Values.api.sensorTransport.mtls.ca.existingSecret | default (printf "%s-sensor-ca" (include "openctem.apiFullname" .)) -}}
+{{- end }}

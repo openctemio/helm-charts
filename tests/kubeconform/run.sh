@@ -27,6 +27,8 @@ check "sensor (API key, local policy, outbox volume), NetworkPolicy, monitoring"
   --set sensor.localPolicy.enabled=true --set sensor.outbox.persistence.enabled=true \
   --set networkPolicy.enabled=true --set monitoring.enabled=true \
   --set monitoring.serviceMonitor.enabled=true --set monitoring.token=0123456789abcdef0123456789abcdef
+check "sensor with its own seccomp profile (installer DaemonSet)" --set api.appEnv=development --set sensor.enabled=true \
+  --set sensor.sandbox.seccompProfile=openctem --set sensor.sandbox.network=required
 check "gateway caddy" --set api.appEnv=development --set gateway.mode=caddy --set gateway.host=openctem.example.com --set "gateway.trustedProxies={10.244.0.0/16}"
 check "production values" -f "$chart/values-production.yaml"
 

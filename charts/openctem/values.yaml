@@ -1198,6 +1198,32 @@ sensor:
   # -- Add the NET_RAW capability (naabu SYN scans, ICMP). Off: port scans
   #    use TCP connect.
   netRaw: false
+  # -- Per-task network confinement (OpenCTEM RFC-060): each tool runs in its
+  #    own network namespace, and its traffic leaves only through the task's
+  #    egress forwarder, which admits only the task's scope.
+  sandbox:
+    # -- auto: confine when the node allows it, else run unconfined and
+    #    report it; required: refuse to run a task unconfined; off: never.
+    network: auto
+    # -- runtime-default: the container runtime's seccomp profile, which
+    #    blocks the namespaces confinement needs (tasks then run unconfined
+    #    under auto, and fail under required). openctem: the sensor's own
+    #    profile (the runtime's default plus clone/unshare of new namespaces),
+    #    installed on the nodes by a DaemonSet (installProfile) and used as a
+    #    Localhost profile. The node must also allow unprivileged user
+    #    namespaces (on Ubuntu 23.10+, kernel.apparmor_restrict_unprivileged_userns=0
+    #    or an AppArmor profile that permits them).
+    seccompProfile: runtime-default
+    # -- With seccompProfile openctem: install the profile with a DaemonSet
+    #    (root, no capabilities, read-only root filesystem, writes only the
+    #    kubelet's seccomp/openctem directory). false: install it yourself at
+    #    <kubelet root>/seccomp/openctem/<the file name the Deployment names>.
+    installProfile: true
+    # -- The kubelet's root directory on the nodes.
+    kubeletRoot: /var/lib/kubelet
+    # -- Image of the installer (needs sh and cp: the default sensor image
+    #    has them; the -slim variant does not). Empty: the sensor image.
+    installerImage: ""
   # -- Writable emptyDirs mounted over the read-only root filesystem. Besides
   #    its state, content and outbox volumes the sensor writes only /tmp:
   #    each scan runs with its own home directory there, and the tools'

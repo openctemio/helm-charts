@@ -547,6 +547,8 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.localPolicy.killSwitchFile` | empty | `SENSOR_KILL_SWITCH_FILE`: while the file exists the sensor runs no job and heartbeats "paused by local policy". Put it on a volume the host owner can write (`sensor.extraVolumes` / `extraVolumeMounts`); in-cluster, `kill_switch: true` in the policy plus a rollout does the same. |
 | `sensor.podSecurityContext` | `runAsNonRoot`, uid/gid/fsGroup `999`, `fsGroupChangePolicy: OnRootMismatch`, seccomp `RuntimeDefault` | The default image runs as uid/gid 999. The single-tool images (`-nuclei`, `-trivy`, `-semgrep`, `-betterleaks`) use 1001: set `runAsUser`, `runAsGroup` and `fsGroup` to 1001 for them. `runAsNonRoot` needs the numeric `runAsUser` (the image's `USER` is a name). Keep `OnRootMismatch`: with `Always` the kubelet makes every file group-readable at each mount, and the sensor refuses an identity key its group can read, so a paired sensor would not start after its pod is replaced. |
 | `sensor.securityContext` | no privilege escalation, read-only root filesystem, `drop: [ALL]` | Container hardening (RFC-040 §5.10). Set a key to `null` to drop it. |
+| `sensor.sandbox.network` | `auto` | Per-task network confinement (RFC-060, `SENSOR_SANDBOX_NETWORK`): `auto` confines when the node allows it, `required` refuses to run a task unconfined, `off` never confines. |
+| `sensor.sandbox.seccompProfile` | `runtime-default` | `openctem`: run the sensor under its own seccomp profile (the runtime default plus new namespaces), installed on the nodes by a DaemonSet (`sensor.sandbox.installProfile`, `kubeletRoot`, `installerImage`). |
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
@@ -590,6 +592,17 @@ needs nothing. With a single-tool image (`-nuclei`, `-trivy`, `-semgrep`,
 that directory in `sensor.writableDirs`, or
 `sensor.securityContext.readOnlyRootFilesystem: false`. Naabu SYN scans need
 `sensor.netRaw: true`.
+
+**Per-task network confinement (OpenCTEM RFC-060).** The sensor runs each tool in its own network namespace. The tool's traffic leaves only through the task's egress forwarder, which admits only the task's targets.
+
+The container runtime's default seccomp profile blocks the namespaces this needs. Under it, `sensor.sandbox.network: auto` (the default) runs tasks unconfined and reports that, and `required` refuses to render.
+
+To confine:
+
+1. Set `sensor.sandbox.seccompProfile: openctem`. The sensor then runs under its own Localhost profile, which is the runtime default plus `clone`/`unshare` of new namespaces. The profile file is named by its digest, so a new profile rolls the pods.
+2. Let the installer DaemonSet copy the profile to each node, or set `installProfile: false` and put it in `<kubelet root>/seccomp/openctem/` yourself.
+3. Make sure the node also allows unprivileged user namespaces. On Ubuntu 23.10 and later, `kernel.apparmor_restrict_unprivileged_userns=1` takes every capability away inside a new user namespace for AppArmor-unconfined processes, so confinement cannot set it up. Either use a runtime that applies its default AppArmor profile, or allow user namespaces for the sensor.
+4. Check the result: the sensor reports whether each task ran confined (`network_enforced`).
 
 `sensor.localPolicy` adds the sensor-local policy (off by default, so nothing
 changes until you enable it). Enable it with ranges of your own: see the
@@ -925,6 +938,11 @@ description from its `# --` comment (generated with
 | `sensor.region` | string | `"default"` | REGION reported by the sensor. |
 | `sensor.replicaCount` | int | `1` |  |
 | `sensor.resources` | object | `{}` |  |
+| `sensor.sandbox.installProfile` | bool | `true` | With seccompProfile openctem: install the profile on the nodes with a DaemonSet (root, no capabilities, read-only root filesystem, writes only `<kubeletRoot>/seccomp/openctem`). |
+| `sensor.sandbox.installerImage` | string | `""` | Installer image (needs sh and cp). Empty: the sensor image. |
+| `sensor.sandbox.kubeletRoot` | string | `"/var/lib/kubelet"` | The kubelet's root directory on the nodes. |
+| `sensor.sandbox.network` | string | `"auto"` | auto, required or off: per-task network confinement (RFC-060). |
+| `sensor.sandbox.seccompProfile` | string | `"runtime-default"` | runtime-default or openctem (the sensor's own Localhost profile). |
 | `sensor.scanRoots` | string | `""` | SENSOR_SCAN_ROOTS: ':'-separated directories that filesystem targets of dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside. Empty: the sensor's working directory (/scan in the image). |
 | `sensor.securityContext` | object | see `values.yaml` | Container security context: no privilege escalation, a read-only root filesystem (the directories the sensor and its tools write are emptyDirs or the state/content/outbox volumes: see writableDirs) and no capabilities (netRaw adds NET_RAW back). |
 | `sensor.state` | object | see `values.yaml` | The sensor's state at /var/lib/openctem/state (SENSOR_STATE_DIR): its paired identity (identity/: its private key and sensor ID), or the API key it renews on its own. Holds a credential: back it up like one. Pairing needs it persistent (the render fails otherwise: a new pod would have to be paired again). With an API key and persistence off it is an emptyDir and key auto-renewal stays off (keyAutoRenew). |

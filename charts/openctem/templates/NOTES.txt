@@ -128,9 +128,6 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 {{- if eq (.Values.api.auth.provider | toString) "local" }}{{- else }}
 {{- $warn = append $warn (printf "AUTH_PROVIDER=%s requires Keycloak configured over HTTPS in production." .Values.api.auth.provider) -}}
 {{- end }}
-{{- if and .Values.ui.secret.createSecret (not .Values.ui.secret.existingSecret) (not .Values.ui.secret.csrfToken) }}
-{{- $warn = append $warn "UI CSRF_SECRET is auto-generated. Lower stakes than the API keys (a rotated CSRF salt just re-issues tokens), but under GitOps the cluster lookup returns empty so it rotates on every sync. Set ui.secret.csrfToken or ui.secret.existingSecret for stability." -}}
-{{- end }}
 {{- if $warn }}
 !! ACTION REQUIRED — the API may fail to boot until these are resolved:
 {{- range $i, $w := $warn }}

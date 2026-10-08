@@ -15,9 +15,6 @@ The defaults are **not a production configuration** by themselves:
   `redis.enabled`). They have no TLS, so an API in production mode does not
   boot against them: production uses external datastores (see
   [Datastores](#datastores-bundled--deveval-only));
-- the UI's CSRF secret is generated at render time unless `ui.secret.csrfToken`
-  or `ui.secret.existingSecret` is set (see
-  [Secrets & GitOps](#secrets--gitops-important--data-loss-footgun));
 - `networkPolicy.enabled` is off.
 
 Start production installs from `values-production.yaml`.
@@ -347,10 +344,6 @@ refuse to render unless you provide a stable value for each. Provide **one** of:
 - or explicit values `api.encryption.key` / `api.auth.jwtSecret` (kept stable in
   your values source):
   `openssl rand -hex 32` (encryption) and `openssl rand -base64 48` (JWT).
-
-The UI `CSRF_SECRET` is lower stakes (rotating it just re-issues CSRF tokens),
-so it is a **warning**, not a hard failure — but for GitOps stability set
-`ui.secret.csrfToken` or `ui.secret.existingSecret`.
 
 ## Datastores (bundled = dev/eval only)
 
@@ -981,10 +974,6 @@ description from its `# --` comment (generated with
 | `ui.readinessProbe.httpGet.port` | string | `"http"` |  |
 | `ui.replicaCount` | int | `1` | Replica count. Default 1 for dev/eval. PRODUCTION should run >= 2 for HA (see values-production.yaml). Pair with podDisruptionBudget + topologySpreadConstraints when running >= 2. |
 | `ui.resources` | object | `{"limits":{"cpu":"500m","memory":"256Mi"},"requests":{"cpu":"50m","memory":"128Mi"}}` | CPU requests are REQUIRED for the CPU-target HPA to function. |
-| `ui.secret.createSecret` | bool | `true` | Create UI secret when existingSecret is not set. |
-| `ui.secret.csrfToken` | string | `""` | Leave empty to auto-generate like `openssl rand -base64 32`. |
-| `ui.secret.csrfTokenKey` | string | `"CSRF_SECRET"` | Secret data key holding the CSRF secret. The UI reads it as the CSRF_SECRET env var (web/src/lib/env.ts in openctemio/openctem). |
-| `ui.secret.existingSecret` | string | `""` | Existing UI secret. |
 | `ui.securityContext` | object | see `values.yaml` | Container-level security context. readOnlyRootFilesystem is left OFF: Next.js writes to .next/cache at runtime. |
 | `ui.service.annotations` | object | `{}` |  |
 | `ui.service.nodePort` | string | `nil` |  |

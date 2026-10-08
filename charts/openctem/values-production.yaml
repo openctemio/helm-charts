@@ -147,14 +147,6 @@ ui:
   config:
     nodeEnv: "production"
 
-  secret:
-    createSecret: true
-    csrfTokenKey: CSRF_SECRET
-    # Leave csrfToken blank to auto-generate (persisted across upgrades via
-    # cluster lookup), or set an explicit >=32-char value / existingSecret.
-    csrfToken: ""
-    # existingSecret: openctem-ui-csrf
-
   resources:
     requests:
       cpu: 100m

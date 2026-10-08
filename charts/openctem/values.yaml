@@ -451,17 +451,6 @@ ui:
     # -- keep blank to set default backend url as the internal api service
     backendUrl: ""
   
-  secret:
-    # -- Existing UI secret.
-    existingSecret: ""
-    # -- Create UI secret when existingSecret is not set.
-    createSecret: true
-    # -- Secret data key holding the CSRF secret. The UI reads it as the
-    # CSRF_SECRET env var (web/src/lib/env.ts in openctemio/openctem).
-    csrfTokenKey: CSRF_SECRET
-    # -- Leave empty to auto-generate like `openssl rand -base64 32`.
-    csrfToken: ""
-
   serviceAccount:
     create: true
     automount: true

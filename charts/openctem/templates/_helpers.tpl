@@ -437,44 +437,6 @@ Create the UI service account name to use
 {{- end }}
 
 {{/*
-Resolve UI secret name.
-*/}}
-{{- define "openctem.uiSecretName" -}}
-{{- if .Values.ui.secret.existingSecret -}}
-{{- .Values.ui.secret.existingSecret -}}
-{{- else -}}
-{{- printf "%s-secret" (include "openctem.uiFullname" .) -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Resolve UI secret CSRF token value. On install: use values or generate; on upgrade: reuse existing secret value.
-Call with: include "openctem.uiSecretCsrfTokenValue" (dict "context" . "existingSecret" $existingSecret)
-*/}}
-{{- define "openctem.uiSecretCsrfTokenValue" -}}
-{{- $ctx := .context -}}
-{{- $existing := .existingSecret -}}
-{{- if $ctx.Values.ui.secret.csrfToken -}}
-{{- $ctx.Values.ui.secret.csrfToken -}}
-{{- else if and $existing (hasKey $existing.data $ctx.Values.ui.secret.csrfTokenKey) -}}
-{{- index $existing.data $ctx.Values.ui.secret.csrfTokenKey | b64dec -}}
-{{- else -}}
-{{- randBytes 32 -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Build checksum source for UI secret (for pod annotation rollout trigger).
-*/}}
-{{- define "openctem.uiSecretChecksumSource" -}}
-{{- if .Values.ui.secret.existingSecret -}}
-{{- printf "name=%s" (include "openctem.uiSecretName" .) -}}
-{{- else if .Values.ui.secret.createSecret -}}
-{{- include (print .Template.BasePath "/ui-secret.yaml") . -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Name of the chart-managed API app secret holding APP_ENCRYPTION_KEY and
 AUTH_JWT_SECRET (only the keys not sourced from an existingSecret).
 */}}

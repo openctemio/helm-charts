@@ -20,7 +20,10 @@ helm template charts/openctem --set api.appEnv=development
 
 and the render tests CI runs, for example `tests/sensor-hardening/run.sh` and
 `tests/gateway/run.sh` (see `.github/workflows/lint-test.yaml` for the full
-list).
+list). `tests/kubeconform/run.sh` validates the renders against the Kubernetes
+schemas ([kubeconform](https://github.com/yannh/kubeconform)), and
+`tests/kind/run.sh` installs the chart on a [kind](https://kind.sigs.k8s.io)
+cluster (`kind create cluster --name chart-smoke` first).
 
 ## Chart changes
 

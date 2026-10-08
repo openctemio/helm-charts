@@ -222,12 +222,21 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 
 10. Bundled sensor
 - Deployment `{{ include "openctem.sensorFullname" . }}`, image {{ $sensor.image.repository }}:{{ $sensor.image.tag }}
-- Authenticates with the API key in Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}` and runs the
-  scans the platform dispatches, with: {{ $sensor.tools | default "(no -tools)" }}. It shows under Settings → Sensors.
 {{- $statePersist := ((($sensor.state | default dict).persistence) | default dict) }}
+{{- if or $sensor.apiKey $sensor.existingSecret }}
+- Authenticates with the API key in Secret `{{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}` and runs the
+  scans the platform dispatches, with: {{ $sensor.tools | default "every scanner in the image" }}. It shows under Settings → Sensors.
+{{- else }}
+- Pairs with the platform (no API key): on its first start it makes its own key and logs a code.
+  An administrator enters the code under Sensors > Pair a sensor, checks that the fingerprint
+  matches the one in the log, and approves it. Read the code with:
+    kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "openctem.sensorFullname" . }}
+  It then runs the scans the platform dispatches, with: {{ $sensor.tools | default "every scanner in the image" }}.
+{{- end }}
 {{- if $statePersist.enabled }}
-- State (the API key the sensor renews): PersistentVolumeClaim {{ $statePersist.existingClaim | default (printf "%s-state" (include "openctem.sensorFullname" .)) }} at /var/lib/openctem/state.
-  Key auto-renewal: {{ ternary "ON" "off" (eq $sensor.keyAutoRenew "true") }}. A renewal retires the key in the Secret: keep this volume (back it up like a credential).
+- State (the paired identity, or the API key the sensor renews): PersistentVolumeClaim {{ $statePersist.existingClaim | default (printf "%s-state" (include "openctem.sensorFullname" .)) }}
+  at /var/lib/openctem/state. Keep this volume and back it up like a credential: without it the sensor
+  must be paired again{{ if or $sensor.apiKey $sensor.existingSecret }} (API key auto-renewal: {{ ternary "ON; a renewal retires the key in the Secret" "off" (eq $sensor.keyAutoRenew "true") }}){{ end }}.
 {{- else }}
 - State is an emptyDir, so key auto-renewal is {{ ternary "ON — WARNING: a renewed key is lost with the pod, which then starts with the retired key in the Secret" "off" (eq $sensor.keyAutoRenew "true") }}.
   Set sensor.state.persistence.enabled=true to let the sensor renew its key.

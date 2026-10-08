@@ -118,7 +118,7 @@ jobs:
       - name: Least-privilege database roles (render checks)
         run: |
           # database.migrator: migration Jobs use the schema owner, the API
-          # keeps the DML-only database.auth role (D-6).
+          # keeps the DML-only database.auth role.
           tests/least-privilege/run.sh
 
       - name: Single-port gateway (render checks)
@@ -143,6 +143,21 @@ jobs:
           tests/versions/run.sh
           tests/versions/check-published.sh
 
+      - name: Install kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.6.7
+          KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
+        run: |
+          curl -fsSLo /tmp/kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+
+      - name: Kubernetes schema checks (kubeconform)
+        run: |
+          # Representative renders validated against the Kubernetes API
+          # schemas, strict (unknown fields fail).
+          tests/kubeconform/run.sh
+
       - name: Render templates (production values)
         run: |
           # Production values file provides the required secrets -> must render.
@@ -157,3 +172,48 @@ jobs:
             exit 1
           fi
           echo "OK: production render is correctly fail-closed without secrets"
+
+  kind-install:
+    # Installs the chart on a kind cluster: the bundled datastores become
+    # ready, and the bundled sensor pairs, adopts the nuclei-templates baked
+    # into its image, and keeps its identity 0600 across a pod replacement
+    # (tests/kind/run.sh).
+    runs-on: ubuntu-latest
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+      KUBECTL_VERSION: v1.34.1
+      KUBECTL_SHA256: 7721f265e18709862655affba5343e85e1980639395d5754473dafaadcaa69e3
+      KIND_CLUSTER: chart-smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.1.3
+
+      - name: Install kind and kubectl
+        run: |
+          curl -fsSLo /tmp/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  /tmp/kind" | sha256sum -c -
+          curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  /tmp/kubectl" | sha256sum -c -
+          sudo install -m 0755 /tmp/kind /tmp/kubectl /usr/local/bin/
+
+      - name: Create the cluster
+        run: kind create cluster --name "$KIND_CLUSTER" --wait 120s
+
+      - name: Resolve chart dependencies
+        run: helm dependency build charts/openctem
+
+      - name: Install smoke test
+        run: tests/kind/run.sh
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n openctem-smoke describe pods
+          kubectl -n openctem-smoke logs deploy/smoke-openctem-sensor --all-containers || true

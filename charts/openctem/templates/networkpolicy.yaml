@@ -93,6 +93,26 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+    {{- $st := .Values.api.sensorTransport }}
+    {{- if and $st.enabled $st.publicHost }}
+    # Sensor protocol v3 gRPC binding (mutual TLS): from the gateway's layer-4
+    # passthrough, or from anywhere through the dedicated Service. The client
+    # certificate is the access control.
+    - from:
+        {{- if $st.dedicatedService.enabled }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        - ipBlock:
+            cidr: ::/0
+        {{- else }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- end }}
+      ports:
+        - port: {{ $st.mtls.port }}
+          protocol: TCP
+    {{- end }}
     {{- if and .Values.monitoring.enabled .Values.monitoring.serviceMonitor.enabled }}
     # Prometheus scrapes /metrics (monitoring.serviceMonitor).
     - from:

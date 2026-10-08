@@ -156,6 +156,18 @@ spec:
               value: "{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}"
             - name: GATEWAY_MAX_BODY_SIZE
               value: {{ $c.maxBodySize | quote }}
+            {{- $st := .Values.api.sensorTransport }}
+            {{- if and $st.enabled $st.gatewayPassthrough }}
+            # Sensor protocol v3 (RFC-059): TLS for the sensor host passes
+            # through at layer 4 to the API's mTLS listener (needs an image
+            # with the layer4 module: gateway.caddy.image).
+            - name: OPENCTEM_SENSOR_GATEWAY
+              value: passthrough
+            - name: SENSOR_PUBLIC_HOSTNAME
+              value: {{ include "openctem.sensorPublicHostname" . | quote }}
+            - name: SENSOR_MTLS_UPSTREAM
+              value: "{{ include "openctem.apiFullname" . }}:{{ $st.mtls.port }}"
+            {{- end }}
             {{- with $c.frontProxies }}
             - name: OPENCTEM_TRUSTED_PROXIES
               value: {{ join " " . | quote }}
@@ -219,6 +231,10 @@ spec:
               {{- range $path, $_ := .Files.Glob "files/gateway/modes/*" }}
               - key: modes-{{ base $path }}
                 path: modes/{{ base $path }}
+              {{- end }}
+              {{- range $path, $_ := .Files.Glob "files/gateway/sensors/*" }}
+              - key: sensors-{{ base $path }}
+                path: sensors/{{ base $path }}
               {{- end }}
         - name: data
           {{- if $c.persistence.enabled }}

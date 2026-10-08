@@ -128,6 +128,12 @@ jobs:
           # is files/gateway/planes.caddy's.
           tests/gateway/run.sh
 
+      - name: Sensor protocol v3 (render checks)
+        run: |
+          # OpenCTEM RFC-059: off by default; API settings, mTLS port, sensor
+          # CA, gateway passthrough, dedicated Service, NetworkPolicy.
+          tests/sensor-transport/run.sh
+
       - name: Single-port gateway (bundled Caddy in Docker)
         run: |
           # Runs the rendered Caddy (internal, files, http TLS modes) in front

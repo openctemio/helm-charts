@@ -1,0 +1,59 @@
+{{- $st := .Values.api.sensorTransport -}}
+{{- if and $st.enabled (not $st.mtls.ca.existingSecret) }}
+{{- /*
+The sensor CA (OpenCTEM RFC-059 T9): made once by the chart and kept across
+upgrades (lookup) and uninstall (keep). Its key signs sensor client
+certificates and the API's mTLS server certificate; it is not the job signer.
+Bring your own with api.sensorTransport.mtls.ca.existingSecret (tls.crt,
+tls.key) for a key managed outside the cluster.
+*/ -}}
+{{- $name := include "openctem.sensorCASecret" . -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/tls
+data:
+  {{- if and $existing $existing.data }}
+  tls.crt: {{ index $existing.data "tls.crt" }}
+  tls.key: {{ index $existing.data "tls.key" }}
+  {{- else }}
+  {{- $ca := genCA "OpenCTEM sensor CA" 3650 }}
+  tls.crt: {{ $ca.Cert | b64enc }}
+  tls.key: {{ $ca.Key | b64enc }}
+  {{- end }}
+{{- end }}
+{{- if and $st.enabled $st.publicHost $st.dedicatedService.enabled }}
+---
+# The gRPC binding on its own address (a separate port or a TCP load
+# balancer), instead of the gateway's SNI passthrough. TLS is never
+# terminated in front of the API.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openctem.apiFullname" . }}-sensors
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+  {{- with $st.dedicatedService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $st.dedicatedService.type }}
+  {{- with $st.dedicatedService.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - port: {{ $st.dedicatedService.port }}
+      targetPort: sensor-mtls
+      protocol: TCP
+      name: sensor-mtls
+  selector:
+    {{- include "openctem.apiSelectorLabels" . | nindent 4 }}
+{{- end }}

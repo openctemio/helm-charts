@@ -1,0 +1,39 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+{{- if not .Values.monitoring.enabled }}
+{{- fail "monitoring.serviceMonitor.enabled needs monitoring.enabled=true (the API serves /metrics only with a token)" }}
+{{- end }}
+{{/*
+Scrapes the API's /metrics with the bearer token. The job label is fixed to
+openctem-api, the name the alert rules (monitoring.prometheusRule) use.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "openctem.apiFullname" . }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "openctem.apiSelectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "openctem.metricsSecretName" . }}
+          key: {{ .Values.monitoring.metricsTokenKey }}
+      relabelings:
+        - action: replace
+          targetLabel: job
+          replacement: openctem-api
+{{- end }}

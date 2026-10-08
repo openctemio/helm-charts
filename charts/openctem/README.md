@@ -276,6 +276,50 @@ in `caddy` mode the UI accepts only the gateway (unless `ui.ingress` /
 ingress controller (`networkPolicy.ingressController*Selector`) may reach the
 API on 8080.
 
+## Sensor protocol v3 (gRPC over mutual TLS)
+
+OpenCTEM RFC-059: paired sensors speak gRPC over mutual TLS to a dedicated
+sensor host name, with Connect over HTTPS (`/api/v3/sensor`, through the
+normal routing) as their fallback. Off by default; sensors keep protocol v2.
+
+| Value | Default | Meaning |
+|---|---|---|
+| `api.sensorTransport.enabled` | `false` | Serve protocol v3. Alone it serves the HTTPS binding only. |
+| `api.sensorTransport.publicHost` | `""` | `host:port` sensors dial for gRPC (e.g. `sensors.example.com:443`); enables the API's mTLS listener. |
+| `api.sensorTransport.gatewayPassthrough` | `false` | With `gateway.mode=caddy`: route `publicHost` by SNI on the gateway's 443 to the API's mTLS listener, not terminated. Needs a gateway image with the layer4 module (below). |
+| `api.sensorTransport.mtls.port` | `8443` | The API's mTLS listener (container and Service port). |
+| `api.sensorTransport.mtls.certTTL` | `168h` | Client certificate lifetime (1h..720h). |
+| `api.sensorTransport.mtls.trustedProxies` | `[]` | CIDRs whose PROXY protocol header is believed; with the passthrough it defaults to `gateway.trustedProxies`. |
+| `api.sensorTransport.mtls.ca.existingSecret` | `""` | Your sensor CA (`tls.crt`, `tls.key`). Empty: the chart makes one (`genCA`), keeps it across upgrades and `helm uninstall`. It is not the job-signing key. |
+| `api.sensorTransport.dedicatedService.*` | off | The gRPC binding on its own Service (`LoadBalancer`, port 443) instead of the passthrough: a separate address, or any TCP load balancer. Never terminate TLS in front of it. |
+
+Same port by SNI (bundled Caddy):
+
+```yaml
+gateway:
+  mode: caddy
+  host: ctem.example.com
+  trustedProxies: [10.42.0.0/16]
+  caddy:
+    image:
+      repository: registry.example.com/openctem-gateway-l4   # built from openctem api/deploy/gateway/Dockerfile
+      tag: "2.11.4-l4-0.1.2"
+api:
+  sensorTransport:
+    enabled: true
+    publicHost: sensors.example.com:443
+    gatewayPassthrough: true
+```
+
+`sensors.example.com` must resolve to the gateway and differ from
+`gateway.host`. No public certificate is needed for it: the API mints its
+server certificate from the sensor CA and sensors pin that CA. With
+ingress-nginx instead, expose the API's `sensor-mtls` port with
+`--enable-ssl-passthrough` and an `nginx.ingress.kubernetes.io/ssl-passthrough`
+Ingress, or use `dedicatedService`. NetworkPolicy opens the mTLS port to the
+release's pods (passthrough) or to everyone (dedicated Service): the client
+certificate is the access control.
+
 ## Secrets & GitOps (IMPORTANT — data-loss footgun)
 
 `APP_ENCRYPTION_KEY` encrypts stored integration credentials and
@@ -513,6 +557,12 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.16.0 (sensor protocol v3)
+
+Nothing changes until `api.sensorTransport.enabled=true`. The gateway files
+are re-synced from openctem (`files/gateway/sensors/` is new; the stock Caddy
+image keeps working with the passthrough off).
 
 ## Upgrading to 0.15.0 (sensor pairing, sensor v0.11.0)
 

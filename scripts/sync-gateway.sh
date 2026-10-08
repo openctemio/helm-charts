@@ -8,6 +8,8 @@
 #                 (OpenCTEM RFC-041); the chart's Ingress/HTTPRoute path lists
 #                 are read from it at render time
 #   entrypoint.sh TLS-mode validation
+#   sensors/      layer-4 routing of the sensor host (sensor protocol v3,
+#                 OpenCTEM RFC-059), imported by the Caddyfile
 # The TLS mode files (files/gateway/modes/) stay chart-owned: the chart serves
 # port 80 only in modes acme and http, so its internal/files modes do not
 # import the compose file's port-80 redirect.
@@ -26,7 +28,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$ROOT/charts/openctem/files/gateway"
 PLATFORM_REPO="${PLATFORM_REPO:-https://github.com/openctemio/openctem.git}"
 ref="${1:-develop}"
-files=(Caddyfile planes.caddy entrypoint.sh)
+files=(Caddyfile planes.caddy entrypoint.sh sensors/off.wrappers sensors/passthrough.wrappers)
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -34,6 +36,7 @@ git -C "$tmp" init -q
 git -C "$tmp" fetch -q --depth 1 "$PLATFORM_REPO" "$ref"
 sha="$(git -C "$tmp" rev-parse FETCH_HEAD)"
 
+mkdir -p "$DEST/sensors"
 for f in "${files[@]}"; do
   git -C "$tmp" show "FETCH_HEAD:api/deploy/gateway/$f" > "$DEST/$f"
 done

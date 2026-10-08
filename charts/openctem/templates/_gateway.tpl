@@ -61,6 +61,10 @@ entrypoint.sh: |-
 modes-{{ base $path }}: |-
 {{ $.Files.Get $path | indent 2 }}
 {{- end }}
+{{- range $path, $_ := .Files.Glob "files/gateway/sensors/*" }}
+sensors-{{ base $path }}: |-
+{{ $.Files.Get $path | indent 2 }}
+{{- end }}
 {{- end }}
 
 {{/* The gateway mode, validated. Empty string when the gateway is off. */}}

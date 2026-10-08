@@ -1,0 +1,6 @@
+# openctem-rules.yml is a copy of openctemio/openctem deploy/observability/prometheus/rules/openctem.yml
+# at this commit. Do not edit it here: change the monorepo, then run
+# scripts/sync-monitoring.sh <ref>. CI (tests/monitoring/run.sh) fails when
+# the copy differs from this commit.
+commit=d6441ff8bae01bdac565ac1004af2717dd5ca067
+source=deploy/observability/prometheus/rules/openctem.yml

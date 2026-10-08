@@ -392,6 +392,43 @@ API egress defaults to permissive (`networkPolicy.api.egress.allowAll=true`) so
 threat-intel / CVE / CT feeds keep working; pin it with
 `networkPolicy.api.egress.extra` when you can enumerate those endpoints.
 
+## Monitoring (optional)
+
+Operator alerting on the running platform: what to watch, the alert rules
+and a runbook per alert are in OpenCTEM
+`api/docs/operations/monitoring.md`. On a cluster with the Prometheus
+Operator:
+
+```yaml
+monitoring:
+  enabled: true              # the API serves /metrics with a bearer token
+  serviceMonitor:
+    enabled: true
+    labels: {release: kube-prometheus-stack}   # what your Prometheus selects
+  prometheusRule:
+    enabled: true
+    labels: {release: kube-prometheus-stack}
+  prometheusNamespaceSelector: {kubernetes.io/metadata.name: monitoring}  # with networkPolicy.enabled
+```
+
+- `monitoring.enabled` sets `METRICS_TOKEN` on the API from a Secret (random,
+  generated once and kept across upgrades; or `monitoring.existingSecret`).
+  Without it the API answers 404 on `/metrics`. The gateway never routes
+  `/metrics`.
+- The ServiceMonitor scrapes the API Service with that token and labels the
+  job `openctem-api`, the name the rules use.
+- The PrometheusRule holds the OpenCTEM groups `openctem-api`,
+  `openctem-work` and `openctem-security` (`monitoring.prometheusRule.groups`)
+  plus `ApiTargetDown`. The host, Postgres, Redis and container groups of the
+  compose stack are left out: the cluster's own monitoring covers those. The
+  rules are `files/monitoring/openctem-rules.yml`, a copy of the monorepo's
+  `deploy/observability/prometheus/rules/openctem.yml` pinned in
+  `files/monitoring/UPSTREAM`; refresh it with `scripts/sync-monitoring.sh <ref>`,
+  never by hand (CI checks the copy).
+- Route the alerts to Telegram or Slack in your Alertmanager. Labels carry no
+  tenant or user data. Some rules read metrics added after OpenCTEM v0.9.0;
+  with an older API image they stay silent.
+
 ## helm test
 
 `helm test <release>` runs an in-cluster Pod that curls the API `/health` and

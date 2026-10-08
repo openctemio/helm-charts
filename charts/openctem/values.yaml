@@ -840,6 +840,42 @@ redis:
 # flows: ingress-controller -> ui, ui -> api, api -> postgres:5432,
 # api -> redis:6379, and api egress (DNS + HTTPS for threat-intel / CT feeds).
 # =============================================================================
+# Operator monitoring (OpenCTEM api/docs/operations/monitoring.md): the API's
+# Prometheus metrics and the alert rules, for a cluster that runs the
+# Prometheus Operator. Off by default.
+monitoring:
+  # -- Turn on the API's /metrics (bearer token METRICS_TOKEN). Off: /metrics
+  #    answers 404. The gateway never routes /metrics, whatever this says.
+  enabled: false
+  # -- Secret holding the metrics token under `metricsTokenKey`. Empty: the
+  #    chart creates one with a random token, kept across upgrades.
+  existingSecret: ""
+  metricsTokenKey: metrics-token
+  serviceMonitor:
+    # -- Create a ServiceMonitor (monitoring.coreos.com/v1) that scrapes the
+    #    API with the token. Needs monitoring.enabled.
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # -- Extra labels, e.g. the `release` label your Prometheus selects on.
+    labels: {}
+  prometheusRule:
+    # -- Create a PrometheusRule with the OpenCTEM alert rules
+    #    (files/monitoring/openctem-rules.yml, synced from the monorepo).
+    enabled: false
+    # -- Rule groups to include. The other groups of the file need the
+    #    compose stack's exporters (blackbox, node, cAdvisor, Postgres, Redis);
+    #    on Kubernetes the cluster's own monitoring usually covers those.
+    groups:
+      - openctem-api
+      - openctem-work
+      - openctem-security
+    labels: {}
+  # -- With networkPolicy.enabled: where Prometheus runs, allowed to reach the
+  #    API port. Both empty: any namespace (set them in production).
+  prometheusNamespaceSelector: {}
+  prometheusPodSelector: {}
+
 networkPolicy:
   # -- Master switch for all NetworkPolicy resources in this chart.
   enabled: false

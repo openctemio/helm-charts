@@ -1,0 +1,44 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+{{/*
+The OpenCTEM alert rules (files/monitoring/openctem-rules.yml, a copy of the
+monorepo's deploy/observability/prometheus/rules/openctem.yml; runbooks in
+its api/docs/operations/monitoring.md), limited to
+monitoring.prometheusRule.groups, plus ApiTargetDown: on Kubernetes there is
+no synthetic /health probe, so a scrape target that stays down is the signal.
+The rule texts are data here, not Helm templates: their template markers are
+for Prometheus.
+*/}}
+{{- $file := .Files.Get "files/monitoring/openctem-rules.yml" | fromYaml -}}
+{{- $want := .Values.monitoring.prometheusRule.groups -}}
+{{- $groups := list -}}
+{{- range $file.groups -}}
+{{- if has .name $want -}}
+{{- $groups = append $groups . -}}
+{{- end -}}
+{{- end -}}
+{{- if ne (len $groups) (len $want) -}}
+{{- fail (printf "monitoring.prometheusRule.groups names a group that files/monitoring/openctem-rules.yml does not have (wanted %v)" $want) -}}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "openctem.apiFullname" . }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: openctem-kubernetes
+      rules:
+        - alert: ApiTargetDown
+          expr: up{job="openctem-api"} == 0
+          for: 5m
+          labels: {severity: critical, component: platform}
+          annotations:
+            summary: Prometheus cannot scrape the OpenCTEM API
+            description: The API pod is down or /metrics fails (check the pod, then the METRICS_TOKEN secret).
+            runbook_url: https://github.com/openctemio/openctem/blob/develop/api/docs/operations/monitoring.md#apidown
+    {{- toYaml $groups | nindent 4 }}
+{{- end }}

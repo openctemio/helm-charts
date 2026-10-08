@@ -91,5 +91,40 @@ expect "kill switch env" "value: \"/run/owner/STOP\"" "$out"
 expect "extra volume" "path: /etc/openctem-owner" "$out"
 expect "extra mount" "mountPath: /run/owner" "$out"
 
+# 8. Per-task network confinement (RFC-060) and the sensor seccomp profile.
+out="$(render)"
+expect "confinement auto by default" 'value: "auto"' "$out"
+reject "no Localhost profile by default" "type: Localhost" "$out"
+reject "no installer by default" "sensor-seccomp" "$(renderAll)"
+out="$(renderAll --set sensor.sandbox.seccompProfile=openctem --set sensor.sandbox.network=required)"
+expect "Localhost profile" "type: Localhost" "$out"
+expect "profile named by digest" "localhostProfile: openctem/sensor-" "$out"
+expect "confinement required" 'value: "required"' "$out"
+expect "installer DaemonSet" "kind: DaemonSet" "$out"
+expect "installer writes only the openctem seccomp dir" 'path: "/var/lib/kubelet/seccomp/openctem"' "$out"
+expect "installer drops capabilities" 'drop: ["ALL"]' "$out"
+expect "installer has no service account token" "automountServiceAccountToken: false" "$out"
+reject "installer never privileged" "privileged: true" "$out"
+file="$(grep -o 'openctem/sensor-[0-9a-f]*\.json' <<<"$out" | head -1)"
+expect "installer writes the file the Deployment names" "/host/$(basename "$file")" "$out"
+out="$(renderAll --set sensor.sandbox.seccompProfile=openctem --set sensor.sandbox.installProfile=false)"
+reject "installProfile=false: no installer" "kind: DaemonSet" "$out"
+expect "installProfile=false: still Localhost" "type: Localhost" "$out"
+if out="$(render --set sensor.sandbox.network=required)"; then
+  fail "required under the runtime default profile fails the render"
+else
+  expect "required under the runtime default profile fails the render" "cannot work under the runtime's default seccomp profile" "$out"
+fi
+if out="$(render --set sensor.podSecurityContext.seccompProfile.type=Unconfined)"; then
+  fail "Unconfined seccomp fails the render"
+else
+  expect "Unconfined seccomp fails the render" "Unconfined is refused" "$out"
+fi
+if out="$(render --set sensor.sandbox.network=maybe)"; then
+  fail "unknown sandbox.network fails the render"
+else
+  expect "unknown sandbox.network fails the render" "must be auto, required or off" "$out"
+fi
+
 if [[ $fails -gt 0 ]]; then echo "$fails failed"; exit 1; fi
 echo "all sensor hardening checks passed"

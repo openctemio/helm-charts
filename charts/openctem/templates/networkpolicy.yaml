@@ -93,6 +93,27 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+    {{- if and .Values.monitoring.enabled .Values.monitoring.serviceMonitor.enabled }}
+    # Prometheus scrapes /metrics (monitoring.serviceMonitor).
+    - from:
+        {{- if or .Values.monitoring.prometheusNamespaceSelector .Values.monitoring.prometheusPodSelector }}
+        - {{- if .Values.monitoring.prometheusNamespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.monitoring.prometheusNamespaceSelector | nindent 14 }}
+          {{- end }}
+          {{- if .Values.monitoring.prometheusPodSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.monitoring.prometheusPodSelector | nindent 14 }}
+          {{- end }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
     {{- if has $gwMode (list "ingress" "httpRoute") }}
     # gateway.mode={{ $gwMode }}: the ingress controller / Gateway routes the
     # dedicated API paths straight to the API.

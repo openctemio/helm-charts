@@ -95,6 +95,13 @@ jobs:
           # a warning says when that commit is behind openctem develop.
           LATEST_REF=develop tests/gateway/upstream.sh
 
+      - name: Operator monitoring (render checks)
+        run: |
+          # monitoring.*: the API metrics token, ServiceMonitor, PrometheusRule
+          # (and that its rules file equals the OpenCTEM commit in
+          # files/monitoring/UPSTREAM), the NetworkPolicy opening for Prometheus.
+          tests/monitoring/run.sh
+
       - name: Least-privilege database roles (render checks)
         run: |
           # database.migrator: migration Jobs use the schema owner, the API

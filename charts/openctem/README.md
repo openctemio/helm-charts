@@ -17,10 +17,10 @@ that does not exist (`tests/versions/check-published.sh`).
 | Chart | appVersion (OpenCTEM) | Default images |
 |---|---|---|
 | 0.4.1 | v0.8.0 | `openctemio/api`, `openctemio/ui`, `openctemio/migrations` (Docker Hub, never published) |
-| 0.5.0 – 0.11.x | v0.9.0 | `ghcr.io/openctemio/openctem-api`, `ghcr.io/openctemio/openctem-web`, `ghcr.io/openctemio/migrations` |
+| 0.5.0 and later | v0.9.0 | `ghcr.io/openctemio/openctem-api`, `ghcr.io/openctemio/openctem-web`, `ghcr.io/openctemio/migrations` |
 
 > **OpenCTEM v0.9.0 is not released yet**, so no published chart installs
-> with its default image values today. Charts 0.5.0 to 0.11.x were published
+> with its default image values today. Charts 0.5.0 and later were published
 > ahead of v0.9.0 and pull `openctem-api:v0.9.0`, which does not exist yet.
 > Chart 0.4.1 (v0.8.0) names Docker Hub repositories that were never
 > published. Until v0.9.0 is tagged, deploy v0.8.0 with chart 0.4.1 and the
@@ -59,9 +59,14 @@ helm test openctem -n openctem      # smoke-check /health and /
 
 Production checklist (the chart enforces / warns on most of these):
 
-- **Run ≥ 2 replicas** for the API and UI (`values-production.yaml` sets 2),
-  with a PodDisruptionBudget (`minAvailable: 1`) and
-  `topologySpreadConstraints` so replicas don't co-locate.
+- **Replicas**: run the API with **one** replica. Its schedulers and
+  background controllers run in every replica, so the chart refuses more than
+  one (`api.replicaCount`, or autoscaling `maxReplicas`) unless
+  `api.allowMultipleReplicas` is set, which only an API release that documents
+  multi-replica support should use. Run the UI with 2 or more replicas
+  (`values-production.yaml` sets 2), with a PodDisruptionBudget
+  (`minAvailable: 1`) and `topologySpreadConstraints` so replicas don't
+  co-locate.
 - **External datastores** — set `postgresql.enabled=false` /
   `redis.enabled=false` and point `database.*` / `redisConfig.*` at managed
   Postgres/Redis with TLS (see "Datastores" below).
@@ -71,8 +76,8 @@ Production checklist (the chart enforces / warns on most of these):
 ## First install: platform admin and first organization
 
 OpenCTEM has no self-registration and, by default, no self-service
-organizations: the **platform administrator** creates organizations, as in
-Tenable Security Center. The administrator is not a member of any
+organizations: the **platform administrator** creates organizations. The
+administrator is not a member of any
 organization (it cannot see organization data); each organization has its own
 owner, who invites users or configures SSO.
 
@@ -83,11 +88,11 @@ api:
   tenantCreationMode: admin_only        # the default
   bootstrapAdmin:
     enabled: true
-    email: admin@acme.io                # platform administrator
-    backupEmail: breakglass@acme.io     # break-glass backup administrator
+    email: admin@example.com                # platform administrator
+    backupEmail: breakglass@example.com     # break-glass backup administrator
     org:
-      name: "Acme Security"             # first organization
-      ownerEmail: owner@acme.io         # its owner (not one of the admins)
+      name: "Example Security"             # first organization
+      ownerEmail: owner@example.com         # its owner (not one of the admins)
 ```
 
 1. `helm install`. After the migrations, a post-install Job runs
@@ -122,8 +127,8 @@ first organization to an install that skipped it:
 
 ```bash
 kubectl exec -n <ns> deploy/<fullname>-api -- /app/bootstrap-admin \
-  -email=admin@acme.io -backup-email=breakglass@acme.io \
-  -org-name="Acme Security" -org-owner-email=owner@acme.io
+  -email=admin@example.com -backup-email=breakglass@example.com \
+  -org-name="Example Security" -org-owner-email=owner@example.com
 ```
 
 **Why the pod log and not a Secret.** Writing the credentials to a Kubernetes
@@ -153,10 +158,10 @@ passed verbatim.
 
 ## Single-port gateway (one HTTPS entry point)
 
-Chart 0.7.0 can serve the UI **and** the REST API on one hostname and one HTTPS
-port (as Tenable.sc does), so sensors, API clients, SCIM, webhooks and browsers
-all use `https://<host>`. It is opt-in: `gateway.mode: none` (the default)
-renders exactly what 0.6.0 did, and the per-component `api.ingress` /
+The chart can serve the UI **and** the REST API on one hostname and one HTTPS
+port, so sensors, API clients, SCIM, webhooks and browsers all use
+`https://<host>` (since chart 0.7.0). It is opt-in: `gateway.mode: none` (the
+default) renders no gateway, and the per-component `api.ingress` /
 `ui.ingress` / `*.httpRoute` keep working (give them a different host).
 
 | `gateway.mode` | Renders | TLS | Routes API-key clients on any `/api/*` |
@@ -315,7 +320,7 @@ Create both once, as the superuser, with the bootstrap script from the
 OpenCTEM repository (idempotent; re-run it after restoring a dump):
 
 ```bash
-psql "postgres://postgres@db.internal:5432/openctem" -v ON_ERROR_STOP=1 \
+psql "postgres://postgres@db.example.com:5432/openctem" -v ON_ERROR_STOP=1 \
   -v app_password="$APP_PW" -v migrator_password="$MIGRATOR_PW" \
   -f api/deploy/postgres/least-privilege-roles.sql
 ```
@@ -350,7 +355,7 @@ would see different files. With `existingClaim`, list `ReadWriteMany` in
 ```bash
 kubectl -n openctem create secret generic openctem-attachments-s3 \
   --from-literal=STORAGE_ACCESS_KEY=... --from-literal=STORAGE_SECRET_KEY=...
-helm upgrade --install openctem openctemio/openctem -n openctem \
+helm upgrade --install openctem openctem/openctem -n openctem \
   --set api.attachments.storage=s3 \
   --set api.attachments.s3.bucket=openctem-attachments \
   --set api.attachments.s3.existingSecret=openctem-attachments-s3
@@ -358,7 +363,7 @@ helm upgrade --install openctem openctemio/openctem -n openctem \
 ```
 
 S3 storage needs an API release with server-wide S3 support
-(`STORAGE_PROVIDER=s3`, openctemio/openctem#781); older API images ignore it
+(`STORAGE_PROVIDER=s3`); older API images ignore it
 and keep files on the pod's disk. The created PVC carries
 `helm.sh/resource-policy: keep`, so `helm uninstall` leaves the files; delete
 the claim by hand to remove them. Switching storage later does not move
@@ -441,7 +446,7 @@ next to the API, for work the cluster can reach (public DAST, recon,
 validation). Scanning an internal network still needs a remote sensor.
 
 ```bash
-# 1. In the UI: Settings → Sensors → Add sensor; copy its API key.
+# 1. In the web console: Settings > Sensors > Add sensor; copy its API key.
 kubectl -n openctem create secret generic openctem-sensor --from-literal=api-key=<key>
 # 2. Enable it.
 helm upgrade openctem charts/openctem -n openctem -f values.yaml \
@@ -451,9 +456,9 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | Value | Default | Meaning |
 |---|---|---|
 | `sensor.mode` | `daemon` | The only mode: an API-key sensor (`-daemon -enable-commands`) that runs the scans the platform dispatches. `platform` (bootstrap-token self-registration) was removed in 0.9.0 and fails the render: no OpenCTEM API serves it. |
-| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.9.1` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`. From v0.4.2 the plain tag (`v0.4.2`, `latest`) is the default image (semgrep, betterleaks, trivy, nuclei), the same as `v0.4.2-default`. Other variants: `<version>-nuclei`, `-betterleaks`, `-semgrep`, `-trivy`, `-ci`. v0.4.x adds the durable results outbox; v0.5.0 speaks protocol v2 for the whole sensor surface; v0.6.x runs on the SDK's sensor runtime (sdk-go v0.12.0), detects its own tools and keeps a renewed API key in its state volume (RFC-032 Phase 0); v0.8.x enforces the sensor-local policy (RFC-040); v0.9.x ships pinned nuclei templates and reports template versions. Chart 0.12.1 moved the default from v0.6.3 (three releases behind). Betterleaks replaced gitleaks after sensor v0.3.0 (whose images carry gitleaks and a semgrep that fails to start); `-gitleaks` tags are no longer published. |
+| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.9.1` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. The plain tag is the default image (`<version>-default`). In v0.9.1 it carries semgrep, betterleaks, trivy, nuclei and the recon tools (subfinder, dnsx, naabu, httpx, katana); from sensor v0.11.0 it carries nuclei and the recon tools only, and semgrep, trivy and betterleaks run from the single-tool images (`<version>-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). The `-ci` and `-gitleaks` images are no longer published. See the [sensor README](https://github.com/openctemio/sensor#install). |
 | `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | The sensor's API key. Prefer `existingSecret`. |
-| `sensor.tools` | `nuclei` | Daemon: scanners offered for dispatched jobs (`-tools`), e.g. `nuclei,semgrep,betterleaks,trivy`. `gitleaks` is still accepted and runs betterleaks. |
+| `sensor.tools` | `nuclei` | Daemon: the scanners the sensor offers for dispatched jobs (`-tools`), an allowlist of what the image carries, e.g. `nuclei,httpx,subfinder,dnsx,naabu,katana`. Empty: every installed scanner. `gitleaks` is still accepted and runs betterleaks. |
 | `sensor.allowPrivateTargets` | empty | `"1"` sets `SENSOR_ALLOW_PRIVATE_TARGETS=1` (RFC1918 / ULA targets allowed). Empty keeps them blocked. Any other value fails the render: the sensor only recognises `1`. Reaching the in-cluster API needs nothing (the sensor's API client allows the platform's private address). |
 | `sensor.scanRoots` | empty | `SENSOR_SCAN_ROOTS` for dispatched code scans; empty = `/scan`. |
 | `sensor.keyAutoRenew` | empty | `PLATFORM_KEY_AUTORENEW`, always rendered. Empty: on exactly when `sensor.state.persistence.enabled`; `true` / `false` force it. The renewed key is kept in the state volume (`-credentials=/var/lib/openctem/state/sensor-credentials.json`), not the Secret: the renewal retires the key in the Secret, so a pod without that volume would start with a dead key. The API issues expiring keys only with `SENSOR_KEY_TTL`. |
@@ -496,8 +501,8 @@ default StorageClass, or set `api.attachments.persistence.storageClass`. With a
 ReadWriteOnce volume the API Deployment switches to the `Recreate` strategy
 (a short gap during upgrades) unless `api.deploymentStrategy` is set.
 
-**Several API replicas** (`api.replicaCount > 1` or autoscaling, as in
-`values-production.yaml`) no longer render on that default: choose
+**Several API replicas** (`api.replicaCount > 1` or autoscaling; see the
+replica limit in [Production](#production)) no longer render on that default: choose
 `api.attachments.storage=s3` or a ReadWriteMany volume. Files written to the
 pod's filesystem by earlier chart versions are not migrated (they were lost on
 every pod restart anyway).
@@ -599,3 +604,287 @@ equal to the chart default counts as unset.
 `existingSecret` is not owned by the release and is used as is. The new pod
 starts from scratch: the old pod kept its sensor credentials only in its
 container filesystem.
+
+## Values
+
+Every value in [`values.yaml`](values.yaml), with its type, default and the
+description from its `# --` comment (generated with
+[helm-docs](https://github.com/norwoodj/helm-docs); see
+[CONTRIBUTING.md](../../CONTRIBUTING.md)). Long defaults are in `values.yaml`.
+
+<!-- values-table:start -->
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `api.affinity` | object | `{}` | Pod affinity/anti-affinity. For HA, spread replicas across nodes. See topologySpreadConstraints below for a lighter-weight alternative; use one or the other. Example soft anti-affinity is in values-production.yaml. |
+| `api.allowMultipleReplicas` | bool | `false` | Opt in to more than one API replica. Only set this once the deployed API version documents multi-replica support. |
+| `api.appEnv` | string | `"production"` | Application environment. "production" (the secure default) turns validateProduction() into a HARD BOOT GATE: it requires DB TLS, Redis TLS + a >=32-char Redis password, a >=64-char JWT secret, an encryption key, and secure cookies — the API refuses to start otherwise. Set to "development" or "staging" ONLY as a conscious opt-out (e.g. to run the bundled, non-TLS Redis for a demo). See values-production.yaml for the required prod values. |
+| `api.attachments` | object | see `values.yaml` | Uploaded attachments and finding evidence. Without this, files were written to the pod's own filesystem: lost on every restart/upgrade, and split across pods with more than one replica. |
+| `api.attachments.persistence.accessModes` | list | `["ReadWriteOnce"]` | ReadWriteOnce (default) serves one replica, and the Deployment then uses the Recreate strategy unless api.deploymentStrategy is set (a rolling update could not attach the volume on another node). ReadWriteMany (NFS, CephFS, EFS, Azure Files, ...) allows several. |
+| `api.attachments.persistence.enabled` | bool | `true` | PersistentVolumeClaim at /app/data. false = emptyDir (files are lost when the pod goes; single replica only). |
+| `api.attachments.persistence.existingClaim` | string | `""` | Use an existing claim instead of creating one. For more than one replica it must be ReadWriteMany: list ReadWriteMany in accessModes below to confirm it. |
+| `api.attachments.s3.endpoint` | string | `""` | Empty: AWS S3. Otherwise the S3 endpoint URL, e.g. http://minio.storage.svc:9000 (private addresses are allowed here: this is operator configuration, not tenant input). |
+| `api.attachments.s3.existingSecret` | string | `""` | Secret holding the access key and secret key (keys below). Recommended; otherwise the chart creates one from accessKey/secretKey. |
+| `api.attachments.s3.provider` | string | `"s3"` | s3 or minio (path-style addressing when endpoint is set). |
+| `api.attachments.s3.region` | string | `""` | Empty: us-east-1. |
+| `api.attachments.storage` | string | `"local"` | local: files on a volume mounted at /app/data (persistence below). s3: an S3-compatible bucket (AWS S3, MinIO, ...; s3.* below). Needs an API release with server-wide S3 storage (STORAGE_PROVIDER=s3); older APIs ignore it and write to the pod's disk. More than one API replica (replicaCount > 1, or autoscaling with maxReplicas > 1) needs s3 or a ReadWriteMany volume: rendering fails otherwise. Switching storage later does not move existing files. |
+| `api.auth.cookieSecure` | bool | `true` | AUTH_COOKIE_SECURE — must be true in production (HTTPS). |
+| `api.auth.existingSecret` | string | `""` | Source AUTH_JWT_SECRET from an existing Secret instead of the chart. |
+| `api.auth.jwtSecret` | string | `""` | JWT signing secret (AUTH_JWT_SECRET). STABLE across upgrades — rotating it logs every user out. Leave blank to auto-generate-once and persist (via cluster lookup); production should set an explicit value or existingSecret. Must be >= 64 characters in production. |
+| `api.auth.jwtSecretKey` | string | `"AUTH_JWT_SECRET"` |  |
+| `api.auth.provider` | string | `"local"` | AUTH_PROVIDER: "local" (built-in email/password, the product default), "oidc" (Keycloak) or "hybrid". "oidc"/"hybrid" additionally require the Keycloak block to be configured in production. |
+| `api.autoscaling.enabled` | bool | `false` |  |
+| `api.autoscaling.maxReplicas` | int | `100` |  |
+| `api.autoscaling.minReplicas` | int | `1` |  |
+| `api.autoscaling.targetCPUUtilizationPercentage` | int | `80` |  |
+| `api.bootstrapAdmin` | object | see `values.yaml` | Bootstrap the first PLATFORM administrators (RFC-022) and, optionally, the first organization. Runs /app/bootstrap-admin as a post-install hook Job after the migrations. The primary admin and a break-glass backup super admin are each created as a sign-in account with a temporary password printed ONCE to the Job log. Both sign in on /login, enroll an authenticator when opening the admin console (/admin), and must change the temporary password first. The backup is local (never bound to the platform identity provider, exempt from "require IdP"); every sign-in with it is audited (high), logged with alert=break_glass_sign_in and emailed to the other admins (system SMTP). Store its credentials offline and test it at least every 90 days. The completed Job (and its log) is KEPT until you delete it: read the credentials with `kubectl logs job/<fullname>-api-bootstrap-admin` (the exact command is in NOTES), store them, then `kubectl delete job/...`. Re-running is safe: existing admins are left unchanged and an existing organization slug is skipped; any other error fails the Job and the release. |
+| `api.bootstrapAdmin.backoffLimit` | int | `0` | Retries. 0: a failure is reported once, never retried (each attempt would print a new log the operator has to find). |
+| `api.bootstrapAdmin.backupEmail` | string | `""` | Break-glass backup administrator (required unless noBackup=true). |
+| `api.bootstrapAdmin.noBackup` | bool | `false` | Skip the break-glass backup (not recommended). |
+| `api.bootstrapAdmin.org` | object | `{"name":"","ownerEmail":"","ownerName":"","slug":""}` | First organization (optional). Set name AND ownerEmail together. Created through the normal, audited organization service. The owner gets a one-time set-password link (valid 24h): emailed when SMTP is configured (SMTP_* in api.extraEnv / api.extraEnvFrom; the link base is SMTP_BASE_URL, set by gateway.* or api.extraEnv), otherwise printed once to the Job log. The owner must not be one of the platform admins (admins cannot be organization members). |
+| `api.bootstrapAdmin.org.name` | string | `""` | Organization name, e.g. "Acme Security". |
+| `api.bootstrapAdmin.org.ownerEmail` | string | `""` | Owner's email (a new sign-in account unless it already exists). |
+| `api.bootstrapAdmin.org.ownerName` | string | `""` | Owner's display name. Empty: derived from the email. |
+| `api.bootstrapAdmin.org.slug` | string | `""` | URL slug. Empty: derived from the name. |
+| `api.deploymentStrategy` | object | `{}` |  |
+| `api.encryption.existingSecret` | string | `""` | Source APP_ENCRYPTION_KEY from an existing Secret instead of the chart. |
+| `api.encryption.key` | string | `""` | APP_ENCRYPTION_KEY (AES-256-GCM) for integration credentials at rest. Without it, non-dev deployments refuse to boot; a wrong/rotated key makes all stored credentials undecryptable. STABLE across upgrades — never rotated automatically. Leave blank to auto-generate-once and persist; production should set an explicit value or existingSecret. Accepts 32 raw / 64 hex / 44 base64 chars. |
+| `api.encryption.keyRef` | string | `"APP_ENCRYPTION_KEY"` |  |
+| `api.extraEnv` | list | `[]` |  |
+| `api.extraEnvFrom` | list | `[]` |  |
+| `api.httpRoute` | object | see `values.yaml` | Expose API service via gateway-api HTTPRoute |
+| `api.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `api.image.repository` | string | `"ghcr.io/openctemio/openctem-api"` | API image. Published by the openctemio/openctem monorepo from v0.9.0; releases up to v0.8.0 exist only as ghcr.io/openctemio/api, which keeps receiving identical copies for a transition window. |
+| `api.image.tag` | string | `""` |  |
+| `api.ingress.annotations` | object | `{}` |  |
+| `api.ingress.className` | string | `""` |  |
+| `api.ingress.enabled` | bool | `false` |  |
+| `api.ingress.hosts[0].host` | string | `"api.chart-example.local"` |  |
+| `api.ingress.hosts[0].paths[0].path` | string | `"/"` |  |
+| `api.ingress.hosts[0].paths[0].pathType` | string | `"ImplementationSpecific"` |  |
+| `api.ingress.tls` | list | `[]` |  |
+| `api.livenessProbe.httpGet.path` | string | `"/health"` |  |
+| `api.livenessProbe.httpGet.port` | string | `"http"` |  |
+| `api.migrations.activeDeadlineSeconds` | int | `600` | Hard timeout for the migration Job in seconds. |
+| `api.migrations.affinity` | object | `{}` |  |
+| `api.migrations.backoffLimit` | int | `2` | Job backoffLimit (retries before Job is marked failed). |
+| `api.migrations.downMigration` | object | `{"activeDeadlineSeconds":600,"backoffLimit":0,"enabled":false,"steps":1}` | Manual, gated DOWN-migration Job for controlled rollbacks. DISABLED by default. `helm rollback` does NOT down-migrate — it only reverts the Kubernetes manifests, leaving the DB at the NEWER schema. If the older app version is not forward-compatible with that schema you must revert the schema yourself. Enabling this renders a one-shot Job that runs `migrate ... down <steps>`. Run it deliberately (never as an automatic hook), confirm the target step count, and take a DB backup first. |
+| `api.migrations.downMigration.steps` | int | `1` | Number of migrations to revert (passed to `migrate ... down N`). |
+| `api.migrations.enabled` | bool | `true` | Enable the database migrations Job. |
+| `api.migrations.extraArgs` | list | `[]` | Extra args appended BEFORE the "up" subcommand. |
+| `api.migrations.extraEnv` | list | `[]` | Extra environment variables for the migration container. |
+| `api.migrations.hooks` | object | `{"enabled":true}` | Run as a Helm hook (post-install,pre-upgrade). When false, the Job is applied as a plain resource (useful for GitOps flows). |
+| `api.migrations.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `api.migrations.image.repository` | string | `"ghcr.io/openctemio/migrations"` |  |
+| `api.migrations.image.tag` | string | `""` | Image tag for the migrations image. Defaults to .Chart.AppVersion. |
+| `api.migrations.nodeSelector` | object | `{}` |  |
+| `api.migrations.podSecurityContext` | object | see `values.yaml` | Pod-level security context of the migration Jobs (up and down). migrate only reads the SQL files baked into the image and talks to Postgres, so it runs unprivileged under the "restricted" Pod Security Standard. Empty ({}) used to run it as the image's user: root. |
+| `api.migrations.resources` | object | `{}` |  |
+| `api.migrations.securityContext` | object | see `values.yaml` | Container-level security context of the migration Jobs. |
+| `api.migrations.sslMode` | string | `""` | Override the Postgres sslmode used in the connection URL. Blank = "disable" when postgresql.enabled, otherwise "require". |
+| `api.migrations.tolerations` | list | `[]` |  |
+| `api.nodeSelector` | object | `{}` |  |
+| `api.podAnnotations` | object | `{}` |  |
+| `api.podDisruptionBudget` | object | `{"enabled":false,"maxUnavailable":"","minAvailable":1}` | Optional PodDisruptionBudget. Set minAvailable OR maxUnavailable. |
+| `api.podLabels` | object | `{}` |  |
+| `api.podSecurityContext` | object | see `values.yaml` | Pod-level security context (safe non-root defaults; API image runs as uid 1000). |
+| `api.readinessProbe.httpGet.path` | string | `"/health"` |  |
+| `api.readinessProbe.httpGet.port` | string | `"http"` |  |
+| `api.redis.tlsEnabled` | bool | `false` | REDIS_TLS_ENABLED. Production REQUIRES TLS. The bundled Bitnami Redis does not terminate TLS, so production must point at an external Redis with TLS (redis.enabled=false + redisConfig.*) and set this true. |
+| `api.redis.tlsSkipVerify` | bool | `false` | REDIS_TLS_SKIP_VERIFY — must stay false in production. |
+| `api.replicaCount` | int | `1` | Replica count. Keep 1 for now. The API runs its schedulers and background controllers in every replica and is not yet safe with more than one: with 2+ replicas scheduled scans fire twice, the audit hash chain forks and report emails are sent twice. The chart refuses more than 1 replica (replicaCount or autoscaling maxReplicas) unless allowMultipleReplicas is true. |
+| `api.resources` | object | `{"limits":{"cpu":"1","memory":"1Gi"},"requests":{"cpu":"100m","memory":"256Mi"}}` | CPU requests are REQUIRED for the CPU-target HPA to function. Memory limit is 1Gi (not 512Mi): the Go API does ingest/enrichment and threat-intel loading that spikes memory; 512Mi OOM-kills under load. Tune down only if you have measured a smaller working set. |
+| `api.securityContext` | object | see `values.yaml` | Container-level security context. readOnlyRootFilesystem is left OFF: the API writes local attachment storage under /app/data; enable it only with a writable volume mounted there. |
+| `api.sensorReleaseChannel` | object | `{"latestVersion":"","minVersion":""}` | The sensor release channel the Sensors page compares each sensor's version with, and the tag the page's install commands pin. latestVersion (SENSOR_LATEST_VERSION): empty = sensor.image.tag, so the bundled sensor and the install commands run the same release. minVersion (SENSOR_MIN_VERSION): empty = no minimum; a heartbeating sensor below it shows as degraded ("version unsupported"). An entry for either name in api.extraEnv takes precedence. |
+| `api.service.annotations` | object | `{}` |  |
+| `api.service.nodePort` | string | `nil` |  |
+| `api.service.port` | int | `80` |  |
+| `api.service.type` | string | `"ClusterIP"` |  |
+| `api.serviceAccount.annotations` | object | `{}` |  |
+| `api.serviceAccount.automount` | bool | `true` |  |
+| `api.serviceAccount.create` | bool | `true` |  |
+| `api.serviceAccount.name` | string | `""` |  |
+| `api.startupProbe` | object | `{"failureThreshold":30,"httpGet":{"path":"/health","port":"http"},"periodSeconds":5}` | startupProbe is ENABLED by default: first boot can be slow (app init + threat-intel load) and without it a slow start trips livenessProbe and the kubelet kills the pod in a crash loop. failureThreshold*periodSeconds = 30*5 = up to 150s of grace before liveness takes over. Set to {} to disable. |
+| `api.tenantCreationMode` | string | `"admin_only"` | Who may create organizations (TENANT_CREATION_MODE). admin_only — only the platform administrator creates organizations: in the admin console (/admin -> Organizations) or with the bootstrap-admin org flags (api.bootstrapAdmin.org). The default, and the right setting for self-hosted and on-prem installs. self_service — any signed-in user may create organizations (and owns each one). SaaS / trial opt-in only. A TENANT_CREATION_MODE entry in api.extraEnv takes precedence. |
+| `api.tolerations` | list | `[]` |  |
+| `api.topologySpreadConstraints` | list | `[]` | topologySpreadConstraints (values-driven, templated). Keeps the >= 2 replicas off a single node/zone. Empty by default; values-production.yaml ships a soft (ScheduleAnyway) hostname spread. Supports `tpl` for dynamic label values. |
+| `api.volumeMounts` | list | `[]` |  |
+| `api.volumes` | list | `[]` |  |
+| `database.auth.createSecret` | bool | `true` | Create credentials secret from values below when existingSecret is not set. |
+| `database.auth.existingSecret` | string | `""` | Existing secret containing DB_USER and DB_PASSWORD keys. |
+| `database.auth.password` | string | `""` |  |
+| `database.auth.passwordKey` | string | `"DB_PASSWORD"` |  |
+| `database.auth.userKey` | string | `"DB_USER"` |  |
+| `database.auth.username` | string | `""` |  |
+| `database.host` | string | `""` | Settings in this section are used only when postgresql.enabled=false. |
+| `database.migrator` | object | see `values.yaml` | Least-privilege split (OpenCTEM api/docs/deployment/database-roles.md). When `username` (or an existing secret) is set, the migration Jobs connect as this schema owner (openctem_migrator) and only the API keeps `database.auth` above, which should then be the DML-only role (openctem_app). Run the openctem api/deploy/postgres/least-privilege-roles.sql once as the Postgres superuser before the first install. Empty = migrations use database.auth (the old single-role layout). External databases only. |
+| `database.migrator.existingSecret` | string | `""` | Existing secret holding the migrator user and password keys. Empty = the database.auth secret (created with these keys when createSecret). |
+| `database.name` | string | `"openctem"` |  |
+| `database.port` | int | `5432` |  |
+| `extraManifests` | list | `[]` |  |
+| `fullnameOverride` | string | `""` |  |
+| `gateway.caddy` | object | see `values.yaml` | ------------------------------------------------------------------------- |
+| `gateway.caddy.frontProxies` | list | `[]` | CIDRs of proxies IN FRONT of Caddy whose X-Forwarded-For Caddy believes (tls.mode=http behind an L7 proxy). Empty: none. |
+| `gateway.caddy.maxBodySize` | string | `"256MB"` | Largest request body (the API enforces the real per-route limits). |
+| `gateway.caddy.persistence.enabled` | bool | `true` | PersistentVolumeClaim for /data (certificates, ACME account, the internal CA). Keep it: losing it re-issues the internal CA and every sensor and browser must trust the new root. false = emptyDir. |
+| `gateway.caddy.podSecurityContext` | object | see `values.yaml` | Caddy runs as a non-root user. The image's caddy binary carries the file capability cap_net_bind_service (to bind 443/80), so the container must keep NET_BIND_SERVICE: with every capability dropped the kernel refuses to execute it. Dropping ALL and adding back only NET_BIND_SERVICE is allowed by the "restricted" Pod Security Standard. |
+| `gateway.caddy.service.externalTrafficPolicy` | string | `"Local"` | Local keeps the client's source address (audit log, IP allowlists) for LoadBalancer/NodePort; Cluster SNATs it to a node address. |
+| `gateway.caddy.service.http` | object | `{"enabled":false,"nodePort":null,"port":80}` | Also expose port 80 (acme: HTTP-01 + HTTP->HTTPS redirect). In tls.mode=http port 80 is the only port and is always exposed. |
+| `gateway.caddy.service.type` | string | `"LoadBalancer"` | LoadBalancer \| NodePort \| ClusterIP |
+| `gateway.caddy.tls.allowPlainHttp` | bool | `false` | Must be true to use tls.mode=http (no encryption between the client and this gateway unless a TLS proxy sits in front). |
+| `gateway.caddy.tls.files.secretName` | string | `""` | kubernetes.io/tls Secret with tls.crt (full chain) and tls.key. |
+| `gateway.caddy.tls.mode` | string | `"internal"` | internal \| acme \| files \| http internal: certificates from Caddy's own CA (LAN / IP installs). Give sensors and browsers the root (see NOTES after install). acme: Let's Encrypt (or acme.ca) for a public DNS name; needs 443 reachable from the Internet (TLS-ALPN-01), or enable service.http for HTTP-01 and the HTTP->HTTPS redirect. files: your certificate: a kubernetes.io/tls Secret (files.secretName). http: plain HTTP on port 80, ONLY behind a proxy that terminates TLS; refused unless allowPlainHttp=true. |
+| `gateway.host` | string | `""` | Public hostname (DNS name, or an IP address in caddy internal/files mode). Required for every mode except caddy with tls.mode=http. |
+| `gateway.httpRoute` | object | see `values.yaml` | ------------------------------------------------------------------------- |
+| `gateway.httpRoute.apiKeyHeaderRouting` | bool | `true` | Route /api/* with `Authorization: Bearer oct_*` or `X-API-Key` to the API. |
+| `gateway.ingress` | object | see `values.yaml` | ------------------------------------------------------------------------- |
+| `gateway.ingress.annotations` | object | `{}` | Controller-specific annotations. WebSockets and large uploads usually need tuning, e.g. for ingress-nginx: nginx.ingress.kubernetes.io/proxy-body-size: "256m" nginx.ingress.kubernetes.io/proxy-read-timeout: "3600" nginx.ingress.kubernetes.io/proxy-send-timeout: "3600" |
+| `gateway.ingress.tls.clusterIssuer` | string | `""` | Convenience: adds cert-manager.io/cluster-issuer (or .../issuer). |
+| `gateway.ingress.tls.enabled` | bool | `true` | Terminate TLS at the ingress for `host`. |
+| `gateway.ingress.tls.secretName` | string | `""` | kubernetes.io/tls Secret. Default: <fullname>-gateway-tls (which cert-manager creates when an issuer below is set). |
+| `gateway.mode` | string | `"none"` | none (default; nothing changes) \| ingress \| httpRoute \| caddy |
+| `gateway.publicUrl` | string | `""` | Public origin, used for APP_URL, CORS_ALLOWED_ORIGINS and SMTP_BASE_URL. Default: https://<host>. Set it when clients use a non-443 port (e.g. https://ctem.example.com:8443) or in caddy http mode. |
+| `gateway.trustedProxies` | list | `[]` | REQUIRED when mode != none: CIDRs/IPs the API trusts to report the client address (SERVER_TRUSTED_PROXIES). These are the hops that connect to the API: the gateway pods (or the ingress controller / Gateway pods) and the UI pods. Pod IPs change, so give the cluster's POD CIDR, e.g. kubeadm+flannel 10.244.0.0/16, k3s 10.42.0.0/16, GKE/EKS: the VPC/pod range. kubectl cluster-info dump \| grep -m1 -- --cluster-cidr Anything outside this list is recorded as its own TCP peer, so nothing can choose the IP written to the audit log or matched by IP allowlists. |
+| `imagePullSecrets` | list | `[]` |  |
+| `monitoring.enabled` | bool | `false` | Turn on the API's /metrics (bearer token METRICS_TOKEN). Off: /metrics answers 404. The gateway never routes /metrics, whatever this says. |
+| `monitoring.existingSecret` | string | `""` | Secret holding the metrics token under `metricsTokenKey`. Empty: the chart creates one with a random token, kept across upgrades. |
+| `monitoring.metricsTokenKey` | string | `"metrics-token"` |  |
+| `monitoring.prometheusNamespaceSelector` | object | `{}` | With networkPolicy.enabled: where Prometheus runs, allowed to reach the API port. Both empty: any namespace (set them in production). |
+| `monitoring.prometheusPodSelector` | object | `{}` |  |
+| `monitoring.prometheusRule.enabled` | bool | `false` | Create a PrometheusRule with the OpenCTEM alert rules (files/monitoring/openctem-rules.yml, synced from the monorepo). |
+| `monitoring.prometheusRule.groups` | list | `["openctem-api","openctem-work","openctem-security"]` | Rule groups to include. The other groups of the file need the compose stack's exporters (blackbox, node, cAdvisor, Postgres, Redis); on Kubernetes the cluster's own monitoring usually covers those. |
+| `monitoring.prometheusRule.labels` | object | `{}` |  |
+| `monitoring.serviceMonitor.enabled` | bool | `false` | Create a ServiceMonitor (monitoring.coreos.com/v1) that scrapes the API with the token. Needs monitoring.enabled. |
+| `monitoring.serviceMonitor.interval` | string | `"30s"` |  |
+| `monitoring.serviceMonitor.labels` | object | `{}` | Extra labels, e.g. the `release` label your Prometheus selects on. |
+| `monitoring.serviceMonitor.scrapeTimeout` | string | `"10s"` |  |
+| `nameOverride` | string | `""` |  |
+| `networkPolicy.api` | object | `{"egress":{"allowAll":true,"extra":[]}}` | Egress policy for the API. The API reaches out to threat-intel / CVE / Certificate-Transparency feeds over HTTPS and needs DNS. Kept permissive by default (all egress) so those feeds are not silently broken; tighten `api.egress` to explicit CIDRs/ports if your environment allows it. |
+| `networkPolicy.api.egress.allowAll` | bool | `true` | Allow all egress from the API (recommended unless you can enumerate every threat-intel endpoint). When false, only the explicit rules below (DNS + the datastore rules) are permitted. |
+| `networkPolicy.api.egress.extra` | list | `[]` | Extra egress rules (NetworkPolicyEgressRule objects) appended when allowAll=false. Use to pin threat-intel egress to known CIDRs. |
+| `networkPolicy.enabled` | bool | `false` | Master switch for all NetworkPolicy resources in this chart. |
+| `networkPolicy.ingressControllerNamespaceSelector` | object | `{}` | Label selector identifying the namespace(s) your ingress controller runs in, used to allow inbound traffic to the UI. Empty {} allows from ALL namespaces (podSelector only). Example: { kubernetes.io/metadata.name: ingress-nginx } |
+| `networkPolicy.ingressControllerPodSelector` | object | `{}` | Pod selector for the ingress controller within the namespace above. |
+| `postgresql.auth.database` | string | `"openctem"` |  |
+| `postgresql.auth.password` | string | `""` |  |
+| `postgresql.auth.username` | string | `"openctem"` |  |
+| `postgresql.enabled` | bool | `true` | Deploy bundled Bitnami PostgreSQL subchart. DEV/EVAL ONLY — see note above. |
+| `redis.architecture` | string | `"standalone"` |  |
+| `redis.auth.enabled` | bool | `true` |  |
+| `redis.auth.existingSecret` | string | `""` |  |
+| `redis.auth.existingSecretPasswordKey` | string | `"redis-password"` |  |
+| `redis.auth.password` | string | `""` |  |
+| `redis.enabled` | bool | `true` | Deploy bundled Bitnami Redis subchart. DEV/EVAL ONLY — see note above. |
+| `redisConfig.auth.createSecret` | bool | `true` | Create password secret from values below when existingSecret is not set. |
+| `redisConfig.auth.existingSecret` | string | `""` | Existing secret containing REDIS_PASSWORD key. |
+| `redisConfig.auth.password` | string | `""` |  |
+| `redisConfig.auth.passwordKey` | string | `"REDIS_PASSWORD"` |  |
+| `redisConfig.db` | int | `0` |  |
+| `redisConfig.host` | string | `""` | Settings in this section are used only when redis.enabled=false. |
+| `redisConfig.port` | int | `6379` |  |
+| `sensor.affinity` | object | `{}` |  |
+| `sensor.allowPrivateTargets` | string | `""` | SENSOR_ALLOW_PRIVATE_TARGETS. Empty (default): RFC1918 / IPv6 ULA targets are refused — co-located sensors are for external-reachable work; internal scanning belongs on a remote sensor. "1": allow private targets. Loopback, link-local/IMDS and CGNAT stay blocked either way. The sensor only recognises "1", so any other value fails the render. (Reaching the in-cluster API needs no setting: since sdk-go v0.7.2 the sensor's API client allows the platform's private address.) |
+| `sensor.apiKey` | string | `""` | The sensor's API key (API_KEY). For production provide it out-of-band via existingSecret instead of committing it here. |
+| `sensor.apiUrl` | string | `""` | Override the API base URL (API_URL). Defaults to the in-cluster API service. It must reach the API directly: the sensor refuses redirects. |
+| `sensor.content` | object | see `values.yaml` | Scanner content cache at /var/lib/openctem/content (SENSOR_CONTENT_DIR: trivy DB, nuclei templates, semgrep rules), so a new pod does not download it again. Disposable (it can be deleted), and kept apart from the state on purpose. |
+| `sensor.content.emptyDirSizeLimit` | string | `""` | emptyDir size limit when persistence is off (empty: none). |
+| `sensor.content.persistence.enabled` | bool | `true` | Back the content cache with a PersistentVolumeClaim (needs replicaCount 1; switches the Deployment to Recreate). Off: an emptyDir (emptyDirSizeLimit). |
+| `sensor.enabled` | bool | `false` | Enable the bundled co-located sensor. Disabled by default (opt-in). |
+| `sensor.existingSecret` | string | `""` | Name of a pre-created Secret holding the API key. Takes precedence over apiKey; nothing secret is then rendered by Helm. |
+| `sensor.existingSecretKey` | string | `""` | Key within the secret. Empty: "api-key". |
+| `sensor.extraEnv` | list | `[]` |  |
+| `sensor.extraVolumeMounts` | list | `[]` |  |
+| `sensor.extraVolumes` | list | `[]` | Extra volumes and mounts for the sensor container (for example a host directory holding the kill switch file). |
+| `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
+| `sensor.image.tag` | string | `"v0.9.1"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag (v0.4.2, latest; from v0.4.2) is the default image: semgrep, betterleaks, trivy and nuclei, the same as <version>-default. Other variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy, and -ci for CI. Pin a version for reproducible installs. v0.4.x adds the durable outbox (results survive a platform outage) and protocol v2 results; v0.3.0 images carry gitleaks and a semgrep that fails to start, so do not go back to them. |
+| `sensor.keyAutoRenew` | string | `""` | Renew the sensor API key before it expires and when the platform asks (PLATFORM_KEY_AUTORENEW). The renewed key is kept in the state volume (/var/lib/openctem/state/sensor-credentials.json), not the Secret: the renewal retires the key in the Secret. Empty (default): on exactly when state.persistence.enabled (a renewed key on an emptyDir is lost with the pod, which then starts with the retired key). true / false force it. |
+| `sensor.localPolicy` | object | see `values.yaml` | The sensor-local policy (api RFC-040 §5.7): a read-only file the network owner writes, mounted at /etc/openctem/sensor-policy.yaml. The sensor refuses every job outside it (targets, ports, tools, job types, custom templates, interactsh, rate, kill switch) whatever the platform sends; a policy it cannot load stops it. Off by default so an upgrade keeps today's behavior (the sensor then reports local_policy "absent"); new installs should turn it on and replace the example ranges. Keys: docs/LOCAL_POLICY.md in openctemio/sensor. Needs sensor >= the release that ships the local policy (older images ignore the file). |
+| `sensor.localPolicy.existingConfigMap` | string | `""` | A pre-created ConfigMap holding sensor-policy.yaml (kept out of this release so whoever installs the platform need not own the policy). Takes precedence over policy. |
+| `sensor.localPolicy.existingConfigMapKey` | string | `"sensor-policy.yaml"` | Key of the policy in existingConfigMap. |
+| `sensor.localPolicy.killSwitchFile` | string | `""` | SENSOR_KILL_SWITCH_FILE: while this file exists the sensor runs no job and heartbeats "paused by local policy". It must sit on a volume the host owner can write (extraVolumes/extraVolumeMounts); empty: none. kill_switch: true in the policy plus a rollout is the in-cluster way. |
+| `sensor.localPolicy.policy` | string | see `values.yaml` | The policy document, rendered into a ConfigMap when existingConfigMap is empty. Mirrors the sensor's docs/sensor-policy.example.yaml (custom templates and interactsh off). |
+| `sensor.mode` | string | `"daemon"` | How the sensor connects to the platform. Only "daemon": an API-key sensor (create a sensor under Settings → Sensors, put its API key in apiKey or existingSecret); it runs `-daemon -enable-commands`, executing the scans the platform dispatches. "platform" (the bootstrap-token self-registration chart <= 0.4.x ran) was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered. |
+| `sensor.netRaw` | bool | `false` | Add the NET_RAW capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
+| `sensor.nodeSelector` | object | `{}` |  |
+| `sensor.outbox` | object | see `values.yaml` | The sensor's outbox: results kept at /var/lib/openctem/outbox until the platform accepted them (sensor >= v0.4.0), so an API outage or a pod restart loses nothing. By default it is an emptyDir, which survives a container restart but NOT a pod deletion, reschedule or upgrade: results still queued then are lost. Enable persistence for a PVC. |
+| `sensor.outbox.emptyDirSizeLimit` | string | `""` | emptyDir size limit when persistence is off (empty: none). |
+| `sensor.outbox.maxAge` | string | `""` | SENSOR_OUTBOX_MAX_AGE (empty: 168h). |
+| `sensor.outbox.maxBytes` | string | `""` | SENSOR_OUTBOX_MAX_BYTES (empty: the sensor's default, 1GiB and at most half of the free space). Keep it below the volume size. |
+| `sensor.outbox.persistence.enabled` | bool | `false` | Back the outbox with a PersistentVolumeClaim. Needs replicaCount 1 (one sensor process per outbox) and switches the Deployment to the Recreate strategy (a ReadWriteOnce volume). |
+| `sensor.outbox.persistence.existingClaim` | string | `""` | Use this pre-created claim instead of creating one. |
+| `sensor.outbox.persistence.fsGroup` | int | `999` | fsGroup given to the pod (unless podSecurityContext sets one) so the image's user (uid/gid 999) can write the volumes (outbox, state, content); applied when any of them is a PersistentVolumeClaim. |
+| `sensor.outbox.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |
+| `sensor.podAnnotations` | object | `{}` |  |
+| `sensor.podLabels` | object | `{}` |  |
+| `sensor.podSecurityContext` | object | see `values.yaml` | Pod security context. The sensor image runs as uid/gid 999 (the single-tool -nuclei/-trivy/-semgrep/-betterleaks images use 1001: set runAsUser/runAsGroup/fsGroup to 1001 for them). runAsNonRoot needs a numeric runAsUser because the image's USER is a name. |
+| `sensor.region` | string | `"default"` | REGION reported by the sensor. |
+| `sensor.replicaCount` | int | `1` |  |
+| `sensor.resources` | object | `{}` |  |
+| `sensor.scanRoots` | string | `""` | SENSOR_SCAN_ROOTS: ':'-separated directories that filesystem targets of dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside. Empty: the sensor's working directory (/scan in the image). |
+| `sensor.securityContext` | object | see `values.yaml` | Container security context: no privilege escalation, a read-only root filesystem (the directories the sensor and its tools write are emptyDirs or the state/content/outbox volumes: see writableDirs) and no capabilities (netRaw adds NET_RAW back). |
+| `sensor.state` | object | see `values.yaml` | The sensor's state at /var/lib/openctem/state (SENSOR_STATE_DIR): the API key it renews on its own (api RFC-032 Phase 0). Holds a credential: back it up like one. With persistence off it is an emptyDir and key auto-renewal stays off (keyAutoRenew). |
+| `sensor.state.persistence.enabled` | bool | `true` | Back the state with a PersistentVolumeClaim (needs replicaCount 1; switches the Deployment to Recreate). |
+| `sensor.state.persistence.existingClaim` | string | `""` | Use this pre-created claim instead of creating one. |
+| `sensor.state.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |
+| `sensor.terminationGracePeriodSeconds` | int | `45` | Seconds Kubernetes waits after SIGTERM. The sensor drains for up to 30s and hands unfinished work back so the platform re-queues it at once; the Kubernetes default (30) can cut that off. |
+| `sensor.tolerations` | list | `[]` |  |
+| `sensor.tools` | string | `"nuclei"` | daemon mode: comma-separated scanners the sensor offers for dispatched jobs (-tools). The default image carries semgrep, betterleaks, trivy and nuclei ("gitleaks" is still accepted and runs betterleaks). |
+| `sensor.verbose` | bool | `false` |  |
+| `sensor.writableDirs` | list | `["/tmp","/home/openctem","/scan","/cache","/config"]` | Writable emptyDirs mounted over the read-only root filesystem: /tmp, the home directory (tool configs and caches), the scan workspace and the image's cache and config directories. |
+| `sensor.writableDirsSizeLimit` | string | `""` | emptyDir size limit of each writable directory (empty: none). |
+| `tests.enabled` | bool | `true` |  |
+| `tests.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `tests.image.repository` | string | `"busybox"` | Small image with wget (busybox). Pinned for reproducibility. |
+| `tests.image.tag` | string | `"1.37.0"` |  |
+| `tests.timeoutSeconds` | int | `10` | Overall timeout (seconds) for each curl/wget probe. |
+| `ui.affinity` | object | `{}` |  |
+| `ui.autoscaling.enabled` | bool | `false` |  |
+| `ui.autoscaling.maxReplicas` | int | `100` |  |
+| `ui.autoscaling.minReplicas` | int | `1` |  |
+| `ui.autoscaling.targetCPUUtilizationPercentage` | int | `80` |  |
+| `ui.config.backendUrl` | string | `""` | keep blank to set default backend url as the internal api service |
+| `ui.config.nodeEnv` | string | `"production"` |  |
+| `ui.deploymentStrategy` | object | `{}` |  |
+| `ui.extraEnv` | string | `nil` |  |
+| `ui.extraEnvFrom` | string | `nil` |  |
+| `ui.httpRoute` | object | see `values.yaml` | Expose UI service via gateway-api HTTPRoute |
+| `ui.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `ui.image.repository` | string | `"ghcr.io/openctemio/openctem-web"` | Web console image (web/ in openctemio/openctem). Releases up to v0.8.0 exist only as ghcr.io/openctemio/ui. |
+| `ui.image.tag` | string | `""` |  |
+| `ui.ingress.annotations` | object | `{}` |  |
+| `ui.ingress.className` | string | `""` |  |
+| `ui.ingress.enabled` | bool | `false` |  |
+| `ui.ingress.hosts[0].host` | string | `"ui.chart-example.local"` |  |
+| `ui.ingress.hosts[0].paths[0].path` | string | `"/"` |  |
+| `ui.ingress.hosts[0].paths[0].pathType` | string | `"ImplementationSpecific"` |  |
+| `ui.ingress.tls` | list | `[]` |  |
+| `ui.livenessProbe.httpGet.path` | string | `"/"` |  |
+| `ui.livenessProbe.httpGet.port` | string | `"http"` |  |
+| `ui.nodeSelector` | object | `{}` |  |
+| `ui.podAnnotations` | object | `{}` |  |
+| `ui.podDisruptionBudget` | object | `{"enabled":false,"maxUnavailable":"","minAvailable":1}` | Optional PodDisruptionBudget. Set minAvailable OR maxUnavailable. |
+| `ui.podLabels` | object | `{}` |  |
+| `ui.podSecurityContext` | object | see `values.yaml` | Pod-level security context (UI image runs as uid 1001 "nextjs"). |
+| `ui.readinessProbe.httpGet.path` | string | `"/"` |  |
+| `ui.readinessProbe.httpGet.port` | string | `"http"` |  |
+| `ui.replicaCount` | int | `1` | Replica count. Default 1 for dev/eval. PRODUCTION should run >= 2 for HA (see values-production.yaml). Pair with podDisruptionBudget + topologySpreadConstraints when running >= 2. |
+| `ui.resources` | object | `{"limits":{"cpu":"500m","memory":"256Mi"},"requests":{"cpu":"50m","memory":"128Mi"}}` | CPU requests are REQUIRED for the CPU-target HPA to function. |
+| `ui.secret.createSecret` | bool | `true` | Create UI secret when existingSecret is not set. |
+| `ui.secret.csrfToken` | string | `""` | Leave empty to auto-generate like `openssl rand -base64 32`. |
+| `ui.secret.csrfTokenKey` | string | `"CSRF_SECRET"` | Secret data key holding the CSRF secret. The UI reads it as the CSRF_SECRET env var (web/src/lib/env.ts in openctemio/openctem). |
+| `ui.secret.existingSecret` | string | `""` | Existing UI secret. |
+| `ui.securityContext` | object | see `values.yaml` | Container-level security context. readOnlyRootFilesystem is left OFF: Next.js writes to .next/cache at runtime. |
+| `ui.service.annotations` | object | `{}` |  |
+| `ui.service.nodePort` | string | `nil` |  |
+| `ui.service.port` | int | `80` |  |
+| `ui.service.type` | string | `"ClusterIP"` |  |
+| `ui.serviceAccount.annotations` | object | `{}` |  |
+| `ui.serviceAccount.automount` | bool | `true` |  |
+| `ui.serviceAccount.create` | bool | `true` |  |
+| `ui.serviceAccount.name` | string | `""` |  |
+| `ui.startupProbe` | object | `{}` | Optional startupProbe. Empty {} disables it. |
+| `ui.tolerations` | list | `[]` |  |
+| `ui.topologySpreadConstraints` | list | `[]` | topologySpreadConstraints (values-driven, templated). See api section. |
+| `ui.volumeMounts` | list | `[]` |  |
+| `ui.volumes` | list | `[]` |  |
+<!-- values-table:end -->

@@ -3,6 +3,27 @@ entries:
   openctem:
   - apiVersion: v2
     appVersion: v0.9.0
+    created: "2026-10-08T21:16:10.187078451Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.5.6
+    - condition: redis.enabled
+      name: redis
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 25.3.2
+    description: 'OpenCTEM (Continuous Threat Exposure Management) platform: the API,
+      the web console, database migrations and an optional co-located scanning sensor,
+      plus optional PostgreSQL and Redis for evaluation.'
+    digest: 09d1580f0b9251ed3af397feb34c4535b50b326fbcc56ffe242abcf46ed7d099
+    name: openctem
+    type: application
+    urls:
+    - https://github.com/openctemio/helm-charts/releases/download/openctem-0.17.0/openctem-0.17.0.tgz
+    version: 0.17.0
+  - apiVersion: v2
+    appVersion: v0.9.0
     created: "2026-10-08T11:47:08.822327182Z"
     dependencies:
     - condition: postgresql.enabled
@@ -539,4 +560,4 @@ entries:
     urls:
     - https://github.com/openctemio/helm-charts/releases/download/openctem-0.1.1/openctem-0.1.1.tgz
     version: 0.1.1
-generated: "2026-10-08T11:47:08.82253154Z"
+generated: "2026-10-08T21:16:10.187380448Z"

@@ -19,6 +19,19 @@ jobs:
       - name: Actions are pinned to commit SHAs
         run: bash .github/scripts/check-action-pins.sh
 
+      - name: Customer identifiers (self-test)
+        run: bash .github/scripts/check-customer-identifiers.test.sh >/dev/null
+
+      # Fails when a tracked file names a customer (case-insensitive fixed
+      # strings from the CUSTOMER_DENYLIST secret, so the list is never
+      # committed) or carries the live LAN range outside tests. Prints only
+      # file:line. Passes with a notice when the secret is empty (forks).
+      - name: Customer identifiers
+        env:
+          CUSTOMER_DENYLIST: ${{ secrets.CUSTOMER_DENYLIST }}
+        run: bash .github/scripts/check-customer-identifiers.sh
+
+
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:

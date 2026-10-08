@@ -1,6 +1,5 @@
 apiVersion: apps/v1
 kind: Deployment
-{{- $uiSecretChecksumSource := include "openctem.uiSecretChecksumSource" . | trim }}
 metadata:
   name: {{ include "openctem.uiFullname" . }}
   labels:
@@ -21,9 +20,6 @@ spec:
       annotations:
         {{- with .Values.ui.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-        {{- end }}
-        {{- if $uiSecretChecksumSource }}
-        checksum/ui-secret: {{ $uiSecretChecksumSource | sha256sum }}
         {{- end }}
       labels:
         {{- include "openctem.uiLabels" . | nindent 8 }}
@@ -61,12 +57,6 @@ spec:
               {{- end }}
             - name: NODE_ENV
               value: {{ .Values.ui.config.nodeEnv | quote }}
-            # -- The UI reads CSRF_SECRET (web/src/lib/env.ts), not CSRF_TOKEN.
-            - name: CSRF_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openctem.uiSecretName" . }}
-                  key: {{ .Values.ui.secret.csrfTokenKey }}
             {{- if include "openctem.gatewayMode" . }}
             {{- $uiEnvNames := list }}
             {{- range $e := .Values.ui.extraEnv }}

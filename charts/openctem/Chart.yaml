@@ -1,6 +1,6 @@
 apiVersion: v2
 name: openctem
-description: A Helm chart for Kubernetes
+description: "OpenCTEM (Continuous Threat Exposure Management) platform: the API, the web console, database migrations and an optional co-located scanning sensor, plus optional PostgreSQL and Redis for evaluation."
 
 # A chart can be either an 'application' or a 'library' chart.
 #
@@ -15,7 +15,7 @@ type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.14.1
+version: 0.15.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to

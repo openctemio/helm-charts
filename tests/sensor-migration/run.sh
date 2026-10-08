@@ -62,11 +62,11 @@ D=(--set api.appEnv=development --set sensor.enabled=true --set sensor.apiKey=rd
 out="$(render "${D[@]}")"
 expect "sensor: Deployment" "name: t-openctem-sensor" "$out"
 expect "sensor: component label" "app.kubernetes.io/component: sensor" "$out"
-expect "sensor: image" 'image: "ghcr.io/openctemio/sensor:v0.9.1"' "$out"
+expect "sensor: image" 'image: "ghcr.io/openctemio/sensor:v0.11.0"' "$out"
 expect "sensor: drain grace period" "terminationGracePeriodSeconds: 45" "$out"
 expect "sensor: daemon" '"-daemon"' "$out"
 expect "sensor: dispatched commands" '"-enable-commands"' "$out"
-expect "sensor: tools" '"-tools=nuclei"' "$out"
+reject "sensor: no -tools by default (every installed scanner)" '"-tools=' "$out"
 expect "sensor: API_KEY" "name: API_KEY" "$out"
 expect "sensor: chart Secret" "name: t-openctem-sensor-credentials" "$out"
 expect "sensor: Secret key" 'api-key: "rda_test"' "$out"
@@ -83,7 +83,8 @@ expect "sensor: content PVC size" 'storage: "5Gi"' "$out"
 expect "sensor: content mounted" "mountPath: /var/lib/openctem/content" "$out"
 expect "sensor: Recreate with the PVCs" "type: Recreate" "$(render "${D[@]}" -s templates/sensor-deployment.yaml)"
 expect "sensor: fsGroup for the PVCs" "fsGroup: 999" "$out"
-expect "sensor: NOTES state" "Key auto-renewal: ON" "$out"
+expect "sensor: fsGroup only on a new volume" "fsGroupChangePolicy: OnRootMismatch" "$out"
+expect "sensor: NOTES state" "API key auto-renewal: ON" "$out"
 reject "sensor: no SENSOR_NAME" "name: SENSOR_NAME" "$out"
 reject "sensor: private targets off by default" "name: SENSOR_ALLOW_PRIVATE_TARGETS" "$out"
 reject "sensor: no AGENT_ env" "name: AGENT_" "$out"
@@ -93,6 +94,8 @@ out="$(render "${D[@]}" --set-string sensor.allowPrivateTargets=1 --set sensor.s
 expect "sensor: allowPrivateTargets=1" 'name: SENSOR_ALLOW_PRIVATE_TARGETS
               value: "1"' "$out"
 expect "sensor: scanRoots" 'value: "/scan:/work"' "$out"
+
+expect "sensor: tools allowlist" '"-tools=nuclei"' "$(render "${D[@]}" --set sensor.tools=nuclei)"
 
 out="$(render "${D[@]}" --set sensor.existingSecret=octem-sensor --set sensor.existingSecretKey=key)"
 expect "sensor: existingSecret" "name: octem-sensor" "$out"
@@ -140,10 +143,27 @@ else
   expect "sensor: mode=platform fails with the reason" "sensor.mode=platform was removed in chart 0.9.0" "$out"
 fi
 
-if out="$(render --set api.appEnv=development --set sensor.enabled=true)"; then
-  fail "sensor: daemon without an API key must fail"
+# No API key: the sensor pairs (its own key in the state volume).
+P=(--set api.appEnv=development --set sensor.enabled=true)
+out="$(render "${P[@]}")"
+expect "pairing: Deployment" "name: t-openctem-sensor" "$out"
+reject "pairing: no API_KEY" "name: API_KEY" "$out"
+reject "pairing: no chart Secret" "t-openctem-sensor-credentials" "$out"
+expect "pairing: SENSOR_NAME defaults to the Deployment name" 'name: SENSOR_NAME
+              value: "t-openctem-sensor"' "$out"
+expect "pairing: state PVC" "claimName: t-openctem-sensor-state" "$out"
+expect "pairing: NOTES says how to read the code" "Sensors > Pair a sensor" "$out"
+reject "pairing: no pins by default" "SENSOR_CA_FINGERPRINT" "$out"
+out="$(render "${P[@]}" --set sensor.name=dmz-01 --set sensor.caFingerprint=AB:CD --set sensor.platformKey=pk123)"
+expect "pairing: name" 'value: "dmz-01"' "$out"
+expect "pairing: CA pin" 'name: SENSOR_CA_FINGERPRINT
+              value: "AB:CD"' "$out"
+expect "pairing: platform key pin" 'name: SENSOR_PLATFORM_KEY
+              value: "pk123"' "$out"
+if out="$(render "${P[@]}" --set sensor.state.persistence.enabled=false)"; then
+  fail "pairing: an emptyDir state must fail"
 else
-  expect "sensor: daemon without an API key fails" "requires either sensor.apiKey or sensor.existingSecret" "$out"
+  expect "pairing: an emptyDir state fails" "its identity must survive the pod" "$out"
 fi
 if out="$(render "${D[@]}" --set sensor.mode=agent)"; then
   fail "sensor: unknown mode must fail"
@@ -172,7 +192,7 @@ fi
 out="$(render -f "$here/legacy-agent-with-key-values.yaml")"
 expect "legacy: sensor Deployment" "name: t-openctem-sensor" "$out"
 reject "legacy: no agent objects" "app.kubernetes.io/component: agent" "$out"
-expect "legacy: sensor image (frozen agent image dropped)" 'image: "ghcr.io/openctemio/sensor:v0.9.1"' "$out"
+expect "legacy: sensor image (frozen agent image dropped)" 'image: "ghcr.io/openctemio/sensor:v0.11.0"' "$out"
 expect "legacy: daemon" '"-daemon"' "$out"
 reject "legacy: no -platform" '"-platform"' "$out"
 reject "legacy: no BOOTSTRAP_TOKEN" "name: BOOTSTRAP_TOKEN" "$out"

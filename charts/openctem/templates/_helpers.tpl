@@ -159,14 +159,17 @@ mode: daemon
 replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
-  tag: v0.9.1
+  tag: v0.11.0
   pullPolicy: IfNotPresent
 region: default
 apiUrl: ""
+name: ""
+caFingerprint: ""
+platformKey: ""
 apiKey: ""
 existingSecret: ""
 existingSecretKey: ""
-tools: nuclei
+tools: ""
 keyAutoRenew: ""
 verbose: false
 allowPrivateTargets: ""
@@ -233,6 +236,7 @@ podSecurityContext:
   runAsUser: 999
   runAsGroup: 999
   fsGroup: 999
+  fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
     type: RuntimeDefault
 securityContext:
@@ -244,10 +248,6 @@ securityContext:
 netRaw: false
 writableDirs:
   - /tmp
-  - /home/openctem
-  - /scan
-  - /cache
-  - /config
 writableDirsSizeLimit: ""
 resources: {}
 terminationGracePeriodSeconds: 45
@@ -351,14 +351,14 @@ Resolve the effective sensor values, as YAML (use with fromYaml):
 {{- end -}}
 {{- $ownSecret := (.Values.sensor | default dict).existingSecret -}}
 {{- if and $sensor.enabled (not $sensor.apiKey) (not $ownSecret) -}}
-{{- fail "\n\nThe `agent:` block (chart <= 0.4.x) ran the sensor with -platform and a bootstrap token. That mode was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered.\nCreate a sensor under Settings → Sensors and set sensor.apiKey, or sensor.existingSecret with its API key (key `api-key`, or sensor.existingSecretKey). sensor.existingSecret may name the Secret agent.existingSecret used, once it holds the API key.\n" -}}
+{{- fail "\n\nThe `agent:` block (chart <= 0.4.x) ran the sensor with -platform and a bootstrap token. That mode was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered.\nMove the settings you keep into `sensor:` and delete `agent:`: without an API key the sensor then pairs (an administrator approves it under Sensors > Pair a sensor). To keep an API key, set sensor.apiKey or sensor.existingSecret (key `api-key`, or sensor.existingSecretKey); sensor.existingSecret may name the Secret agent.existingSecret used, once it holds the API key.\n" -}}
 {{- end -}}
 {{- end -}}
 {{- if eq (toString $sensor.mode) "platform" -}}
-{{- fail "\n\nsensor.mode=platform was removed in chart 0.9.0: it ran -platform self-registration with a bootstrap token, and no OpenCTEM API serves /api/v1/platform/register, so it never registered.\nUse sensor.mode=daemon (the default) with the API key of a sensor created under Settings → Sensors (sensor.apiKey or sensor.existingSecret).\n" -}}
+{{- fail "\n\nsensor.mode=platform was removed in chart 0.9.0: it ran -platform self-registration with a bootstrap token, and no OpenCTEM API serves /api/v1/platform/register, so it never registered.\nUse sensor.mode=daemon (the default): the sensor pairs, or uses the API key in sensor.apiKey / sensor.existingSecret.\n" -}}
 {{- end -}}
 {{- if ne (toString $sensor.mode) "daemon" -}}
-{{- fail (printf "\n\nsensor.mode=%q is not supported. Use \"daemon\" (the API key of a sensor created under Settings → Sensors).\n" (toString $sensor.mode)) -}}
+{{- fail (printf "\n\nsensor.mode=%q is not supported. Use \"daemon\".\n" (toString $sensor.mode)) -}}
 {{- end -}}
 {{- $kar := toString $sensor.keyAutoRenew -}}
 {{- if has $kar (list "" "<nil>" "auto") -}}
@@ -670,7 +670,8 @@ Resolve secret key containing DB password.
 {{- end }}
 
 {{/*
-True when the migration Jobs use a separate schema-owner role (D-6).
+True when the migration Jobs use a separate schema-owner role (the API's
+own role then has no DDL rights).
 */}}
 {{- define "openctem.dbMigratorEnabled" -}}
 {{- if and (not .Values.postgresql.enabled) (or .Values.database.migrator.username .Values.database.migrator.existingSecret) -}}true{{- end -}}

@@ -7,6 +7,11 @@
 {{- $statePersist := (($sensor.state | default dict).persistence | default dict) -}}
 {{- $anyPVC := or $persist.enabled $statePersist.enabled $contentPersist.enabled -}}
 {{- $lp := $sensor.localPolicy | default dict -}}
+{{- /* No API key: the sensor pairs and keeps its identity in the state volume. */ -}}
+{{- $pairing := not (or $sensor.apiKey $sensor.existingSecret) -}}
+{{- if and $pairing (not $statePersist.enabled) }}
+{{- fail "\n\nThe sensor pairs (no sensor.apiKey or sensor.existingSecret), so its identity must survive the pod: set sensor.state.persistence.enabled=true (the default), or give it an API key.\n" }}
+{{- end }}
 {{- if and $persist.enabled (gt (int $sensor.replicaCount) 1) }}
 {{- fail "\n\nsensor.outbox.persistence.enabled needs sensor.replicaCount=1: an outbox belongs to one sensor process (the sensor locks it).\n" }}
 {{- end }}
@@ -20,7 +25,7 @@ metadata:
   labels:
     {{- include "openctem.sensorLabels" . | nindent 4 }}
 spec:
-  # A sensor is one identity (one API key): run a single replica. Replicas
+  # A sensor is one identity (one key): run a single replica. Replicas
   # sharing a key are flagged by the platform as a cloned identity.
   replicas: {{ $sensor.replicaCount }}
   {{- if $anyPVC }}
@@ -34,8 +39,9 @@ spec:
       {{- include "openctem.sensorSelectorLabels" . | nindent 6 }}
   template:
     metadata:
+      {{- if or (and $sensor.apiKey (not $sensor.existingSecret)) (and $lp.enabled (not $lp.existingConfigMap)) $sensor.podAnnotations }}
       annotations:
-        {{- if not $sensor.existingSecret }}
+        {{- if and $sensor.apiKey (not $sensor.existingSecret) }}
         checksum/credentials-secret: {{ include (print $.Template.BasePath "/sensor-secret.yaml") . | sha256sum }}
         {{- end }}
         {{- if and $lp.enabled (not $lp.existingConfigMap) }}
@@ -45,6 +51,7 @@ spec:
         {{- with $sensor.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- end }}
       labels:
         {{- include "openctem.sensorLabels" . | nindent 8 }}
         {{- with $sensor.podLabels }}
@@ -59,6 +66,11 @@ spec:
       {{- $podSC := deepCopy ($sensor.podSecurityContext | default dict) }}
       {{- if and $anyPVC $persist.fsGroup (not (hasKey $podSC "fsGroup")) }}
       {{- $_ := set $podSC "fsGroup" (int $persist.fsGroup) }}
+      {{- end }}
+      {{- /* fsGroup with the default policy (Always) makes the identity key
+             group-readable at every mount, and the sensor then refuses it. */}}
+      {{- if and (hasKey $podSC "fsGroup") (not (hasKey $podSC "fsGroupChangePolicy")) }}
+      {{- $_ := set $podSC "fsGroupChangePolicy" "OnRootMismatch" }}
       {{- end }}
       {{- with $podSC }}
       securityContext:
@@ -89,9 +101,8 @@ spec:
             {{- with $sensor.tools }}
             - "-tools={{ . }}"
             {{- end }}
-            # The renewed API key lives in the state volume. Explicit, so a
-            # sensor release from before the state directory keeps it there
-            # too, instead of in the pod's home directory.
+            # A renewed API key lives in the state volume (unused when the
+            # sensor pairs).
             - "-credentials=/var/lib/openctem/state/sensor-credentials.json"
             {{- if $sensor.verbose }}
             - "-verbose"
@@ -103,6 +114,17 @@ spec:
               value: {{ $sensor.apiUrl | default (printf "http://%s:%v" (include "openctem.apiFullname" .) .Values.api.service.port) | quote }}
             - name: REGION
               value: {{ $sensor.region | quote }}
+            {{- if $pairing }}
+            # No API_KEY: the sensor pairs. It makes its own key in the state
+            # volume and logs a code for an administrator to approve under
+            # Sensors > Pair a sensor; then it signs every request.
+            - name: SENSOR_NAME
+              value: {{ $sensor.name | default (include "openctem.sensorFullname" .) | quote }}
+            {{- else }}
+            {{- with $sensor.name }}
+            - name: SENSOR_NAME
+              value: {{ . | quote }}
+            {{- end }}
             # The credential comes from a Secret, never from args (which are
             # visible via `kubectl describe pod`).
             - name: API_KEY
@@ -110,6 +132,15 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}
                   key: {{ include "openctem.sensorSecretKey" (dict "sensor" $sensor) }}
+            {{- end }}
+            {{- with $sensor.caFingerprint }}
+            - name: SENSOR_CA_FINGERPRINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $sensor.platformKey }}
+            - name: SENSOR_PLATFORM_KEY
+              value: {{ . | quote }}
+            {{- end }}
             # Always explicit: the sensor's own check counts any volume as
             # persistent, an emptyDir too, which is lost with the pod.
             - name: PLATFORM_KEY_AUTORENEW
@@ -118,6 +149,13 @@ spec:
               value: /var/lib/openctem/state
             - name: SENSOR_CONTENT_DIR
               value: /var/lib/openctem/content
+            # The home directory stays the image's (read-only): it holds the
+            # baked nuclei-templates release. Tools write their configuration
+            # and cache under /tmp instead.
+            - name: XDG_CONFIG_HOME
+              value: /tmp/.config
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
             {{- if eq $sensor.allowPrivateTargets "1" }}
             # Explicit opt-in: allow RFC1918 / ULA scan targets. Unset (the
             # default) keeps them blocked: co-located sensors are for
@@ -198,7 +236,8 @@ spec:
           persistentVolumeClaim:
             claimName: {{ $statePersist.existingClaim | default (printf "%s-state" (include "openctem.sensorFullname" .)) }}
           {{- else }}
-          # Lost with the pod: key auto-renewal stays off (sensor.keyAutoRenew).
+          # Lost with the pod (API key only: key auto-renewal stays off,
+          # sensor.keyAutoRenew).
           emptyDir: {}
           {{- end }}
         - name: content

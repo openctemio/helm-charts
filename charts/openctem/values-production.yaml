@@ -216,7 +216,7 @@ database:
     # api/deploy/postgres/least-privilege-roles.sql (run once as the superuser).
     username: "openctem_app"
     password: "<REQUIRED_DB_PASSWORD>"
-  # Migration Jobs connect as the schema owner, never as the API's role (D-6).
+  # Migration Jobs connect as the schema owner, never as the API's role.
   migrator:
     existingSecret: ""          # e.g. openctem-db-migrator (DB_MIGRATE_USER + DB_MIGRATE_PASSWORD)
     userKey: DB_MIGRATE_USER

@@ -21,14 +21,26 @@ out="$(render)"
 expect "runAsNonRoot" "runAsNonRoot: true" "$out"
 expect "runAsUser 999 (the default image's user)" "runAsUser: 999" "$out"
 expect "fsGroup 999" "fsGroup: 999" "$out"
+expect "fsGroup only on a new volume (identity stays 0600)" "fsGroupChangePolicy: OnRootMismatch" "$out"
 expect "seccomp RuntimeDefault" "type: RuntimeDefault" "$out"
 expect "no privilege escalation" "allowPrivilegeEscalation: false" "$out"
 expect "read-only root filesystem" "readOnlyRootFilesystem: true" "$out"
 expect "drop ALL capabilities" "- ALL" "$out"
 reject "no NET_RAW by default" "NET_RAW" "$out"
-for d in /tmp /home/openctem /scan /cache /config /var/lib/openctem/state /var/lib/openctem/content /var/lib/openctem/outbox; do
+for d in /tmp /var/lib/openctem/state /var/lib/openctem/content /var/lib/openctem/outbox; do
   expect "writable $d" "mountPath: $d" "$out"
 done
+# The image's home holds the baked nuclei-templates release: never hidden.
+reject "home directory not mounted over" "mountPath: /home/openctem" "$out"
+expect "tool configuration under /tmp" "value: /tmp/.config" "$out"
+expect "tool cache under /tmp" "value: /tmp/.cache" "$out"
+# An fsGroup set without a policy (an older values file) still gets OnRootMismatch;
+# an explicit policy is kept.
+out="$(render --set sensor.podSecurityContext.fsGroupChangePolicy=null)"
+expect "policy added when unset" "fsGroupChangePolicy: OnRootMismatch" "$out"
+out="$(render --set sensor.podSecurityContext.fsGroupChangePolicy=Always)"
+expect "explicit policy kept" "fsGroupChangePolicy: Always" "$out"
+out="$(render)"
 reject "no local policy by default" "SENSOR_LOCAL_POLICY" "$out"
 out="$(renderAll)"
 reject "no policy ConfigMap by default" "sensor-policy.yaml:" "$out"

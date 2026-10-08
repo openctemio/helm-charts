@@ -246,6 +246,12 @@ securityContext:
     drop:
       - ALL
 netRaw: false
+sandbox:
+  network: auto
+  seccompProfile: runtime-default
+  installProfile: true
+  kubeletRoot: /var/lib/kubelet
+  installerImage: ""
 writableDirs:
   - /tmp
 writableDirsSizeLimit: ""
@@ -297,6 +303,14 @@ Resolve the effective sensor values, as YAML (use with fromYaml):
       to its AGENT_ and SENSOR_ variables).
   The result carries "_legacy" (used, mapped, dropped, notes) for NOTES.txt.
 */}}
+{{/*
+The sensor seccomp profile's file name under <kubelet root>/seccomp: named
+by its digest, so a changed profile is a new file and rolls the pods.
+*/}}
+{{- define "openctem.sensorSeccompFile" -}}
+openctem/sensor-{{ .Files.Get "files/seccomp/openctem-sensor.json" | sha256sum | trunc 16 }}.json
+{{- end -}}
+
 {{- define "openctem.sensor" -}}
 {{- $defaults := include "openctem.sensorDefaults" . | fromYaml -}}
 {{- $sensor := deepCopy (.Values.sensor | default dict) -}}

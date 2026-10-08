@@ -69,7 +69,40 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            {{- $st := .Values.api.sensorTransport }}
+            {{- if and $st.enabled $st.publicHost }}
+            - name: sensor-mtls
+              containerPort: {{ $st.mtls.port }}
+              protocol: TCP
+            {{- end }}
           env:
+            {{- if $st.enabled }}
+            # Sensor protocol v3 (OpenCTEM RFC-059).
+            - name: SENSOR_TRANSPORT_V3_ENABLED
+              value: "true"
+            {{- if $st.publicHost }}
+            - name: SENSOR_PUBLIC_HOST
+              value: {{ $st.publicHost | quote }}
+            - name: SENSOR_MTLS_LISTEN_ADDR
+              value: ":{{ $st.mtls.port }}"
+            {{- end }}
+            - name: SENSOR_MTLS_CA_CERT_FILE
+              value: /etc/openctem/sensor-ca/tls.crt
+            - name: SENSOR_MTLS_CA_KEY_FILE
+              value: /etc/openctem/sensor-ca/tls.key
+            - name: SENSOR_MTLS_CERT_TTL
+              value: {{ $st.mtls.certTTL | quote }}
+            {{- /* PROXY headers come from the gateway's pods: by default the
+                 CIDRs already trusted for forwarded headers. */}}
+            {{- $tp := $st.mtls.trustedProxies }}
+            {{- if and (not $tp) $st.gatewayPassthrough }}
+            {{- $tp = .Values.gateway.trustedProxies }}
+            {{- end }}
+            {{- with $tp }}
+            - name: SENSOR_MTLS_TRUSTED_PROXIES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- end }}
             - name: SERVER_HOST
               value: "0.0.0.0"
             - name: SERVER_PORT
@@ -182,20 +215,31 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- $mounts := include "openctem.apiAttachmentsVolumeMount" . }}
-          {{- if or $mounts .Values.api.volumeMounts }}
+          {{- if or $mounts .Values.api.volumeMounts $st.enabled }}
           volumeMounts:
             {{- with $mounts }}
             {{- . | nindent 12 }}
+            {{- end }}
+            {{- if $st.enabled }}
+            - name: sensor-ca
+              mountPath: /etc/openctem/sensor-ca
+              readOnly: true
             {{- end }}
             {{- with .Values.api.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
       {{- $vols := include "openctem.apiAttachmentsVolume" . }}
-      {{- if or $vols .Values.api.volumes }}
+      {{- if or $vols .Values.api.volumes .Values.api.sensorTransport.enabled }}
       volumes:
         {{- with $vols }}
         {{- . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.api.sensorTransport.enabled }}
+        - name: sensor-ca
+          secret:
+            secretName: {{ include "openctem.sensorCASecret" . }}
+            defaultMode: 0400
         {{- end }}
         {{- with .Values.api.volumes }}
         {{- toYaml . | nindent 8 }}

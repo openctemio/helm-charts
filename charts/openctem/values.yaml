@@ -8,6 +8,39 @@ fullnameOverride: ""
 imagePullSecrets: []
 
 api:
+  # -- Sensor protocol v3 (OpenCTEM RFC-059): gRPC over mutual TLS for paired
+  # sensors, with Connect over HTTPS (/api/v3/sensor, through the normal
+  # routing) as the fallback. Off by default; sensors keep protocol v2.
+  sensorTransport:
+    enabled: false
+    # -- host:port sensors dial for gRPC (e.g. sensors.example.com:443).
+    # Empty: only the HTTPS binding is served (no mTLS listener).
+    publicHost: ""
+    # -- With gateway.mode=caddy: route publicHost by SNI on the gateway's
+    # port 443 straight to the API's mTLS listener (layer 4, not
+    # terminated). Needs gateway.caddy.image with the layer4 module (the
+    # image built from deploy/gateway/Dockerfile).
+    gatewayPassthrough: false
+    mtls:
+      # -- The API's mTLS listener port (container and Service).
+      port: 8443
+      # -- Client certificate lifetime (1h..720h).
+      certTTL: 168h
+      # -- CIDRs whose PROXY protocol header the listener believes (the
+      # gateway pods when gatewayPassthrough is on). Empty: the TCP peer.
+      trustedProxies: []
+      ca:
+        # -- Secret (tls.crt, tls.key) with your sensor CA. Empty: the chart
+        # makes one and keeps it.
+        existingSecret: ""
+    # -- The gRPC binding on its own Service (a separate port or TCP load
+    # balancer) instead of the gateway passthrough.
+    dedicatedService:
+      enabled: false
+      type: LoadBalancer
+      port: 443
+      annotations: {}
+      loadBalancerSourceRanges: []
   # -- Replica count. Keep 1 for now. The API runs its schedulers and background
   # controllers in every replica and is not yet safe with more than one: with 2+
   # replicas scheduled scans fire twice, the audit hash chain forks and report

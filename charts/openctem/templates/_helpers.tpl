@@ -478,6 +478,17 @@ Build checksum source for UI secret (for pod annotation rollout trigger).
 Name of the chart-managed API app secret holding APP_ENCRYPTION_KEY and
 AUTH_JWT_SECRET (only the keys not sourced from an existingSecret).
 */}}
+{{/*
+Secret holding the API metrics token (monitoring.*).
+*/}}
+{{- define "openctem.metricsSecretName" -}}
+{{- if .Values.monitoring.existingSecret -}}
+{{- .Values.monitoring.existingSecret -}}
+{{- else -}}
+{{- printf "%s-metrics" (include "openctem.apiFullname" .) -}}
+{{- end -}}
+{{- end }}
+
 {{- define "openctem.apiAppSecretName" -}}
 {{- printf "%s-app" (include "openctem.apiFullname" .) -}}
 {{- end }}

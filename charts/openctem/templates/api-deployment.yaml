@@ -148,6 +148,14 @@ spec:
             {{- end }}
             # Attachment storage (api.attachments)
             {{- include "openctem.apiAttachmentsEnv" . | nindent 12 }}
+            {{- if .Values.monitoring.enabled }}
+            # Operator metrics (monitoring.*): /metrics needs this bearer token
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.metricsSecretName" . }}
+                  key: {{ .Values.monitoring.metricsTokenKey }}
+            {{- end }}
             # Extra environment variables
             {{- if .Values.api.extraEnv }}
             {{- include "openctem.apiExtraEnv" . | nindent 12 }}

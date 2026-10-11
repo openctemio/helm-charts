@@ -394,8 +394,9 @@ openctem/sensor-{{ .Files.Get "files/seccomp/openctem-sensor.json" | sha256sum |
 {{- end }}
 
 {{/*
-The API's pre-rename settings (AGENT_<X>, renamed SENSOR_<X> in RFC-023 §9.5).
-The API no longer reads them and refuses to start while one is set, so the
+The API's retired settings: the pre-rename AGENT_<X> (renamed SENSOR_<X> in
+RFC-023 §9.5) and SENSOR_TRANSPORT_V3_ENABLED (sensor protocol v3 is
+automatic; api.sensorTransport.mode sets SENSOR_TRANSPORT_V3). The API no longer reads them and refuses to start while one is set, so the
 render fails first, naming the replacement.
 */}}
 {{- define "openctem.apiRetiredEnv" -}}
@@ -409,6 +410,7 @@ AGENT_LB_DISK_IO_WEIGHT: SENSOR_LB_DISK_IO_WEIGHT
 AGENT_LB_NETWORK_WEIGHT: SENSOR_LB_NETWORK_WEIGHT
 AGENT_LB_MAX_DISK_THROUGHPUT_MBPS: SENSOR_LB_MAX_DISK_THROUGHPUT_MBPS
 AGENT_LB_MAX_NETWORK_THROUGHPUT_MBPS: SENSOR_LB_MAX_NETWORK_THROUGHPUT_MBPS
+SENSOR_TRANSPORT_V3_ENABLED: api.sensorTransport.mode (auto or off)
 {{- end }}
 
 {{- define "openctem.apiExtraEnv" -}}
@@ -423,7 +425,7 @@ AGENT_LB_MAX_NETWORK_THROUGHPUT_MBPS: SENSOR_LB_MAX_NETWORK_THROUGHPUT_MBPS
 {{- end -}}
 {{- end -}}
 {{- if $bad -}}
-{{- fail (printf "\n\napi.extraEnv uses retired pre-sensor names that the API no longer reads (it refuses to start with them). Rename:\n  - %s\n" (join "\n  - " $bad)) -}}
+{{- fail (printf "\n\napi.extraEnv uses retired names that the API no longer reads (it refuses to start with them). Replace:\n  - %s\n" (join "\n  - " $bad)) -}}
 {{- end -}}
 {{- toYaml (.Values.api.extraEnv | default list) -}}
 {{- end }}
@@ -915,13 +917,67 @@ several replicas (duplicate scheduled scans, forked audit chain).
 
 
 {{/*
-Sensor protocol v3 (OpenCTEM RFC-059): the sensor host name without a port,
-validated when the transport is on.
+Sensor protocol v3 (OpenCTEM RFC-059): "true" when the API serves it
+(api.sensorTransport.mode=auto, the default), "" when mode=off. Fails on an
+unknown mode and on the values removed in chart 0.18.0.
+*/}}
+{{- define "openctem.sensorTransportOn" -}}
+{{- $st := .Values.api.sensorTransport | default dict -}}
+{{- range $old := list "enabled" "gatewayPassthrough" -}}
+{{- if hasKey $st $old -}}
+{{- fail (printf "\n\napi.sensorTransport.%s was removed in chart 0.18.0: the API serves sensor protocol v3 by itself (HTTPS always, gRPC once its self-probe passes).\nRemove it. To turn v3 off set api.sensorTransport.mode=off; for the gateway's layer-4 routing set gateway.caddy.sensorGateway (alpn or passthrough). See the chart README, \"Upgrading to 0.18.0\".\n" $old) -}}
+{{- end -}}
+{{- end -}}
+{{- $mode := toString ($st.mode | default "auto") -}}
+{{- if not (has $mode (list "auto" "off")) -}}
+{{- fail (printf "\n\napi.sensorTransport.mode=%q is not one of: auto, off.\n" $mode) -}}
+{{- end -}}
+{{- if eq $mode "auto" }}true{{ end -}}
+{{- end }}
+
+{{/*
+How the bundled Caddy carries the sensor gRPC binding on its port 443
+(OPENCTEM_SENSOR_GATEWAY): off | alpn | passthrough. "off" unless
+gateway.mode=caddy and v3 is on. Empty gateway.caddy.sensorGateway: alpn when
+the image has the layer4 module (gateway.caddy.image.layer4), else off.
+*/}}
+{{- define "openctem.sensorGateway" -}}
+{{- $c := .Values.gateway.caddy | default dict -}}
+{{- $img := $c.image | default dict -}}
+{{- $sg := toString ($c.sensorGateway | default "") -}}
+{{- if not (has $sg (list "" "off" "alpn" "passthrough")) -}}
+{{- fail (printf "\n\ngateway.caddy.sensorGateway=%q is not one of: alpn, passthrough, off (or empty).\n" $sg) -}}
+{{- end -}}
+{{- if or (ne (include "openctem.gatewayMode" .) "caddy") (not (include "openctem.sensorTransportOn" .)) -}}
+off
+{{- else -}}
+{{- if eq $sg "" -}}{{- $sg = ternary "alpn" "off" (eq (toString $img.layer4) "true") -}}{{- end -}}
+{{- if ne $sg "off" -}}
+{{- if ne (toString $img.layer4) "true" -}}
+{{- fail (printf "\n\ngateway.caddy.sensorGateway=%s needs the gateway image with the layer4 module: build it from openctemio/openctem api/deploy/gateway/Dockerfile, set gateway.caddy.image to it and gateway.caddy.image.layer4=true. Without it leave sensorGateway empty: sensors use the HTTPS binding.\n" $sg) -}}
+{{- end -}}
+{{- if eq (include "openctem.gatewayCaddyTlsMode" .) "http" -}}
+{{- fail (printf "\n\ngateway.caddy.sensorGateway=%s needs a TLS mode (the gateway must see the TLS ClientHello to route it); gateway.caddy.tls.mode=http cannot. Set sensorGateway=off.\n" $sg) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $sg "passthrough" -}}
+{{- $h := include "openctem.sensorPublicHostname" . -}}
+{{- if eq $h (toString .Values.gateway.host) -}}
+{{- fail "\n\napi.sensorTransport.publicHost must name a host other than gateway.host with gateway.caddy.sensorGateway=passthrough: the gateway routes the sensor host by its name (SNI). For one host name use sensorGateway=alpn.\n" -}}
+{{- end -}}
+{{- end -}}
+{{- $sg -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The dedicated sensor host name (api.sensorTransport.publicHost without its
+port), required by gateway.caddy.sensorGateway=passthrough.
 */}}
 {{- define "openctem.sensorPublicHostname" -}}
 {{- $st := .Values.api.sensorTransport -}}
 {{- if not $st.publicHost -}}
-{{- fail "\n\napi.sensorTransport.publicHost is required with api.sensorTransport.enabled and a gRPC binding (e.g. sensors.example.com:443).\n" -}}
+{{- fail "\n\napi.sensorTransport.publicHost is required with gateway.caddy.sensorGateway=passthrough: the dedicated sensor host name and port (e.g. sensors.example.com:443).\n" -}}
 {{- end -}}
 {{- (split ":" $st.publicHost)._0 -}}
 {{- end }}

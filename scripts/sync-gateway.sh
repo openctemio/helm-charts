@@ -28,7 +28,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$ROOT/charts/openctem/files/gateway"
 PLATFORM_REPO="${PLATFORM_REPO:-https://github.com/openctemio/openctem.git}"
 ref="${1:-develop}"
-files=(Caddyfile planes.caddy entrypoint.sh sensors/off.wrappers sensors/passthrough.wrappers)
+files=(Caddyfile planes.caddy entrypoint.sh sensors/off.wrappers sensors/alpn.wrappers sensors/passthrough.wrappers)
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

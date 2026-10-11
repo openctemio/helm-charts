@@ -30,6 +30,16 @@ check "sensor (API key, local policy, outbox volume), NetworkPolicy, monitoring"
 check "sensor with its own seccomp profile (installer DaemonSet)" --set api.appEnv=development --set sensor.enabled=true \
   --set sensor.sandbox.seccompProfile=openctem --set sensor.sandbox.network=required
 check "gateway caddy" --set api.appEnv=development --set gateway.mode=caddy --set gateway.host=openctem.example.com --set "gateway.trustedProxies={10.244.0.0/16}"
+check "gateway caddy, sensor gRPC by ALPN (layer4 image), NetworkPolicy" --set api.appEnv=development --set gateway.mode=caddy \
+  --set gateway.host=openctem.example.com --set "gateway.trustedProxies={10.244.0.0/16}" --set gateway.caddy.image.layer4=true \
+  --set networkPolicy.enabled=true
+check "gateway caddy, dedicated sensor host (passthrough)" --set api.appEnv=development --set gateway.mode=caddy \
+  --set gateway.host=openctem.example.com --set "gateway.trustedProxies={10.244.0.0/16}" --set gateway.caddy.image.layer4=true \
+  --set gateway.caddy.sensorGateway=passthrough --set api.sensorTransport.publicHost=sensors.example.com:443
+check "sensor gRPC on a dedicated Service, NetworkPolicy" --set api.appEnv=development \
+  --set api.sensorTransport.publicHost=sensors.example.com:443 --set api.sensorTransport.dedicatedService.enabled=true \
+  --set networkPolicy.enabled=true
+check "sensor protocol v3 off" --set api.appEnv=development --set api.sensorTransport.mode=off
 check "production values" -f "$chart/values-production.yaml"
 
 if [[ $fails -gt 0 ]]; then echo "$fails failed"; exit 1; fi

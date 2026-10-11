@@ -3,8 +3,13 @@
 # files, environment, non-root user, read-only root filesystem, dropped
 # capabilities) in Docker, in front of two stub upstreams
 # named like the chart's API and UI Services, and checks the routing over real
-# HTTPS (TLS mode `internal`) and plain HTTP (TLS mode `http`).
-# Usage: tests/gateway/caddy-smoke.sh  (needs helm, docker, curl, python3+PyYAML)
+# HTTPS (TLS mode `internal`) and plain HTTP (TLS mode `http`). With the
+# layer4 image (built from openctem api/deploy/gateway/Dockerfile at the
+# UPSTREAM commit, or L4_IMAGE), it checks the sensor ALPN routing
+# (gateway.caddy.sensorGateway=alpn): a ClientHello offering openctem-sensor/3
+# reaches the API's mTLS port behind a PROXY v2 header, everything else is
+# served as before. SKIP_L4=1 skips that part.
+# Usage: tests/gateway/caddy-smoke.sh  (needs helm, docker, curl, openssl, python3+PyYAML)
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -16,7 +21,7 @@ fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 tmp="$(mktemp -d)"
 net="octem-gw-smoke-$$"
 cleanup() {
-  docker rm -f "$net-api" "$net-ui" "$net-gw" >/dev/null 2>&1 || true
+  docker rm -f "$net-api" "$net-ui" "$net-gw" "$net-mtls" >/dev/null 2>&1 || true
   docker network rm "$net" >/dev/null 2>&1 || true
   rm -rf "$tmp"
 }
@@ -219,6 +224,62 @@ base="https://ctem.example.com:$hostport"
 wait_up "${r[@]}" "$base/" && pass "files: HTTPS with the operator's certificate" || fail "files: HTTPS did not come up"
 check "files: Bearer oct_ key -> api" "api " "${r[@]}" -H 'Authorization: Bearer oct_abc' "$base/api/v1/findings"
 check "files: /metrics -> 404" " 404" "${r[@]}" "$base/metrics"
+
+# 4. Sensor gRPC binding by ALPN (layer4 image). A stub stands in for the API's
+#    mTLS listener and logs the first bytes it receives.
+if [ "${SKIP_L4:-}" != 1 ]; then
+  l4="${L4_IMAGE:-}"
+  if [ -z "$l4" ]; then
+    commit="$(sed -n 's/^commit=//p' "$chart/files/gateway/UPSTREAM")"
+    l4="octem-gw-l4-smoke:$commit"
+    docker build -q -t "$l4" "${PLATFORM_REPO:-https://github.com/openctemio/openctem.git}#$commit:api/deploy/gateway" >/dev/null
+  fi
+  docker run -d --name "$net-mtls" --network "$net" --network-alias t-openctem-sensor-stub python:3.13-alpine \
+    python3 -u -c '
+import socket
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("", 8443)); s.listen(8)
+while True:
+    c, _ = s.accept(); c.settimeout(5)
+    try: print("got", c.recv(16).hex(), flush=True)
+    except OSError: pass
+    c.close()
+' >/dev/null
+  d="$tmp/alpn"; mkdir -p "$d"
+  repo="${l4%:*}"; tag="${l4##*:}"
+  extract "$d" "${common[@]}" --set gateway.caddy.image.repository="$repo" --set gateway.caddy.image.tag="$tag" \
+    --set gateway.caddy.image.layer4=true \
+    --set 'gateway.caddy.extraEnv[0].name=SENSOR_MTLS_UPSTREAM' --set 'gateway.caddy.extraEnv[0].value=t-openctem-sensor-stub:8443'
+  if grep -qx 'OPENCTEM_SENSOR_GATEWAY=alpn' "$d/env"; then pass "alpn: rendered by default with the layer4 image"; else fail "alpn: not rendered"; fi
+  start_gateway "$d" 443
+  ca="$tmp/root-alpn.crt"
+  for _ in $(seq 1 30); do
+    docker exec "$net-gw" cat /data/caddy/pki/authorities/local/root.crt > "$ca" 2>/dev/null && [ -s "$ca" ] && break
+    sleep 1
+  done
+  r=(--resolve "ctem.example.com:$hostport:127.0.0.1" --cacert "$ca")
+  base="https://ctem.example.com:$hostport"
+  wait_up "${r[@]}" "$base/" && pass "alpn: HTTPS still served" || fail "alpn: HTTPS did not come up"
+  check "alpn: browser (h2) / -> ui" "ui " "${r[@]}" --http2 "$base/"
+  check "alpn: Bearer oct_ key -> api" "api " "${r[@]}" -H 'Authorization: Bearer oct_abc' "$base/api/v1/findings"
+  openssl s_client -connect "127.0.0.1:$hostport" -servername ctem.example.com -alpn h2,openctem-sensor/3 \
+    </dev/null >/dev/null 2>&1 || true
+  sleep 1
+  # PROXY protocol v2 signature: \r\n\r\n\0\r\nQUIT\n
+  if docker logs "$net-mtls" 2>&1 | grep -q '^got 0d0a0d0a000d0a515549540a'; then
+    pass "alpn: the sensor ALPN id reaches the mTLS port behind a PROXY v2 header"
+  else
+    fail "alpn: the sensor ALPN id did not reach the mTLS port ($(docker logs "$net-mtls" 2>&1 | tail -3))"
+  fi
+  n="$(docker logs "$net-mtls" 2>&1 | grep -c '^got' || true)"
+  curl -s -o /dev/null "${r[@]}" --http2 "$base/" || true
+  sleep 1
+  if [ "$(docker logs "$net-mtls" 2>&1 | grep -c '^got' || true)" = "$n" ]; then
+    pass "alpn: a browser connection never reaches the mTLS port"
+  else
+    fail "alpn: a browser connection reached the mTLS port"
+  fi
+fi
 
 echo
 if [ "$fails" -gt 0 ]; then

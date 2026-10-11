@@ -8,38 +8,49 @@ fullnameOverride: ""
 imagePullSecrets: []
 
 api:
-  # -- Sensor protocol v3 (OpenCTEM RFC-059): gRPC over mutual TLS for paired
-  # sensors, with Connect over HTTPS (/api/v3/sensor, through the normal
-  # routing) as the fallback. Off by default; sensors keep protocol v2.
+  # Sensor protocol v3 (OpenCTEM RFC-059). The API serves it by itself: the
+  # HTTPS binding (/api/v3/sensor, through the normal routing) always, and the
+  # gRPC binding (mutual TLS) only while its self-probe reaches it through the
+  # public endpoint. Nothing to turn on.
   sensorTransport:
-    enabled: false
-    # -- host:port sensors dial for gRPC (e.g. sensors.example.com:443).
-    # Empty: only the HTTPS binding is served (no mTLS listener).
+    # -- SENSOR_TRANSPORT_V3: `auto` serves v3 and picks the bindings itself.
+    # `off` serves no v3 at all (every sensor back to v2 at its next call):
+    # the emergency switch.
+    mode: auto
+    # -- SENSOR_PUBLIC_HOST: host:port sensors dial for gRPC. Empty: the host
+    # and port of the public URL (gateway.publicUrl, else APP_URL), reached
+    # through the gateway's ALPN routing. Set it for a dedicated sensor host
+    # name (gateway.caddy.sensorGateway=passthrough, an ingress-nginx
+    # ssl-passthrough Ingress) or the dedicatedService address. Advertised to
+    # sensors only while the self-probe passes either way.
     publicHost: ""
-    # -- With gateway.mode=caddy: route publicHost by SNI on the gateway's
-    # port 443 straight to the API's mTLS listener (layer 4, not
-    # terminated). Needs gateway.caddy.image with the layer4 module (the
-    # image built from deploy/gateway/Dockerfile).
-    gatewayPassthrough: false
     mtls:
       # -- The API's mTLS listener port (container and Service).
       port: 8443
       # -- Client certificate lifetime (1h..720h).
       certTTL: 168h
-      # -- CIDRs whose PROXY protocol header the listener believes (the
-      # gateway pods when gatewayPassthrough is on). Empty: the TCP peer.
+      # -- SENSOR_MTLS_TRUSTED_PROXIES: CIDRs whose PROXY protocol v2 header
+      # the mTLS listener believes. Empty: gateway.trustedProxies when the
+      # bundled Caddy routes sensors (gateway.caddy.sensorGateway alpn or
+      # passthrough), else none (the TCP peer is the sensor's address).
       trustedProxies: []
       ca:
         # -- Secret (tls.crt, tls.key) with your sensor CA. Empty: the chart
-        # makes one and keeps it.
+        # makes one and keeps it across upgrades and uninstall.
         existingSecret: ""
-    # -- The gRPC binding on its own Service (a separate port or TCP load
-    # balancer) instead of the gateway passthrough.
+    # The gRPC binding on its own Service (a separate port or a TCP load
+    # balancer) instead of the gateway's port 443. Needs publicHost set to the
+    # address sensors reach it at. TLS is never terminated in front of it.
     dedicatedService:
+      # -- Render the `<api>-sensors` Service.
       enabled: false
+      # -- LoadBalancer | NodePort | ClusterIP
       type: LoadBalancer
+      # -- Service port (publicHost names the port sensors dial).
       port: 443
+      # -- Service annotations (load balancer settings).
       annotations: {}
+      # -- Source ranges allowed to reach the load balancer.
       loadBalancerSourceRanges: []
   # -- Replica count. Keep 1 for now. The API runs its schedulers and background
   # controllers in every replica and is not yet safe with more than one: with 2+
@@ -692,6 +703,20 @@ gateway:
       repository: caddy
       tag: "2.11.4-alpine"
       pullPolicy: IfNotPresent
+      # -- The image carries the layer4 module: built from openctemio/openctem
+      # api/deploy/gateway/Dockerfile (Caddy plus caddy-l4). Needed by
+      # sensorGateway alpn and passthrough, and makes alpn the default.
+      layer4: false
+    # -- OPENCTEM_SENSOR_GATEWAY: how this gateway carries the sensor gRPC
+    # binding on its port 443. Empty: `alpn` when image.layer4 is true, else
+    # `off`. `alpn`: a TLS connection that offers the sensor ALPN id
+    # (openctem-sensor/3) passes through untouched to the API's mTLS listener;
+    # works with one host name or an IP address. `passthrough`: alpn, plus a
+    # dedicated sensor host name (the host of api.sensorTransport.publicHost)
+    # routed by SNI, for sensors that do not offer the id. `off`: sensors use
+    # the HTTPS binding. alpn and passthrough need image.layer4 and a TLS mode
+    # other than http.
+    sensorGateway: ""
     tls:
       # -- internal | acme | files | http
       #   internal: certificates from Caddy's own CA (LAN / IP installs). Give

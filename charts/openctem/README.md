@@ -235,7 +235,8 @@ wins.
 | `gateway.ingress.tls.clusterIssuer` / `.issuer` | — | Adds the cert-manager annotation. |
 | `gateway.httpRoute.parentRefs` | `[{name: gateway, sectionName: https}]` | The Gateway (and its HTTPS listener). |
 | `gateway.httpRoute.apiKeyHeaderRouting` | `true` | The `Bearer oct_*` / `X-API-Key` header rule. |
-| `gateway.caddy.image` | `caddy:2.11.4-alpine` | Official image, pinned. |
+| `gateway.caddy.image` | `caddy:2.11.4-alpine` | Official image, pinned. `image.layer4: true` declares an image with the layer4 module (built from openctem `api/deploy/gateway/Dockerfile`), which the sensor gRPC routing needs (below). |
+| `gateway.caddy.sensorGateway` | `""` | Sensor gRPC routing on port 443: `alpn` (default with `image.layer4`), `passthrough`, `off` (default with the stock image). See [Sensor protocol v3](#sensor-protocol-v3-grpc-over-mutual-tls). |
 | `gateway.caddy.tls.mode` | `internal` | `internal`: Caddy's own CA (LAN / IP installs). `acme`: Let's Encrypt (`tls.acme.email` required, `tls.acme.ca`). `files`: your `kubernetes.io/tls` Secret (`tls.files.secretName`, `certKey`, `keyKey`). `http`: plain HTTP on port 80 behind a TLS proxy; **refused unless `tls.allowPlainHttp: true`**. |
 | `gateway.caddy.frontProxies` | `[]` | Proxies in front of Caddy whose `X-Forwarded-For` it believes (`http` mode behind an L7 proxy). |
 | `gateway.caddy.service.type` | `LoadBalancer` | Exposes **443 only** (`http` mode: 80 only). `service.http.enabled` adds 80 in `acme` mode (HTTP-01 + redirect). `externalTrafficPolicy: Local` keeps the client address. |
@@ -275,47 +276,120 @@ API on 8080.
 
 ## Sensor protocol v3 (gRPC over mutual TLS)
 
-OpenCTEM RFC-059: paired sensors speak gRPC over mutual TLS to a dedicated
-sensor host name, with Connect over HTTPS (`/api/v3/sensor`, through the
-normal routing) as their fallback. Off by default; sensors keep protocol v2.
+OpenCTEM RFC-059. The API serves protocol v3 by itself
+(`SENSOR_TRANSPORT_V3=auto`); there is nothing to turn on:
+
+- the **HTTPS binding** (`/api/v3/sensor`, through the normal routing) is
+  always served, behind any gateway or ingress;
+- the **gRPC binding** (mutual TLS, the API's `sensor-mtls` port) is
+  advertised to sensors only while the API's self-probe reaches it through
+  the public endpoint. The endpoint is the host and port of the public URL
+  (`gateway.publicUrl`, else `APP_URL`) unless `api.sensorTransport.publicHost`
+  names another. A gateway that terminates TLS for that endpoint fails the
+  probe, so sensors are never sent where gRPC cannot work; they stay on HTTPS.
+
+The chart always mounts the sensor CA (made once with `genCA`, kept across
+upgrades and `helm uninstall`, or yours) and exposes the mTLS port on the API
+Service. `api.sensorTransport.mode=off` is the emergency switch: no v3 at all,
+every sensor back on v2 at its next call.
 
 | Value | Default | Meaning |
 |---|---|---|
-| `api.sensorTransport.enabled` | `false` | Serve protocol v3. Alone it serves the HTTPS binding only. |
-| `api.sensorTransport.publicHost` | `""` | `host:port` sensors dial for gRPC (e.g. `sensors.example.com:443`); enables the API's mTLS listener. |
-| `api.sensorTransport.gatewayPassthrough` | `false` | With `gateway.mode=caddy`: route `publicHost` by SNI on the gateway's 443 to the API's mTLS listener, not terminated. Needs a gateway image with the layer4 module (below). |
+| `api.sensorTransport.mode` | `auto` | `SENSOR_TRANSPORT_V3`: `auto` or `off`. |
+| `api.sensorTransport.publicHost` | `""` | `SENSOR_PUBLIC_HOST`, `host:port` sensors dial for gRPC. Empty: derived from the public URL. Set it for a dedicated sensor host name or the dedicated Service's address. |
 | `api.sensorTransport.mtls.port` | `8443` | The API's mTLS listener (container and Service port). |
 | `api.sensorTransport.mtls.certTTL` | `168h` | Client certificate lifetime (1h..720h). |
-| `api.sensorTransport.mtls.trustedProxies` | `[]` | CIDRs whose PROXY protocol header is believed; with the passthrough it defaults to `gateway.trustedProxies`. |
-| `api.sensorTransport.mtls.ca.existingSecret` | `""` | Your sensor CA (`tls.crt`, `tls.key`). Empty: the chart makes one (`genCA`), keeps it across upgrades and `helm uninstall`. It is not the job-signing key. |
-| `api.sensorTransport.dedicatedService.*` | off | The gRPC binding on its own Service (`LoadBalancer`, port 443) instead of the passthrough: a separate address, or any TCP load balancer. Never terminate TLS in front of it. |
+| `api.sensorTransport.mtls.trustedProxies` | `[]` | `SENSOR_MTLS_TRUSTED_PROXIES`: CIDRs whose PROXY protocol v2 header is believed. Empty: `gateway.trustedProxies` when the bundled Caddy routes sensors, else none. |
+| `api.sensorTransport.mtls.ca.existingSecret` | `""` | Your sensor CA (`tls.crt`, `tls.key`). It is not the job-signing key. |
+| `api.sensorTransport.dedicatedService.*` | off | The gRPC binding on its own Service (`LoadBalancer`, port 443): a separate address or any TCP load balancer. Needs `publicHost`. Never terminate TLS in front of it. |
+| `gateway.caddy.image.layer4` | `false` | The gateway image has the layer4 module. |
+| `gateway.caddy.sensorGateway` | `""` | `OPENCTEM_SENSOR_GATEWAY`: `alpn`, `passthrough` or `off`. Empty: `alpn` with `image.layer4`, else `off`. |
 
-Same port by SNI (bundled Caddy):
+### Deployment modes
+
+**Bundled Caddy with the layer4 image (gRPC on the same port 443).** Build the
+gateway image from openctemio/openctem `api/deploy/gateway/Dockerfile` (Caddy
+plus caddy-l4, pinned there) and push it to your registry:
 
 ```yaml
 gateway:
   mode: caddy
-  host: ctem.example.com
+  host: ctem.example.com          # or an IP address (tls.mode internal/files)
   trustedProxies: [10.42.0.0/16]
   caddy:
     image:
-      repository: registry.example.com/openctem-gateway-l4   # built from openctem api/deploy/gateway/Dockerfile
+      repository: registry.example.com/openctem-gateway-l4
       tag: "2.11.4-l4-0.1.2"
-api:
-  sensorTransport:
-    enabled: true
-    publicHost: sensors.example.com:443
-    gatewayPassthrough: true
+      layer4: true                # sensorGateway defaults to alpn
 ```
 
-`sensors.example.com` must resolve to the gateway and differ from
-`gateway.host`. No public certificate is needed for it: the API mints its
-server certificate from the sensor CA and sensors pin that CA. With
-ingress-nginx instead, expose the API's `sensor-mtls` port with
-`--enable-ssl-passthrough` and an `nginx.ingress.kubernetes.io/ssl-passthrough`
-Ingress, or use `dedicatedService`. NetworkPolicy opens the mTLS port to the
-release's pods (passthrough) or to everyone (dedicated Service): the client
-certificate is the access control.
+A TLS connection whose ClientHello offers the ALPN id `openctem-sensor/3` is
+not terminated: it passes to the API's mTLS port behind a PROXY v2 header.
+Browsers, API clients and HTTPS sensors never offer that id and are served as
+before. Works with one host name, an IP address or no DNS at all; no public
+certificate is needed for gRPC (the API mints its server certificate from the
+sensor CA, which sensors pin). The API believes the PROXY header only from
+`gateway.trustedProxies` (or `mtls.trustedProxies`).
+
+**Dedicated sensor host name** (also for sensors that do not offer the ALPN id
+yet): `gateway.caddy.sensorGateway: passthrough` and
+`api.sensorTransport.publicHost: sensors.example.com:443`. That name must
+resolve to the gateway and differ from `gateway.host`; it is routed by SNI.
+
+**Stock Caddy image, `ingress`, `httpRoute`, any L7 load balancer.** Nothing to
+set: the probe meets the gateway's own certificate, nothing is advertised and
+sensors use the HTTPS binding. Keep response buffering off for
+`/api/v3/sensor` so the `Subscribe` stream flows (the bundled Caddy does).
+
+**ingress-nginx with SSL passthrough.** It routes by SNI only, so give sensors
+their own host name: start the controller with `--enable-ssl-passthrough`, set
+`api.sensorTransport.publicHost: sensors.example.com:443`, and add (for
+example through `extraManifests`) an Ingress for that host to the API
+Service's `sensor-mtls` port:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openctem-sensors
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: sensors.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: openctem-api   # your API Service (kubectl get svc -l app.kubernetes.io/component=api)
+                port:
+                  name: sensor-mtls
+```
+
+No PROXY header is sent there, so leave `mtls.trustedProxies` empty. With
+`networkPolicy.enabled`, the ingress controller (the
+`networkPolicy.ingressController*Selector`s) may reach the mTLS port when
+`publicHost` is set in `ingress`/`httpRoute` mode.
+
+**Separate port or TCP load balancer.** `api.sensorTransport.dedicatedService`
+with `publicHost` set to the address and port sensors reach it at.
+
+**The API terminating TLS itself** (`SERVER_TLS_CERT_FILE`/`SERVER_TLS_KEY_FILE`,
+one port without a proxy) is not supported by the chart yet: the web console,
+the gateway, the probes and the ServiceMonitor reach the API over plain HTTP.
+Use one of the modes above.
+
+**Self-probe and egress.** The API dials its own public endpoint. With
+`networkPolicy.api.egress.allowAll=false`, add that endpoint (the gateway's
+load balancer address, port 443) to `networkPolicy.api.egress.extra`, or the
+probe fails and sensors stay on HTTPS. NetworkPolicy opens the mTLS port to
+the release's pods, to the ingress controller (passthrough Ingress) or to
+everyone (dedicated Service): the client certificate is the access control.
+Status: `GET /api/v1/sensors/transport` and the metric
+`openctem_sensor_transport_grpc_advertised`.
 
 ## Secrets & GitOps (IMPORTANT — data-loss footgun)
 
@@ -553,10 +627,32 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Upgrading to 0.18.0 (sensor protocol v3 is automatic)
+
+Breaking: needs an OpenCTEM API with automatic protocol v3 (it refuses
+`SENSOR_TRANSPORT_V3_ENABLED`, which charts 0.16.0 and 0.17.0 set).
+
+- `api.sensorTransport.enabled` and `api.sensorTransport.gatewayPassthrough`
+  are removed; setting either (even `enabled: false`) fails the render.
+  Remove them. v3 is served by default; to keep it off set
+  `api.sensorTransport.mode: off`.
+- `gatewayPassthrough: true` becomes `gateway.caddy.sensorGateway: passthrough`
+  with `gateway.caddy.image.layer4: true` (keep `publicHost`). With a single
+  host name, drop `publicHost` and use `alpn` (the default with the layer4
+  image).
+- The API now always gets the sensor CA (the chart makes and keeps
+  `<release>-openctem-api-sensor-ca`, or `mtls.ca.existingSecret`) and the
+  `sensor-mtls` port on its Service, unless `mode: off`.
+- `api.sensorTransport.publicHost` is optional (derived from the public URL);
+  `dedicatedService` needs it.
+- `SENSOR_TRANSPORT_V3_ENABLED` in `api.extraEnv` fails the render.
+- Gateway files re-synced from openctem (`sensors/alpn.wrappers` new; the MCP
+  plane adds its OAuth paths).
+
 ## Upgrading to 0.16.0 (sensor protocol v3)
 
-Nothing changes until `api.sensorTransport.enabled=true`. The gateway files
-are re-synced from openctem (`files/gateway/sensors/` is new; the stock Caddy
+Nothing changed until `api.sensorTransport.enabled=true` (removed in 0.18.0). The gateway files
+were re-synced from openctem (`files/gateway/sensors/` is new; the stock Caddy
 image keeps working with the passthrough off).
 
 ## Upgrading to 0.15.0 (sensor pairing, sensor v0.11.0)
@@ -810,6 +906,17 @@ description from its `# --` comment (generated with
 | `api.resources` | object | `{"limits":{"cpu":"1","memory":"1Gi"},"requests":{"cpu":"100m","memory":"256Mi"}}` | CPU requests are REQUIRED for the CPU-target HPA to function. Memory limit is 1Gi (not 512Mi): the Go API does ingest/enrichment and threat-intel loading that spikes memory; 512Mi OOM-kills under load. Tune down only if you have measured a smaller working set. |
 | `api.securityContext` | object | see `values.yaml` | Container-level security context. readOnlyRootFilesystem is left OFF: the API writes local attachment storage under /app/data; enable it only with a writable volume mounted there. |
 | `api.sensorReleaseChannel` | object | `{"latestVersion":"","minVersion":""}` | The sensor release channel the Sensors page compares each sensor's version with, and the tag the page's install commands pin. latestVersion (SENSOR_LATEST_VERSION): empty = sensor.image.tag, so the bundled sensor and the install commands run the same release. minVersion (SENSOR_MIN_VERSION): empty = no minimum; a heartbeating sensor below it shows as degraded ("version unsupported"). An entry for either name in api.extraEnv takes precedence. |
+| `api.sensorTransport.dedicatedService.annotations` | object | `{}` | Service annotations (load balancer settings). |
+| `api.sensorTransport.dedicatedService.enabled` | bool | `false` | Render the `<api>-sensors` Service. |
+| `api.sensorTransport.dedicatedService.loadBalancerSourceRanges` | list | `[]` | Source ranges allowed to reach the load balancer. |
+| `api.sensorTransport.dedicatedService.port` | int | `443` | Service port (publicHost names the port sensors dial). |
+| `api.sensorTransport.dedicatedService.type` | string | `"LoadBalancer"` | LoadBalancer \| NodePort \| ClusterIP |
+| `api.sensorTransport.mode` | string | `"auto"` | SENSOR_TRANSPORT_V3: `auto` serves v3 and picks the bindings itself. `off` serves no v3 at all (every sensor back to v2 at its next call): the emergency switch. |
+| `api.sensorTransport.mtls.ca.existingSecret` | string | `""` | Secret (tls.crt, tls.key) with your sensor CA. Empty: the chart makes one and keeps it across upgrades and uninstall. |
+| `api.sensorTransport.mtls.certTTL` | string | `"168h"` | Client certificate lifetime (1h..720h). |
+| `api.sensorTransport.mtls.port` | int | `8443` | The API's mTLS listener port (container and Service). |
+| `api.sensorTransport.mtls.trustedProxies` | list | `[]` | SENSOR_MTLS_TRUSTED_PROXIES: CIDRs whose PROXY protocol v2 header the mTLS listener believes. Empty: gateway.trustedProxies when the bundled Caddy routes sensors (gateway.caddy.sensorGateway alpn or passthrough), else none (the TCP peer is the sensor's address). |
+| `api.sensorTransport.publicHost` | string | `""` | SENSOR_PUBLIC_HOST: host:port sensors dial for gRPC. Empty: the host and port of the public URL (gateway.publicUrl, else APP_URL), reached through the gateway's ALPN routing. Set it for a dedicated sensor host name (gateway.caddy.sensorGateway=passthrough, an ingress-nginx ssl-passthrough Ingress) or the dedicatedService address. Advertised to sensors only while the self-probe passes either way. |
 | `api.service.annotations` | object | `{}` |  |
 | `api.service.nodePort` | string | `nil` |  |
 | `api.service.port` | int | `80` |  |
@@ -839,9 +946,11 @@ description from its `# --` comment (generated with
 | `fullnameOverride` | string | `""` |  |
 | `gateway.caddy` | object | see `values.yaml` | ------------------------------------------------------------------------- |
 | `gateway.caddy.frontProxies` | list | `[]` | CIDRs of proxies IN FRONT of Caddy whose X-Forwarded-For Caddy believes (tls.mode=http behind an L7 proxy). Empty: none. |
+| `gateway.caddy.image.layer4` | bool | `false` | The image carries the layer4 module: built from openctemio/openctem api/deploy/gateway/Dockerfile (Caddy plus caddy-l4). Needed by sensorGateway alpn and passthrough, and makes alpn the default. |
 | `gateway.caddy.maxBodySize` | string | `"256MB"` | Largest request body (the API enforces the real per-route limits). |
 | `gateway.caddy.persistence.enabled` | bool | `true` | PersistentVolumeClaim for /data (certificates, ACME account, the internal CA). Keep it: losing it re-issues the internal CA and every sensor and browser must trust the new root. false = emptyDir. |
 | `gateway.caddy.podSecurityContext` | object | see `values.yaml` | Caddy runs as a non-root user. The image's caddy binary carries the file capability cap_net_bind_service (to bind 443/80), so the container must keep NET_BIND_SERVICE: with every capability dropped the kernel refuses to execute it. Dropping ALL and adding back only NET_BIND_SERVICE is allowed by the "restricted" Pod Security Standard. |
+| `gateway.caddy.sensorGateway` | string | `""` | OPENCTEM_SENSOR_GATEWAY: how this gateway carries the sensor gRPC binding on its port 443. Empty: `alpn` when image.layer4 is true, else `off`. `alpn`: a TLS connection that offers the sensor ALPN id (openctem-sensor/3) passes through untouched to the API's mTLS listener; works with one host name or an IP address. `passthrough`: alpn, plus a dedicated sensor host name (the host of api.sensorTransport.publicHost) routed by SNI, for sensors that do not offer the id. `off`: sensors use the HTTPS binding. alpn and passthrough need image.layer4 and a TLS mode other than http. |
 | `gateway.caddy.service.externalTrafficPolicy` | string | `"Local"` | Local keeps the client's source address (audit log, IP allowlists) for LoadBalancer/NodePort; Cluster SNATs it to a node address. |
 | `gateway.caddy.service.http` | object | `{"enabled":false,"nodePort":null,"port":80}` | Also expose port 80 (acme: HTTP-01 + HTTP->HTTPS redirect). In tls.mode=http port 80 is the only port and is always exposed. |
 | `gateway.caddy.service.type` | string | `"LoadBalancer"` | LoadBalancer \| NodePort \| ClusterIP |

@@ -139,14 +139,13 @@ spec:
             - "-verbose"
             {{- end }}
           env:
-            # Co-located: talk to the in-cluster API service. API_URL, API_KEY
-            # and REGION were not renamed.
-            - name: API_URL
+            # Co-located: talk to the in-cluster API service.
+            - name: SENSOR_API_URL
               value: {{ $sensor.apiUrl | default (printf "http://%s:%v" (include "openctem.apiFullname" .) .Values.api.service.port) | quote }}
-            - name: REGION
+            - name: SENSOR_REGION
               value: {{ $sensor.region | quote }}
             {{- if $pairing }}
-            # No API_KEY: the sensor pairs. It makes its own key in the state
+            # No SENSOR_API_KEY: the sensor pairs. It makes its own key in the state
             # volume and logs a code for an administrator to approve under
             # Sensors > Pair a sensor; then it signs every request.
             - name: SENSOR_NAME
@@ -158,7 +157,7 @@ spec:
             {{- end }}
             # The credential comes from a Secret, never from args (which are
             # visible via `kubectl describe pod`).
-            - name: API_KEY
+            - name: SENSOR_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}
@@ -174,7 +173,7 @@ spec:
             {{- end }}
             # Always explicit: the sensor's own check counts any volume as
             # persistent, an emptyDir too, which is lost with the pod.
-            - name: PLATFORM_KEY_AUTORENEW
+            - name: SENSOR_KEY_AUTORENEW
               value: {{ $sensor.keyAutoRenew | quote }}
             - name: SENSOR_STATE_DIR
               value: /var/lib/openctem/state

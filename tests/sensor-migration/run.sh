@@ -67,12 +67,12 @@ expect "sensor: drain grace period" "terminationGracePeriodSeconds: 45" "$out"
 expect "sensor: daemon" '"-daemon"' "$out"
 expect "sensor: dispatched commands" '"-enable-commands"' "$out"
 reject "sensor: no -tools by default (every installed scanner)" '"-tools=' "$out"
-expect "sensor: API_KEY" "name: API_KEY" "$out"
+expect "sensor: SENSOR_API_KEY" "name: SENSOR_API_KEY" "$out"
 expect "sensor: chart Secret" "name: t-openctem-sensor-credentials" "$out"
 expect "sensor: Secret key" 'api-key: "rda_test"' "$out"
 reject "sensor: no -platform" '"-platform"' "$out"
 reject "sensor: no BOOTSTRAP_TOKEN" "name: BOOTSTRAP_TOKEN" "$out"
-expect "sensor: key auto-renew on with the state PVC" 'name: PLATFORM_KEY_AUTORENEW
+expect "sensor: key auto-renew on with the state PVC" 'name: SENSOR_KEY_AUTORENEW
               value: "true"' "$out"
 expect "sensor: credentials in the state volume" '"-credentials=/var/lib/openctem/state/sensor-credentials.json"' "$out"
 expect "sensor: SENSOR_STATE_DIR" 'name: SENSOR_STATE_DIR' "$out"
@@ -94,7 +94,7 @@ expect "sensor: split: content PVC" "name: t-openctem-sensor-content" "$out"
 expect "sensor: split: content PVC size" 'storage: "5Gi"' "$out"
 expect "sensor: split: content mounted" "mountPath: /var/lib/openctem/content" "$out"
 reject "sensor: split: no data PVC" "name: t-openctem-sensor-data" "$out"
-expect "sensor: split: key auto-renew on with the state PVC" 'name: PLATFORM_KEY_AUTORENEW
+expect "sensor: split: key auto-renew on with the state PVC" 'name: SENSOR_KEY_AUTORENEW
               value: "true"' "$out"
 # A per-directory existingClaim picks the split layout on its own.
 out="$(render "${D[@]}" --set sensor.state.persistence.existingClaim=my-state)"
@@ -107,7 +107,7 @@ else
 fi
 # Data layout without persistence: emptyDir, key auto-renewal off.
 out="$(render "${D[@]}" --set sensor.data.persistence.enabled=false --set sensor.data.emptyDirSizeLimit=4Gi)"
-expect "sensor: data emptyDir: auto-renew off" 'name: PLATFORM_KEY_AUTORENEW
+expect "sensor: data emptyDir: auto-renew off" 'name: SENSOR_KEY_AUTORENEW
               value: "false"' "$out"
 expect "sensor: data emptyDir limit" "sizeLimit: 4Gi" "$out"
 reject "sensor: data emptyDir: no PVC object" "name: t-openctem-sensor-data" "$out"
@@ -152,7 +152,7 @@ reject "sensor: existingSecret, no chart Secret" "t-openctem-sensor-credentials"
 # State and content volumes (split layout), key auto-renewal.
 D=("${D[@]}" "${S[@]}")
 out="$(render "${D[@]}" --set sensor.state.persistence.enabled=false --set sensor.content.persistence.enabled=false --set sensor.content.emptyDirSizeLimit=3Gi)"
-expect "sensor: no state PVC: auto-renew off" 'name: PLATFORM_KEY_AUTORENEW
+expect "sensor: no state PVC: auto-renew off" 'name: SENSOR_KEY_AUTORENEW
               value: "false"' "$out"
 reject "sensor: no state PVC object" "name: t-openctem-sensor-state" "$out"
 reject "sensor: no content PVC object" "name: t-openctem-sensor-content" "$out"
@@ -162,11 +162,11 @@ expect "sensor: content emptyDir limit" "sizeLimit: 3Gi" "$out"
 reject "sensor: no Recreate without PVCs" "type: Recreate" "$(render "${D[@]}" -s templates/sensor-deployment.yaml --set sensor.state.persistence.enabled=false --set sensor.content.persistence.enabled=false --set sensor.content.emptyDirSizeLimit=3Gi)"
 expect "sensor: NOTES emptyDir state" "State is an emptyDir, so key auto-renewal is off" "$out"
 out="$(render "${D[@]}" --set sensor.state.persistence.enabled=false --set sensor.keyAutoRenew=true)"
-expect "sensor: keyAutoRenew=true forces it" 'name: PLATFORM_KEY_AUTORENEW
+expect "sensor: keyAutoRenew=true forces it" 'name: SENSOR_KEY_AUTORENEW
               value: "true"' "$out"
 expect "sensor: NOTES warns about a lost key" "a renewed key is lost with the pod" "$out"
 out="$(render "${D[@]}" --set sensor.keyAutoRenew=false)"
-expect "sensor: keyAutoRenew=false turns it off" 'name: PLATFORM_KEY_AUTORENEW
+expect "sensor: keyAutoRenew=false turns it off" 'name: SENSOR_KEY_AUTORENEW
               value: "false"' "$out"
 out="$(render "${D[@]}" --set sensor.state.persistence.existingClaim=my-state --set sensor.content.persistence.existingClaim=my-content)"
 expect "sensor: state existingClaim" "claimName: my-state" "$out"
@@ -196,7 +196,7 @@ fi
 P=(--set api.appEnv=development --set sensor.enabled=true)
 out="$(render "${P[@]}")"
 expect "pairing: Deployment" "name: t-openctem-sensor" "$out"
-reject "pairing: no API_KEY" "name: API_KEY" "$out"
+reject "pairing: no SENSOR_API_KEY" "name: SENSOR_API_KEY" "$out"
 reject "pairing: no chart Secret" "t-openctem-sensor-credentials" "$out"
 expect "pairing: SENSOR_NAME defaults to the Deployment name" 'name: SENSOR_NAME
               value: "t-openctem-sensor"' "$out"
@@ -247,7 +247,7 @@ reject "legacy: no -platform" '"-platform"' "$out"
 reject "legacy: no BOOTSTRAP_TOKEN" "name: BOOTSTRAP_TOKEN" "$out"
 expect "legacy: region mapped" 'value: "eu-west"' "$out"
 expect "legacy: verbose mapped" '"-verbose"' "$out"
-expect "legacy: keyAutoRenew mapped" 'name: PLATFORM_KEY_AUTORENEW
+expect "legacy: keyAutoRenew mapped" 'name: SENSOR_KEY_AUTORENEW
               value: "true"' "$out"
 expect "legacy: resources mapped" "memory: 64Mi" "$out"
 reject "legacy: private targets stay blocked" "name: SENSOR_ALLOW_PRIVATE_TARGETS" "$out"
@@ -268,7 +268,7 @@ expect "legacy mirror: repository and tag kept" 'image: "registry.example.com/op
 
 out="$(render -f "$here/legacy-to-daemon-values.yaml")"
 expect "legacy + sensor.apiKey: daemon mode" '"-daemon"' "$out"
-expect "legacy + sensor.apiKey: API_KEY" "name: API_KEY" "$out"
+expect "legacy + sensor.apiKey: SENSOR_API_KEY" "name: SENSOR_API_KEY" "$out"
 expect "legacy + sensor.apiKey: region still mapped" 'value: "eu-west"' "$out"
 
 out="$(render -f "$here/both-agree-values.yaml")"

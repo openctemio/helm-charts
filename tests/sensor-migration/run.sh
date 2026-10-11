@@ -76,11 +76,59 @@ expect "sensor: key auto-renew on with the state PVC" 'name: PLATFORM_KEY_AUTORE
               value: "true"' "$out"
 expect "sensor: credentials in the state volume" '"-credentials=/var/lib/openctem/state/sensor-credentials.json"' "$out"
 expect "sensor: SENSOR_STATE_DIR" 'name: SENSOR_STATE_DIR' "$out"
-expect "sensor: state PVC" "name: t-openctem-sensor-state" "$out"
-expect "sensor: state mounted" "mountPath: /var/lib/openctem/state" "$out"
-expect "sensor: content PVC" "name: t-openctem-sensor-content" "$out"
-expect "sensor: content PVC size" 'storage: "5Gi"' "$out"
-expect "sensor: content mounted" "mountPath: /var/lib/openctem/content" "$out"
+# One data volume by default (chart 0.19.0).
+expect "sensor: data PVC" "name: t-openctem-sensor-data" "$out"
+expect "sensor: data PVC size" 'storage: "8Gi"' "$out"
+expect "sensor: data mounted" "mountPath: /var/lib/openctem
+" "$out"
+reject "sensor: no per-directory mount" "mountPath: /var/lib/openctem/" "$out"
+reject "sensor: no state PVC in the data layout" "name: t-openctem-sensor-state" "$out"
+reject "sensor: no content PVC in the data layout" "name: t-openctem-sensor-content" "$out"
+expect "sensor: NOTES data volume" "PersistentVolumeClaim t-openctem-sensor-data at /var/lib/openctem" "$out"
+# The split layout (releases installed before 0.19.0) keeps its volumes.
+S=(--set sensor.storageLayout=split)
+out="$(render "${D[@]}" "${S[@]}")"
+expect "sensor: split: state PVC" "name: t-openctem-sensor-state" "$out"
+expect "sensor: split: state mounted" "mountPath: /var/lib/openctem/state" "$out"
+expect "sensor: split: content PVC" "name: t-openctem-sensor-content" "$out"
+expect "sensor: split: content PVC size" 'storage: "5Gi"' "$out"
+expect "sensor: split: content mounted" "mountPath: /var/lib/openctem/content" "$out"
+reject "sensor: split: no data PVC" "name: t-openctem-sensor-data" "$out"
+expect "sensor: split: key auto-renew on with the state PVC" 'name: PLATFORM_KEY_AUTORENEW
+              value: "true"' "$out"
+# A per-directory existingClaim picks the split layout on its own.
+out="$(render "${D[@]}" --set sensor.state.persistence.existingClaim=my-state)"
+expect "sensor: existingClaim implies split" "claimName: my-state" "$out"
+reject "sensor: existingClaim, no data PVC" "name: t-openctem-sensor-data" "$out"
+if out="$(render "${D[@]}" --set sensor.storageLayout=one)"; then
+  fail "sensor: unknown storageLayout must fail"
+else
+  expect "sensor: unknown storageLayout fails" 'sensor.storageLayout="one" is not recognised' "$out"
+fi
+# Data layout without persistence: emptyDir, key auto-renewal off.
+out="$(render "${D[@]}" --set sensor.data.persistence.enabled=false --set sensor.data.emptyDirSizeLimit=4Gi)"
+expect "sensor: data emptyDir: auto-renew off" 'name: PLATFORM_KEY_AUTORENEW
+              value: "false"' "$out"
+expect "sensor: data emptyDir limit" "sizeLimit: 4Gi" "$out"
+reject "sensor: data emptyDir: no PVC object" "name: t-openctem-sensor-data" "$out"
+expect "sensor: NOTES data emptyDir" "Data (/var/lib/openctem) is an emptyDir" "$out"
+reject "sensor: data emptyDir: no Recreate" "type: Recreate" "$(render "${D[@]}" -s templates/sensor-deployment.yaml --set sensor.data.persistence.enabled=false)"
+out="$(render "${D[@]}" --set sensor.data.persistence.existingClaim=my-data)"
+expect "sensor: data existingClaim" "claimName: my-data" "$out"
+reject "sensor: data existingClaim, no PVC object" "name: t-openctem-sensor-data" "$out"
+if out="$(render "${D[@]}" --set sensor.replicaCount=2)"; then
+  fail "sensor: 2 replicas with the data PVC must fail"
+else
+  expect "sensor: 2 replicas with the data PVC fails" "sensor.data.persistence needs sensor.replicaCount=1" "$out"
+fi
+out="$(render "${D[@]}" --set sensor.replicaCount=2 --set sensor.data.persistence.enabled=false)"
+expect "sensor: 2 replicas without the data PVC render" "replicas: 2" "$out"
+if out="$(render --set api.appEnv=development --set sensor.enabled=true --set sensor.data.persistence.enabled=false)"; then
+  fail "sensor: pairing without the data PVC must fail"
+else
+  expect "sensor: pairing without the data PVC fails" "set sensor.data.persistence.enabled=true" "$out"
+fi
+out="$(render "${D[@]}")"
 expect "sensor: Recreate with the PVCs" "type: Recreate" "$(render "${D[@]}" -s templates/sensor-deployment.yaml)"
 expect "sensor: fsGroup for the PVCs" "fsGroup: 999" "$out"
 expect "sensor: fsGroup only on a new volume" "fsGroupChangePolicy: OnRootMismatch" "$out"
@@ -101,7 +149,8 @@ out="$(render "${D[@]}" --set sensor.existingSecret=octem-sensor --set sensor.ex
 expect "sensor: existingSecret" "name: octem-sensor" "$out"
 reject "sensor: existingSecret, no chart Secret" "t-openctem-sensor-credentials" "$out"
 
-# State and content volumes, key auto-renewal.
+# State and content volumes (split layout), key auto-renewal.
+D=("${D[@]}" "${S[@]}")
 out="$(render "${D[@]}" --set sensor.state.persistence.enabled=false --set sensor.content.persistence.enabled=false --set sensor.content.emptyDirSizeLimit=3Gi)"
 expect "sensor: no state PVC: auto-renew off" 'name: PLATFORM_KEY_AUTORENEW
               value: "false"' "$out"
@@ -151,7 +200,7 @@ reject "pairing: no API_KEY" "name: API_KEY" "$out"
 reject "pairing: no chart Secret" "t-openctem-sensor-credentials" "$out"
 expect "pairing: SENSOR_NAME defaults to the Deployment name" 'name: SENSOR_NAME
               value: "t-openctem-sensor"' "$out"
-expect "pairing: state PVC" "claimName: t-openctem-sensor-state" "$out"
+expect "pairing: data PVC" "claimName: t-openctem-sensor-data" "$out"
 expect "pairing: NOTES says how to read the code" "Sensors > Pair a sensor" "$out"
 reject "pairing: no pins by default" "SENSOR_CA_FINGERPRINT" "$out"
 out="$(render "${P[@]}" --set sensor.name=dmz-01 --set sensor.caFingerprint=AB:CD --set sensor.platformKey=pk123)"
@@ -160,7 +209,7 @@ expect "pairing: CA pin" 'name: SENSOR_CA_FINGERPRINT
               value: "AB:CD"' "$out"
 expect "pairing: platform key pin" 'name: SENSOR_PLATFORM_KEY
               value: "pk123"' "$out"
-if out="$(render "${P[@]}" --set sensor.state.persistence.enabled=false)"; then
+if out="$(render "${P[@]}" --set sensor.storageLayout=split --set sensor.state.persistence.enabled=false)"; then
   fail "pairing: an emptyDir state must fail"
 else
   expect "pairing: an emptyDir state fails" "its identity must survive the pod" "$out"

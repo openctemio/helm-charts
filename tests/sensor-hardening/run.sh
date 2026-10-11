@@ -27,8 +27,12 @@ expect "no privilege escalation" "allowPrivilegeEscalation: false" "$out"
 expect "read-only root filesystem" "readOnlyRootFilesystem: true" "$out"
 expect "drop ALL capabilities" "- ALL" "$out"
 reject "no NET_RAW by default" "NET_RAW" "$out"
-for d in /tmp /var/lib/openctem/state /var/lib/openctem/content /var/lib/openctem/outbox; do
+for d in /tmp /var/lib/openctem; do
   expect "writable $d" "mountPath: $d" "$out"
+done
+split="$(render --set sensor.storageLayout=split)"
+for d in /var/lib/openctem/state /var/lib/openctem/content /var/lib/openctem/outbox; do
+  expect "split layout: writable $d" "mountPath: $d" "$split"
 done
 # The image's home holds the baked nuclei-templates release: never hidden.
 reject "home directory not mounted over" "mountPath: /home/openctem" "$out"

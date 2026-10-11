@@ -10,7 +10,9 @@
 # 2. The bundled sensor, in its default mode (pairing, no API key):
 #    - it imports the nuclei-templates release baked into its image (nothing
 #      is mounted over its home directory) and detects its scanners;
-#    - it starts pairing and keeps its key in the state volume;
+#    - it starts pairing and keeps its key in the state volume (the split
+#      layout: the chart's default sensor image still declares VOLUMEs on
+#      the outbox and content, which would sit on top of a data volume);
 #    - after its pod is replaced, the kubelet has not made the identity
 #      group-readable (fsGroupChangePolicy OnRootMismatch) and the sensor
 #      accepts it. A local PersistentVolume is used because the kubelet
@@ -87,6 +89,7 @@ fi
 install=(upgrade --install "$rel" "$chart" -n "$ns"
   --set api.appEnv=development
   --set sensor.enabled=true
+  --set sensor.storageLayout=split
   --set sensor.state.persistence.existingClaim=sensor-state
   --set sensor.content.persistence.size=1Gi)
 if [[ $published == 1 ]]; then

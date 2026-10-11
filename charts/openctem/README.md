@@ -573,7 +573,7 @@ next to the API, for work the cluster can reach (public DAST, recon,
 validation). Scanning an internal network still needs a remote sensor.
 
 By default the sensor **pairs** with the platform: it has no API key, makes
-its own Ed25519 key in its state volume, and logs a code and a fingerprint.
+its own Ed25519 key in its data volume, and logs a code and a fingerprint.
 An administrator enters the code under **Sensors > Pair a sensor**, checks
 that the console shows the same fingerprint, and approves it; from then on
 the sensor signs every request with its key. Nothing secret goes through Helm
@@ -588,9 +588,12 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 kubectl -n openctem logs deploy/openctem-openctem-sensor
 ```
 
-Keep the state volume (`sensor.state.persistence`, on by default; the render
-fails without it while the sensor pairs): it holds the sensor's identity, and
-a pod without it has to be paired again.
+Keep the data volume (`sensor.data.persistence`, on by default; the render
+fails without it while the sensor pairs): one PersistentVolumeClaim at
+`/var/lib/openctem` holding `state/` (the sensor's identity: a pod without it
+has to be paired again), `outbox/` (results the platform has not accepted
+yet) and `content/` (the scanner cache). Back it up like a credential; the
+`content/` cache can be left out.
 
 An organization that still allows API-key sensors can use a key instead:
 
@@ -610,10 +613,12 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.tools` | empty | Optional allowlist of the scanners the sensor offers (`-tools`), e.g. `nuclei,httpx`. Empty: every scanner installed in the image, which the sensor detects at start and reports on its heartbeat. |
 | `sensor.allowPrivateTargets` | empty | `"1"` sets `SENSOR_ALLOW_PRIVATE_TARGETS=1` (RFC1918 / ULA targets allowed). Empty keeps them blocked. Any other value fails the render: the sensor only recognises `1`. Reaching the in-cluster API needs nothing (the sensor's API client allows the platform's private address). |
 | `sensor.scanRoots` | empty | `SENSOR_SCAN_ROOTS` for dispatched code scans; empty = `/scan`. |
-| `sensor.keyAutoRenew` | empty | API key only. `PLATFORM_KEY_AUTORENEW`, always rendered. Empty: on exactly when `sensor.state.persistence.enabled`; `true` / `false` force it. The renewed key is kept in the state volume (`-credentials=/var/lib/openctem/state/sensor-credentials.json`), not the Secret: the renewal retires the key in the Secret, so a pod without that volume would start with a dead key. The API issues expiring keys only with `SENSOR_KEY_TTL`. |
-| `sensor.state.persistence.enabled` | `true` | The sensor's state at `/var/lib/openctem/state` (`SENSOR_STATE_DIR`): its paired identity (`identity/`: private key and sensor ID), or the API key it renews on its own. A PersistentVolumeClaim `<release>-openctem-sensor-state` (`size` `128Mi`, `storageClass`, `accessModes`) or `existingClaim`. It holds a credential: back it up like one. Required while the sensor pairs. With an API key, `false` gives an `emptyDir` and key auto-renewal stays off. |
-| `sensor.content.persistence.enabled` | `true` | Scanner content cache at `/var/lib/openctem/content` (`SENSOR_CONTENT_DIR`: trivy DB, nuclei templates, semgrep rules), so a new pod does not download it again. A PersistentVolumeClaim `<release>-openctem-sensor-content` (`size` `5Gi`) or `existingClaim`. Disposable, and kept apart from the state. `false`: an `emptyDir` (`sensor.content.emptyDirSizeLimit`). |
-| `sensor.outbox.persistence.enabled` | `false` | The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. Any sensor PVC (outbox, state, content) requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`, with `fsGroupChangePolicy: OnRootMismatch` unless `podSecurityContext` sets a policy. |
+| `sensor.keyAutoRenew` | empty | API key only. `PLATFORM_KEY_AUTORENEW`, always rendered. Empty: on exactly when the state is on a PersistentVolumeClaim (`sensor.data.persistence.enabled`, or `sensor.state.persistence.enabled` in the split layout); `true` / `false` force it. The renewed key is kept in the state volume (`-credentials=/var/lib/openctem/state/sensor-credentials.json`), not the Secret: the renewal retires the key in the Secret, so a pod without that volume would start with a dead key. The API issues expiring keys only with `SENSOR_KEY_TTL`. |
+| `sensor.storageLayout` | empty | `data`: one volume at `/var/lib/openctem` (`sensor.data`). `split`: a volume per directory (`sensor.state`, `sensor.content`, `sensor.outbox`), the layout of releases installed before 0.19.0. Empty: `split` when the release already has one of the sensor's per-directory PVCs or a per-directory `existingClaim` is set (cluster `lookup`), else `data`. Under GitOps (`helm template`: the lookup is empty) set it explicitly. See "Upgrading to 0.19.0". |
+| `sensor.data.persistence.enabled` | `true` | The data layout's PersistentVolumeClaim `<release>-openctem-sensor-data` (`size` `8Gi`, `storageClass`, `accessModes`) or `existingClaim`, mounted at `/var/lib/openctem` (`state/`, `outbox/`, `content/`; the sensor creates them). It holds a credential: back it up like one. Required while the sensor pairs; requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`. With an API key, `false` gives an `emptyDir` (`sensor.data.emptyDirSizeLimit`): key auto-renewal stays off and queued results are lost with the pod. Needs a sensor image without `VOLUME` declarations (v0.16.0+); with an older image the outbox and content sit on the image's anonymous volumes on top of the data volume (the outbox then lives as long as the pod, like the split layout's default emptyDir). |
+| `sensor.state.persistence.enabled` | `true` | Split layout only. The sensor's state at `/var/lib/openctem/state` (`SENSOR_STATE_DIR`): its paired identity (`identity/`: private key and sensor ID), or the API key it renews on its own. A PersistentVolumeClaim `<release>-openctem-sensor-state` (`size` `128Mi`, `storageClass`, `accessModes`) or `existingClaim`. It holds a credential: back it up like one. Required while the sensor pairs. With an API key, `false` gives an `emptyDir` and key auto-renewal stays off. |
+| `sensor.content.persistence.enabled` | `true` | Split layout only. Scanner content cache at `/var/lib/openctem/content` (`SENSOR_CONTENT_DIR`: trivy DB, nuclei templates, semgrep rules), so a new pod does not download it again. A PersistentVolumeClaim `<release>-openctem-sensor-content` (`size` `5Gi`) or `existingClaim`. Disposable, and kept apart from the state. `false`: an `emptyDir` (`sensor.content.emptyDirSizeLimit`). |
+| `sensor.outbox.persistence.enabled` | `false` | Split layout only (its `fsGroup` applies to every sensor PVC). The sensor (v0.4.0+) keeps results in its outbox at `/var/lib/openctem/outbox` until the platform accepted them. Default: an `emptyDir`, which survives a container restart but **not** a pod deletion, reschedule or upgrade (results still queued then are lost; `helm install` prints a warning). `true` creates a PersistentVolumeClaim `<release>-openctem-sensor-outbox` (`size` `2Gi`, `storageClass`, `accessModes` `[ReadWriteOnce]`) or uses `existingClaim`; it requires `replicaCount: 1` (one sensor per outbox), sets the Deployment strategy to `Recreate`, and gives the pod `fsGroup: 999` (the image user) unless `podSecurityContext` sets one. Any sensor PVC (outbox, state, content) requires `replicaCount: 1`, sets `Recreate` and the `fsGroup`, with `fsGroupChangePolicy: OnRootMismatch` unless `podSecurityContext` sets a policy. |
 | `sensor.outbox.maxBytes` / `.maxAge` / `.emptyDirSizeLimit` | empty | `SENSOR_OUTBOX_MAX_BYTES` (default `1GiB`, at most half the free space; keep it below the volume), `SENSOR_OUTBOX_MAX_AGE` (default `168h`), and the `emptyDir` size limit. |
 | `sensor.localPolicy.enabled` | `false` | The sensor-local policy ([RFC-040 §5.7](https://github.com/openctemio/openctem/blob/develop/api/docs/rfcs/RFC-040-platform-sensor-mutual-distrust.md)): a read-only file set by the network owner, mounted at `/etc/openctem/sensor-policy.yaml` (`SENSOR_LOCAL_POLICY`, ConfigMap `defaultMode 0444`). The sensor refuses every job outside it (targets, ports, tools, job types, custom templates, interactsh, rate, kill switch) whatever the platform sends, and does not start when the policy is invalid. Off by default so an upgrade keeps today's behavior (the sensor reports `local_policy: absent`); **new installs should turn it on.** Keys: [`docs/LOCAL_POLICY.md`](https://github.com/openctemio/sensor/blob/main/docs/LOCAL_POLICY.md). Older sensor images ignore the file. |
 | `sensor.localPolicy.policy` | example | The policy document (rendered into `<release>-openctem-sensor-policy`; changing it rolls the pod). The default mirrors the sensor's `docs/sensor-policy.example.yaml` with a documentation range (`203.0.113.0/24`): replace it. Custom templates and interactsh are off. The render fails when it is not a `openctem.io/sensor-policy/v1` document. |
@@ -624,8 +629,61 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.sandbox.network` | `auto` | Per-task network confinement (RFC-060, `SENSOR_SANDBOX_NETWORK`): `auto` confines when the node allows it, `required` refuses to run a task unconfined, `off` never confines. |
 | `sensor.sandbox.seccompProfile` | `runtime-default` | `openctem`: run the sensor under its own seccomp profile (the runtime default plus new namespaces), installed on the nodes by a DaemonSet (`sensor.sandbox.installProfile`, `kubeletRoot`, `installerImage`). |
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
-| `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
+| `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.19.0 (one sensor data volume)
+
+New installs keep the sensor's state, outbox and content cache on ONE
+PersistentVolumeClaim, `<release>-openctem-sensor-data`, mounted at
+`/var/lib/openctem` (`sensor.storageLayout: data`). A release that already
+has the per-directory PVCs (`-state`, `-outbox`, `-content`) keeps them:
+`sensor.storageLayout` empty picks `split` when the cluster `lookup` finds
+one, so `helm upgrade` never drops the volume that holds the sensor's
+identity. Under GitOps (`helm template`, ArgoCD, Flux) the lookup is empty:
+**set `sensor.storageLayout: split` before upgrading an existing sensor**,
+or the render switches to a new, empty data volume and the old PVCs are
+pruned (a paired sensor would have to pair again).
+
+To move an existing sensor to one volume (optional; the split layout keeps
+working), with `S` the sensor's name (`<release>-openctem-sensor`):
+
+1. Back up the `$S-state` claim, then stop the sensor:
+   `kubectl -n openctem scale deploy/$S --replicas=0`.
+2. Create a claim Helm does not own, copy `state/` and `outbox/` into it
+   (`content/` is downloaded again), and give its root to the sensor's user:
+
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata: {name: sensor-data}
+   spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 8Gi}}}
+   ---
+   apiVersion: v1
+   kind: Pod
+   metadata: {name: sensor-copy}
+   spec:
+     restartPolicy: Never
+     containers:
+       - name: copy
+         image: alpine
+         command: ["sh", "-c", "for d in state outbox; do mkdir -p /to/$d && cp -a /old-$d/. /to/$d/; done; chown $(stat -c %u:%g /to/state) /to"]
+         volumeMounts:
+           - {name: state, mountPath: /old-state, readOnly: true}
+           - {name: outbox, mountPath: /old-outbox, readOnly: true}
+           - {name: data, mountPath: /to}
+     volumes:
+       - {name: state, persistentVolumeClaim: {claimName: <S>-state}}
+       - {name: outbox, persistentVolumeClaim: {claimName: <S>-outbox}}   # emptyDir: {} when sensor.outbox.persistence was off
+       - {name: data, persistentVolumeClaim: {claimName: sensor-data}}
+   ```
+
+3. When the pod completed, switch the release:
+   `helm upgrade openctem openctem/openctem -n openctem --reuse-values --set sensor.storageLayout=data --set sensor.data.persistence.existingClaim=sensor-data`.
+4. Check that the sensor comes back as the same sensor (no new pairing code
+   in its log, the same sensor online under Settings → Sensors). Helm
+   deletes the chart-created `-state`, `-outbox` and `-content` claims on
+   that upgrade, so keep the backup from step 1 until then.
 
 ## Upgrading to 0.18.0 (sensor protocol v3 is automatic)
 
@@ -1055,6 +1113,10 @@ description from its `# --` comment (generated with
 | `sensor.scanRoots` | string | `""` | SENSOR_SCAN_ROOTS: ':'-separated directories that filesystem targets of dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside. Empty: the sensor's working directory (/scan in the image). |
 | `sensor.securityContext` | object | see `values.yaml` | Container security context: no privilege escalation, a read-only root filesystem (the directories the sensor and its tools write are emptyDirs or the state/content/outbox volumes: see writableDirs) and no capabilities (netRaw adds NET_RAW back). |
 | `sensor.state` | object | see `values.yaml` | The sensor's state at /var/lib/openctem/state (SENSOR_STATE_DIR): its paired identity (identity/: its private key and sensor ID), or the API key it renews on its own. Holds a credential: back it up like one. Pairing needs it persistent (the render fails otherwise: a new pod would have to be paired again). With an API key and persistence off it is an emptyDir and key auto-renewal stays off (keyAutoRenew). |
+| `sensor.storageLayout` | string | `""` | Where the sensor keeps its data: data (one volume at /var/lib/openctem: sensor.data) or split (a volume per directory: sensor.state, sensor.outbox, sensor.content). Empty: split when the release already has one of the sensor's per-directory PVCs, else data. |
+| `sensor.data.persistence.enabled` | bool | `true` | Back the data (state/, outbox/, content/ at /var/lib/openctem) with a PersistentVolumeClaim (needs replicaCount 1; switches the Deployment to Recreate). |
+| `sensor.data.persistence.size` | string | `"8Gi"` | Size of the data PersistentVolumeClaim. |
+| `sensor.data.emptyDirSizeLimit` | string | `""` | emptyDir size limit when persistence is off (empty: none). |
 | `sensor.state.persistence.enabled` | bool | `true` | Back the state with a PersistentVolumeClaim (needs replicaCount 1; switches the Deployment to Recreate). |
 | `sensor.state.persistence.existingClaim` | string | `""` | Use this pre-created claim instead of creating one. |
 | `sensor.state.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |

@@ -230,6 +230,21 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
     kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "openctem.sensorFullname" . }}
   It then runs the scans the platform dispatches, with: {{ $sensor.tools | default "every scanner in the image" }}.
 {{- end }}
+{{- $dataPersist := ((($sensor.data | default dict).persistence) | default dict) }}
+{{- if eq $sensor._layout "data" }}
+{{- if $dataPersist.enabled }}
+- Data (state/: the paired identity or the API key the sensor renews; outbox/: results not yet accepted;
+  content/: the scanner cache): PersistentVolumeClaim {{ $dataPersist.existingClaim | default (printf "%s-data" (include "openctem.sensorFullname" .)) }} at /var/lib/openctem.
+  Keep this volume and back it up like a credential: without it the sensor must be paired again{{ if or $sensor.apiKey $sensor.existingSecret }}
+  (API key auto-renewal: {{ ternary "ON; a renewal retires the key in the Secret" "off" (eq $sensor.keyAutoRenew "true") }}){{ end }}.
+{{- else }}
+- Data (/var/lib/openctem) is an emptyDir, so key auto-renewal is {{ ternary "ON — WARNING: a renewed key is lost with the pod, which then starts with the retired key in the Secret" "off" (eq $sensor.keyAutoRenew "true") }},
+  and results not yet accepted by the platform are LOST when the pod is deleted, rescheduled or upgraded.
+  Set sensor.data.persistence.enabled=true for a PersistentVolumeClaim.
+{{- end }}
+{{- else }}
+- Storage layout: split (a volume per directory; sensor.storageLayout). README "Upgrading to 0.19.0"
+  moves it to one data volume.
 {{- if $statePersist.enabled }}
 - State (the paired identity, or the API key the sensor renews): PersistentVolumeClaim {{ $statePersist.existingClaim | default (printf "%s-state" (include "openctem.sensorFullname" .)) }}
   at /var/lib/openctem/state. Keep this volume and back it up like a credential: without it the sensor
@@ -250,6 +265,7 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 - WARNING: the sensor's outbox (/var/lib/openctem/outbox) is an emptyDir. Results not yet
   accepted by the platform are LOST when the pod is deleted, rescheduled or upgraded.
   Set sensor.outbox.persistence.enabled=true for a PersistentVolumeClaim.
+{{- end }}
 {{- end }}
 - Private (RFC1918 / ULA) scan targets: {{ if eq $sensor.allowPrivateTargets "1" }}ALLOWED (sensor.allowPrivateTargets="1"){{ else }}blocked (set sensor.allowPrivateTargets="1" to allow){{ end }}.
     kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "openctem.sensorFullname" . }}

@@ -1,6 +1,6 @@
 {{- $sensor := include "openctem.sensor" . | fromYaml -}}
 {{- $persist := (($sensor.outbox | default dict).persistence | default dict) -}}
-{{- if and $sensor.enabled $persist.enabled (not $persist.existingClaim) }}
+{{- if and $sensor.enabled (eq $sensor._layout "split") $persist.enabled (not $persist.existingClaim) }}
 # The sensor's outbox: results not yet accepted by the platform. Kept on
 # uninstall would need helm.sh/resource-policy; it is deleted with the
 # release like the sensor itself.

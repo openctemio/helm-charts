@@ -1077,8 +1077,43 @@ sensor:
   #    dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside.
   #    Empty: the sensor's working directory (/scan in the image).
   scanRoots: ""
-  # -- The sensor's state at /var/lib/openctem/state (SENSOR_STATE_DIR): its
-  #    paired identity (identity/: its private key and sensor ID), or the API
+  # -- Where the sensor keeps its data. "data": ONE volume at /var/lib/openctem
+  #    holding state/ (identity, renewed key), outbox/ (undelivered results)
+  #    and content/ (scanner cache): sensor.data. "split": a volume per
+  #    directory (sensor.state, sensor.outbox, sensor.content), the layout of
+  #    releases installed before chart 0.19.0. Empty: split when the release
+  #    already has one of the sensor's per-directory PVCs (or a per-directory
+  #    existingClaim is set), else data. Under GitOps (helm template, where
+  #    the cluster lookup is empty) set it explicitly: "split" for an existing
+  #    sensor until you migrate (README "Upgrading to 0.19.0"). The data
+  #    layout needs a sensor image without VOLUME declarations (v0.16.0+).
+  storageLayout: ""
+  # -- The data volume (sensor.storageLayout data) at /var/lib/openctem. It
+  #    holds the sensor's private key or renewed API key: back it up like a
+  #    credential (the content/ cache can be left out). Pairing needs it
+  #    persistent. With an API key and persistence off it is an emptyDir and
+  #    key auto-renewal stays off.
+  data:
+    persistence:
+      # -- Back the data with a PersistentVolumeClaim
+      #    (<release>-openctem-sensor-data; needs replicaCount 1, switches the
+      #    Deployment to Recreate, gives the pod fsGroup
+      #    sensor.outbox.persistence.fsGroup unless podSecurityContext sets one).
+      enabled: true
+      # -- Use this pre-created claim instead of creating one.
+      existingClaim: ""
+      # -- The state is tiny; the outbox is capped by sensor.outbox.maxBytes
+      #    and the content cache takes most of it (the trivy DB ~1.5 GB per
+      #    version).
+      size: 8Gi
+      # -- Empty: the cluster's default StorageClass.
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
+    # -- emptyDir size limit when persistence is off (empty: none).
+    emptyDirSizeLimit: ""
+  # -- (storageLayout split) The sensor's state at /var/lib/openctem/state
+  #    (SENSOR_STATE_DIR): its paired identity (identity/: its private key and sensor ID), or the API
   #    key it renews on its own. Holds a credential: back it up like one.
   #    Pairing needs it persistent (the render fails otherwise: a new pod
   #    would have to be paired again). With an API key and persistence off
@@ -1095,7 +1130,8 @@ sensor:
       storageClass: ""
       accessModes:
         - ReadWriteOnce
-  # -- Scanner content cache at /var/lib/openctem/content (SENSOR_CONTENT_DIR:
+  # -- (storageLayout split) Scanner content cache at
+  #    /var/lib/openctem/content (SENSOR_CONTENT_DIR:
   #    trivy DB, nuclei templates, semgrep rules), so a new pod does not
   #    download it again. Disposable (it can be deleted), and kept apart from
   #    the state on purpose.
@@ -1113,8 +1149,9 @@ sensor:
     # -- emptyDir size limit when persistence is off (empty: none).
     emptyDirSizeLimit: ""
   # -- The sensor's outbox: results kept at /var/lib/openctem/outbox until the
-  #    platform accepted them (sensor >= v0.4.0), so an API outage or a pod
-  #    restart loses nothing. By default it is an emptyDir, which survives a
+  #    platform accepted them. maxBytes and maxAge apply in both layouts;
+  #    persistence and emptyDirSizeLimit only to storageLayout split (fsGroup
+  #    to every sensor PVC). Split layout: by default it is an emptyDir, which survives a
   #    container restart but NOT a pod deletion, reschedule or upgrade:
   #    results still queued then are lost. Enable persistence for a PVC.
   outbox:

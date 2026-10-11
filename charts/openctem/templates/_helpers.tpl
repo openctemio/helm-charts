@@ -174,6 +174,16 @@ keyAutoRenew: ""
 verbose: false
 allowPrivateTargets: ""
 scanRoots: ""
+storageLayout: ""
+data:
+  persistence:
+    enabled: true
+    existingClaim: ""
+    size: 8Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  emptyDirSizeLimit: ""
 state:
   persistence:
     enabled: true
@@ -374,11 +384,45 @@ openctem/sensor-{{ .Files.Get "files/seccomp/openctem-sensor.json" | sha256sum |
 {{- if ne (toString $sensor.mode) "daemon" -}}
 {{- fail (printf "\n\nsensor.mode=%q is not supported. Use \"daemon\".\n" (toString $sensor.mode)) -}}
 {{- end -}}
+{{- /* Storage layout: "data" is one volume at /var/lib/openctem holding
+       state/, outbox/ and content/ (sensor.data); "split" is a volume per
+       directory (sensor.state, sensor.outbox, sensor.content: releases
+       installed before chart 0.19.0). Empty picks split when a per-directory
+       claim is named or the release already has one of the sensor's
+       per-directory PVCs, so an upgrade never drops a volume holding the
+       sensor's identity or undelivered results; else data. */ -}}
+{{- $layout := toString ($sensor.storageLayout | default "") -}}
+{{- if not (has $layout (list "" "data" "split")) -}}
+{{- fail (printf "\n\nsensor.storageLayout=%q is not recognised. Use data (one volume at /var/lib/openctem: sensor.data), split (a volume per directory: sensor.state, sensor.outbox, sensor.content), or leave it empty (split when the release already has the sensor's per-directory volumes, else data).\n" $layout) -}}
+{{- end -}}
+{{- if eq $layout "" -}}
+{{- $layout = "data" -}}
+{{- $fullname := include "openctem.sensorFullname" . -}}
+{{- range $k := list "state" "outbox" "content" -}}
+{{- if ((index $sensor $k | default dict).persistence | default dict).existingClaim -}}
+{{- $layout = "split" -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $layout "data" -}}
+{{- range $k := list "state" "outbox" "content" -}}
+{{- if lookup "v1" "PersistentVolumeClaim" $.Release.Namespace (printf "%s-%s" $fullname $k) -}}
+{{- $layout = "split" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $sensor "_layout" $layout -}}
+{{- $persisted := false -}}
+{{- if eq $layout "data" -}}
+{{- $persisted = (($sensor.data | default dict).persistence | default dict).enabled -}}
+{{- else -}}
+{{- $persisted = (($sensor.state | default dict).persistence | default dict).enabled -}}
+{{- end -}}
 {{- $kar := toString $sensor.keyAutoRenew -}}
 {{- if has $kar (list "" "<nil>" "auto") -}}
-{{- $kar = ternary "true" "false" (and (hasKey $sensor "state") (($sensor.state | default dict).persistence | default dict).enabled) -}}
+{{- $kar = ternary "true" "false" (not (not $persisted)) -}}
 {{- else if not (has $kar (list "true" "false")) -}}
-{{- fail (printf "\n\nsensor.keyAutoRenew=%q is not recognised. Use true, false, or leave it empty (on exactly when sensor.state.persistence.enabled).\n" $kar) -}}
+{{- fail (printf "\n\nsensor.keyAutoRenew=%q is not recognised. Use true, false, or leave it empty (on exactly when the sensor's state is on a PersistentVolumeClaim: sensor.data.persistence.enabled, or sensor.state.persistence.enabled with sensor.storageLayout=split).\n" $kar) -}}
 {{- end -}}
 {{- $_ := set $sensor "keyAutoRenew" $kar -}}
 {{- $apt := toString ($sensor.allowPrivateTargets | default "") -}}

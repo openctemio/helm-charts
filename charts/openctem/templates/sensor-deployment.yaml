@@ -5,12 +5,23 @@
 {{- $content := $sensor.content | default dict -}}
 {{- $contentPersist := ($content.persistence | default dict) -}}
 {{- $statePersist := (($sensor.state | default dict).persistence | default dict) -}}
-{{- $anyPVC := or $persist.enabled $statePersist.enabled $contentPersist.enabled -}}
+{{- $data := $sensor.data | default dict -}}
+{{- $dataPersist := ($data.persistence | default dict) -}}
+{{- /* One data volume at /var/lib/openctem, or a volume per directory
+       (sensor.storageLayout; resolved in openctem.sensor). */ -}}
+{{- $split := eq $sensor._layout "split" -}}
+{{- $anyPVC := ternary (or $persist.enabled $statePersist.enabled $contentPersist.enabled) $dataPersist.enabled $split -}}
 {{- $lp := $sensor.localPolicy | default dict -}}
 {{- /* No API key: the sensor pairs and keeps its identity in the state volume. */ -}}
 {{- $pairing := not (or $sensor.apiKey $sensor.existingSecret) -}}
-{{- if and $pairing (not $statePersist.enabled) }}
+{{- if and $pairing $split (not $statePersist.enabled) }}
 {{- fail "\n\nThe sensor pairs (no sensor.apiKey or sensor.existingSecret), so its identity must survive the pod: set sensor.state.persistence.enabled=true (the default), or give it an API key.\n" }}
+{{- end }}
+{{- if and $pairing (not $split) (not $dataPersist.enabled) }}
+{{- fail "\n\nThe sensor pairs (no sensor.apiKey or sensor.existingSecret), so its identity must survive the pod: set sensor.data.persistence.enabled=true (the default), or give it an API key.\n" }}
+{{- end }}
+{{- if and (not $split) $dataPersist.enabled (gt (int $sensor.replicaCount) 1) }}
+{{- fail "\n\nsensor.data.persistence needs sensor.replicaCount=1: the data volume is a ReadWriteOnce volume of one sensor process, and it holds one sensor's identity (replicas sharing a key are flagged as a cloned identity). Run one release per sensor, or set sensor.data.persistence.enabled=false for a multi-replica Deployment with an API key (then key auto-renewal stays off).\n" }}
 {{- end }}
 {{- $sandbox := $sensor.sandbox | default dict -}}
 {{- if not (has ($sandbox.network | default "auto") (list "auto" "required" "off")) }}
@@ -27,10 +38,10 @@
 {{- if and (eq $userSeccomp "Unconfined") }}
 {{- fail "\n\nsensor.podSecurityContext.seccompProfile Unconfined is refused: use sensor.sandbox.seccompProfile=openctem for confinement.\n" }}
 {{- end }}
-{{- if and $persist.enabled (gt (int $sensor.replicaCount) 1) }}
+{{- if and $split $persist.enabled (gt (int $sensor.replicaCount) 1) }}
 {{- fail "\n\nsensor.outbox.persistence.enabled needs sensor.replicaCount=1: an outbox belongs to one sensor process (the sensor locks it).\n" }}
 {{- end }}
-{{- if and (or $statePersist.enabled $contentPersist.enabled) (gt (int $sensor.replicaCount) 1) }}
+{{- if and $split (or $statePersist.enabled $contentPersist.enabled) (gt (int $sensor.replicaCount) 1) }}
 {{- fail "\n\nsensor.state.persistence and sensor.content.persistence need sensor.replicaCount=1: each is a ReadWriteOnce volume of one sensor process, and the state holds one sensor's API key (replicas sharing a key are flagged as a cloned identity). Run one release per sensor, or turn both off for a multi-replica Deployment (then key auto-renewal stays off).\n" }}
 {{- end }}
 apiVersion: apps/v1
@@ -44,8 +55,8 @@ spec:
   # sharing a key are flagged by the platform as a cloned identity.
   replicas: {{ $sensor.replicaCount }}
   {{- if $anyPVC }}
-  # The outbox, state and content volumes are ReadWriteOnce and belong to one
-  # sensor process: the old pod must stop before the new one starts.
+  # The sensor's volumes are ReadWriteOnce and belong to one sensor process:
+  # the old pod must stop before the new one starts.
   strategy:
     type: Recreate
   {{- end }}
@@ -215,12 +226,19 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
+            {{- if $split }}
             - name: outbox
               mountPath: /var/lib/openctem/outbox
             - name: state
               mountPath: /var/lib/openctem/state
             - name: content
               mountPath: /var/lib/openctem/content
+            {{- else }}
+            # One data volume: state/, outbox/ and content/ (the sensor
+            # creates them on a fresh volume).
+            - name: data
+              mountPath: /var/lib/openctem
+            {{- end }}
             # Writable over the read-only root filesystem (sensor.writableDirs).
             {{- range $i, $d := $sensor.writableDirs }}
             - name: writable-{{ $i }}
@@ -240,6 +258,22 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        {{- if not $split }}
+        - name: data
+          {{- if $dataPersist.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $dataPersist.existingClaim | default (printf "%s-data" (include "openctem.sensorFullname" .)) }}
+          {{- else if $data.emptyDirSizeLimit }}
+          # Lost with the pod (API key only: key auto-renewal stays off, and
+          # results still queued when the pod is replaced are lost).
+          emptyDir:
+            sizeLimit: {{ $data.emptyDirSizeLimit }}
+          {{- else }}
+          # Lost with the pod (API key only: key auto-renewal stays off, and
+          # results still queued when the pod is replaced are lost).
+          emptyDir: {}
+          {{- end }}
+        {{- else }}
         - name: outbox
           {{- if $persist.enabled }}
           persistentVolumeClaim:
@@ -275,6 +309,7 @@ spec:
           # A cache: downloaded again when the pod is replaced.
           emptyDir: {}
           {{- end }}
+        {{- end }}
         {{- range $i, $d := $sensor.writableDirs }}
         - name: writable-{{ $i }}
           {{- if $sensor.writableDirsSizeLimit }}

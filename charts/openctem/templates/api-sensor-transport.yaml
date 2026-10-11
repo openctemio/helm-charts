@@ -1,5 +1,6 @@
 {{- $st := .Values.api.sensorTransport -}}
-{{- if and $st.enabled (not $st.mtls.ca.existingSecret) }}
+{{- $v3 := include "openctem.sensorTransportOn" . -}}
+{{- if and $v3 (not $st.mtls.ca.existingSecret) }}
 {{- /*
 The sensor CA (OpenCTEM RFC-059 T9): made once by the chart and kept across
 upgrades (lookup) and uninstall (keep). Its key signs sensor client
@@ -28,11 +29,14 @@ data:
   tls.key: {{ $ca.Key | b64enc }}
   {{- end }}
 {{- end }}
-{{- if and $st.enabled $st.publicHost $st.dedicatedService.enabled }}
+{{- if and $v3 $st.dedicatedService.enabled }}
+{{- if not $st.publicHost }}
+{{- fail "\n\napi.sensorTransport.dedicatedService needs api.sensorTransport.publicHost: the address and port sensors reach that Service at (e.g. sensors.example.com:443).\n" }}
+{{- end }}
 ---
 # The gRPC binding on its own address (a separate port or a TCP load
-# balancer), instead of the gateway's SNI passthrough. TLS is never
-# terminated in front of the API.
+# balancer), instead of the gateway's port 443. TLS is never terminated in
+# front of the API.
 apiVersion: v1
 kind: Service
 metadata:

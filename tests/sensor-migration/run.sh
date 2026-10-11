@@ -242,7 +242,7 @@ fi
 if out="$(render -f "$here/api-env-values.yaml")"; then
   fail "api env: retired AGENT_* names must fail the render"
 else
-  expect "api env: message" "api.extraEnv uses retired pre-sensor names" "$out"
+  expect "api env: message" "api.extraEnv uses retired names" "$out"
   expect "api env: names the replacement" "AGENT_KEY_TTL -> SENSOR_KEY_TTL" "$out"
   expect "api env: names every retired key" "AGENT_PUBLIC_API_URL -> SENSOR_PUBLIC_API_URL" "$out"
   reject "api env: never prints values" "24h" "$out"

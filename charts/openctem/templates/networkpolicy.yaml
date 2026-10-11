@@ -94,10 +94,12 @@ spec:
         - port: 8080
           protocol: TCP
     {{- $st := .Values.api.sensorTransport }}
-    {{- if and $st.enabled $st.publicHost }}
-    # Sensor protocol v3 gRPC binding (mutual TLS): from the gateway's layer-4
-    # passthrough, or from anywhere through the dedicated Service. The client
-    # certificate is the access control.
+    {{- if include "openctem.sensorTransportOn" . }}
+    # Sensor protocol v3 gRPC binding (mutual TLS): from the release's pods
+    # (the bundled gateway's layer-4 routing, the API's own self-probe), the
+    # ingress controller (an ssl-passthrough Ingress for publicHost), or from
+    # anywhere through the dedicated Service. The client certificate is the
+    # access control.
     - from:
         {{- if $st.dedicatedService.enabled }}
         - ipBlock:
@@ -108,6 +110,22 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- if and $st.publicHost (has $gwMode (list "ingress" "httpRoute")) }}
+        {{- if or .Values.networkPolicy.ingressControllerNamespaceSelector .Values.networkPolicy.ingressControllerPodSelector }}
+        - {{- if .Values.networkPolicy.ingressControllerNamespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerNamespaceSelector | nindent 14 }}
+          {{- end }}
+          {{- if .Values.networkPolicy.ingressControllerPodSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerPodSelector | nindent 14 }}
+          {{- end }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+        {{- end }}
         {{- end }}
       ports:
         - port: {{ $st.mtls.port }}

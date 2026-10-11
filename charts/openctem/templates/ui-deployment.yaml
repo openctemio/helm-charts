@@ -69,6 +69,14 @@ spec:
             - name: TRUST_PROXY_HEADERS
               value: "true"
             {{- end }}
+            {{- $publicUrl := include "openctem.gatewayPublicUrl" . }}
+            {{- if and $publicUrl (not (has "NEXT_PUBLIC_APP_URL" $uiEnvNames)) }}
+            # The public origin, for the console's Content-Security-Policy
+            # (the API's APP_URL). Without it the policy allows any https:
+            # origin.
+            - name: NEXT_PUBLIC_APP_URL
+              value: {{ $publicUrl | quote }}
+            {{- end }}
             {{- end }}
           {{- with .Values.ui.extraEnv }}
             {{- toYaml . | nindent 12 }}

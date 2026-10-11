@@ -132,6 +132,13 @@ reject "api: no origin without a gateway mode" "CORS_ALLOWED_ORIGINS" "$out"
 out="$(only ui-deployment.yaml "${GW[@]}" --set gateway.mode=caddy)"
 expect "ui: TRUST_PROXY_HEADERS" 'name: TRUST_PROXY_HEADERS
               value: "true"' "$out"
+expect "ui: NEXT_PUBLIC_APP_URL is the public origin" 'name: NEXT_PUBLIC_APP_URL
+              value: "https://ctem.example.com"' "$out"
+out="$(only ui-deployment.yaml "${GW[@]}" --set gateway.mode=caddy \
+  --set 'ui.extraEnv[0].name=NEXT_PUBLIC_APP_URL' --set 'ui.extraEnv[0].value=https://console.example.com')"
+if [ "$(grep -c 'name: NEXT_PUBLIC_APP_URL' <<<"$out")" = 1 ]; then pass "ui: extraEnv NEXT_PUBLIC_APP_URL wins, no duplicate"; else fail "ui: duplicate NEXT_PUBLIC_APP_URL"; fi
+out="$(only ui-deployment.yaml "${DEV[@]}")"
+reject "ui: no origin without a gateway mode" "NEXT_PUBLIC_APP_URL" "$out"
 
 # 4. mode ingress.
 out="$(only gateway-ingress.yaml "${GW[@]}" --set gateway.mode=ingress \

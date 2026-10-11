@@ -631,7 +631,8 @@ ui:
 #        CORS_ALLOWED_ORIGINS and SMTP_BASE_URL = publicUrl (SAML SP URLs derive
 #        from APP_URL; the API checks the WebSocket Origin against
 #        CORS_ALLOWED_ORIGINS). A name you already set in api.extraEnv wins.
-#   UI:  TRUST_PROXY_HEADERS=true (forward the client IP to the API).
+#   UI:  TRUST_PROXY_HEADERS=true (forward the client IP to the API);
+#        NEXT_PUBLIC_APP_URL = publicUrl (the Content-Security-Policy origin).
 # The per-component api.ingress / ui.ingress / *.httpRoute keep working; do not
 # point them at the same host as the gateway.
 gateway:

@@ -221,8 +221,9 @@ Any mode also sets, on the API, `SERVER_TRUSTED_PROXIES` (from
 `gateway.trustedProxies`), and `APP_URL`, `CORS_ALLOWED_ORIGINS`,
 `SMTP_BASE_URL` (from `gateway.publicUrl`, default `https://<host>`; the API
 checks the WebSocket `Origin` against `CORS_ALLOWED_ORIGINS`), and on the UI
-`TRUST_PROXY_HEADERS=true`. A name already in `api.extraEnv` / `ui.extraEnv`
-wins.
+`TRUST_PROXY_HEADERS=true` and `NEXT_PUBLIC_APP_URL` (the same origin, for the
+console's Content-Security-Policy). A name already in `api.extraEnv` /
+`ui.extraEnv` wins.
 
 | Value | Default | Meaning |
 |---|---|---|

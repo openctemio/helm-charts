@@ -70,6 +70,29 @@ helm upgrade --install openctem charts/openctem \
 helm test openctem -n openctem      # smoke-check /health and /
 ```
 
+### Size presets
+
+`values-small.yaml`, `values-medium.yaml` and `values-large.yaml` set resources,
+replica counts, the API's connection pool and `GOMEMLIMIT`, and sensor volume
+sizes for three installation sizes. Layer one over your production values (the
+later file wins):
+
+```bash
+helm upgrade --install openctem charts/openctem -n openctem \
+  -f charts/openctem/values-production.yaml -f charts/openctem/values-medium.yaml
+```
+
+| Preset | Up to | API requests / limits | UI |
+|---|---|---|---|
+| small | 50 users, 10k assets, 3 sensors | 500m, 512Mi / 2, 2Gi | 1 replica |
+| medium | 500 users, 100k assets, 20 sensors | 2, 2Gi / 4, 4Gi | 2-4 (HPA) |
+| large | 5,000 users, 1M assets, 200 sensors | 4, 4Gi / 8, 8Gi | 3-8 (HPA) |
+
+PostgreSQL and Redis are external in production: size them from the
+[sizing guide](https://docs.openctem.io/install/sizing/), which also says which
+figures are measured. A preset sets `api.extraEnv`; Helm replaces lists, so if
+you set your own `api.extraEnv`, copy the preset's two entries into it.
+
 Production checklist (the chart enforces / warns on most of these):
 
 - **Replicas**: run the API with **one** replica. Its schedulers and

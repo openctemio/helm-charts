@@ -41,6 +41,9 @@ check "sensor gRPC on a dedicated Service, NetworkPolicy" --set api.appEnv=devel
   --set networkPolicy.enabled=true
 check "sensor protocol v3 off" --set api.appEnv=development --set api.sensorTransport.mode=off
 check "production values" -f "$chart/values-production.yaml"
+for size in small medium large; do
+  check "production values + $size preset" -f "$chart/values-production.yaml" -f "$chart/values-$size.yaml"
+done
 
 if [[ $fails -gt 0 ]]; then echo "$fails failed"; exit 1; fi
 echo "all kubeconform checks passed"

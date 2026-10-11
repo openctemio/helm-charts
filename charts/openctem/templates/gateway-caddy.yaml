@@ -156,17 +156,19 @@ spec:
               value: "{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}"
             - name: GATEWAY_MAX_BODY_SIZE
               value: {{ $c.maxBodySize | quote }}
-            {{- $st := .Values.api.sensorTransport }}
-            {{- if and $st.enabled $st.gatewayPassthrough }}
-            # Sensor protocol v3 (RFC-059): TLS for the sensor host passes
-            # through at layer 4 to the API's mTLS listener (needs an image
-            # with the layer4 module: gateway.caddy.image).
+            {{- $sg := include "openctem.sensorGateway" . }}
+            {{- if ne $sg "off" }}
+            # Sensor protocol v3 (RFC-059): a TLS connection that offers the
+            # sensor ALPN id{{ if eq $sg "passthrough" }} or names the sensor host{{ end }} passes through at
+            # layer 4 to the API's mTLS listener (gateway.caddy.image.layer4).
             - name: OPENCTEM_SENSOR_GATEWAY
-              value: passthrough
+              value: {{ $sg }}
+            {{- if eq $sg "passthrough" }}
             - name: SENSOR_PUBLIC_HOSTNAME
               value: {{ include "openctem.sensorPublicHostname" . | quote }}
+            {{- end }}
             - name: SENSOR_MTLS_UPSTREAM
-              value: "{{ include "openctem.apiFullname" . }}:{{ $st.mtls.port }}"
+              value: "{{ include "openctem.apiFullname" . }}:{{ .Values.api.sensorTransport.mtls.port }}"
             {{- end }}
             {{- with $c.frontProxies }}
             - name: OPENCTEM_TRUSTED_PROXIES

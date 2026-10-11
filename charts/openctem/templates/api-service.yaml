@@ -19,7 +19,7 @@ spec:
       nodePort: {{ .Values.api.service.nodePort | int }}
       {{- end }}
     {{- $st := .Values.api.sensorTransport }}
-    {{- if and $st.enabled $st.publicHost }}
+    {{- if include "openctem.sensorTransportOn" . }}
     # Sensor protocol v3 gRPC binding (mutual TLS, never terminated in
     # front of the API).
     - port: {{ $st.mtls.port }}

@@ -31,7 +31,8 @@ that does not exist (`tests/versions/check-published.sh`).
 |---|---|---|
 | 0.4.1 | v0.8.0 | `openctemio/api`, `openctemio/ui`, `openctemio/migrations` (Docker Hub, never published) |
 | 0.5.0 – 0.22.0 | v0.9.0 | `ghcr.io/openctemio/openctem-api`, `ghcr.io/openctemio/openctem-web`, `ghcr.io/openctemio/migrations` |
-| 0.22.1 and later | v0.9.1 | same |
+| 0.22.1 | v0.9.1 | same |
+| 0.22.2 and later | v0.9.2 | same |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).

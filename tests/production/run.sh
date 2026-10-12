@@ -32,7 +32,8 @@ refused "external database without credentials" "The external database needs cre
 refused "external Redis without a host" "needs redisConfig.host" -f "$prod" --set redisConfig.host=
 refused "external Redis without a password" "The external Redis needs a password" \
   -f "$prod" --set redisConfig.auth.existingSecret= --set redisConfig.auth.createSecret=true
-refused "values outside the schema" "Additional property gatway is not allowed" -f "$prod" --set gatway.mode=caddy
+# The schema error wording differs between Helm 3 and Helm 4: match the key.
+refused "values outside the schema" "gatway" -f "$prod" --set gatway.mode=caddy
 refused "SMTP_* in api.extraEnv (moved to the admin console)" "Console > System > E-mail" \
   -f "$prod" --set 'api.extraEnv[0].name=SMTP_HOST' --set 'api.extraEnv[0].value=x'
 

@@ -1023,11 +1023,11 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.11.0"
+    tag: "v0.17.0"
     pullPolicy: IfNotPresent
-  # -- REGION reported by the sensor.
+  # -- SENSOR_REGION reported by the sensor.
   region: default
-  # -- Override the API base URL (API_URL). Defaults to the in-cluster API
+  # -- Override the API base URL (SENSOR_API_URL). Defaults to the in-cluster API
   #    service. It must reach the API directly: the sensor refuses redirects.
   apiUrl: ""
   # -- Name the sensor proposes when it pairs (SENSOR_NAME); the
@@ -1042,7 +1042,7 @@ sensor:
   #    public value): the thumbprint of the platform's pairing key; pairing
   #    refuses another key. Empty: not pinned.
   platformKey: ""
-  # -- The sensor's API key (API_KEY), for organizations that allow API-key
+  # -- The sensor's API key (SENSOR_API_KEY), for organizations that allow API-key
   #    sensors. Empty, with no existingSecret (the default): the sensor
   #    pairs. It makes its own key in the state volume and logs a code; an
   #    administrator enters the code under Sensors > Pair a sensor, compares
@@ -1059,7 +1059,7 @@ sensor:
   #    the sensor detects at start and reports on its heartbeat.
   tools: ""
   # -- Renew the sensor API key before it expires and when the platform asks
-  #    (PLATFORM_KEY_AUTORENEW). The renewed key is kept in the state volume
+  #    (SENSOR_KEY_AUTORENEW). The renewed key is kept in the state volume
   #    (/var/lib/openctem/state/sensor-credentials.json), not the Secret: the
   #    renewal retires the key in the Secret. Empty (default): on exactly when
   #    state.persistence.enabled (a renewed key on an emptyDir is lost with

@@ -1023,7 +1023,7 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.11.0"
+    tag: "v0.17.0"
     pullPolicy: IfNotPresent
   # -- SENSOR_REGION reported by the sensor.
   region: default

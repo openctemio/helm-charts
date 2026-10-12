@@ -22,6 +22,17 @@ reject() { # reject <description> <pattern> <output>
   if grep -qF -- "$2" <<<"$3"; then fail "$1 (unexpected: $2)"; else pass "$1"; fi
 }
 
+# The chart's default sensor image tag (sensor.image.tag in values.yaml), so
+# the image checks below follow a default-tag bump.
+sensor_tag="$(awk '
+  /^sensor:/ { in_sensor = 1; next }
+  in_sensor && /^[^[:space:]#]/ { in_sensor = 0 }
+  in_sensor && /^  image:/ { in_image = 1; next }
+  in_image && /^  [^[:space:]#]/ { in_image = 0 }
+  in_sensor && in_image && /^    tag:/ { gsub(/["[:space:]]/, "", $2); print $2; exit }
+' FS=':' "$chart/values.yaml")"
+[[ -n "$sensor_tag" ]] || { echo "FAIL - no sensor.image.tag in $chart/values.yaml"; exit 1; }
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cp -r "$chart" "$tmp/chart"
@@ -62,7 +73,7 @@ D=(--set api.appEnv=development --set sensor.enabled=true --set sensor.apiKey=rd
 out="$(render "${D[@]}")"
 expect "sensor: Deployment" "name: t-openctem-sensor" "$out"
 expect "sensor: component label" "app.kubernetes.io/component: sensor" "$out"
-expect "sensor: image" 'image: "ghcr.io/openctemio/sensor:v0.11.0"' "$out"
+expect "sensor: image" "image: \"ghcr.io/openctemio/sensor:$sensor_tag\"" "$out"
 expect "sensor: drain grace period" "terminationGracePeriodSeconds: 45" "$out"
 expect "sensor: daemon" '"-daemon"' "$out"
 expect "sensor: dispatched commands" '"-enable-commands"' "$out"
@@ -241,7 +252,7 @@ fi
 out="$(render -f "$here/legacy-agent-with-key-values.yaml")"
 expect "legacy: sensor Deployment" "name: t-openctem-sensor" "$out"
 reject "legacy: no agent objects" "app.kubernetes.io/component: agent" "$out"
-expect "legacy: sensor image (frozen agent image dropped)" 'image: "ghcr.io/openctemio/sensor:v0.11.0"' "$out"
+expect "legacy: sensor image (frozen agent image dropped)" "image: \"ghcr.io/openctemio/sensor:$sensor_tag\"" "$out"
 expect "legacy: daemon" '"-daemon"' "$out"
 reject "legacy: no -platform" '"-platform"' "$out"
 reject "legacy: no BOOTSTRAP_TOKEN" "name: BOOTSTRAP_TOKEN" "$out"

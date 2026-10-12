@@ -135,7 +135,9 @@ replace_pod() {
   kubectl -n "$ns" scale "$sensor" --replicas=1 >/dev/null
 }
 # The identity's modes and the content versions' links, read by a pod
-# without fsGroup (it changes nothing).
+# without fsGroup (it changes nothing). The sensor image is distroless (no
+# shell), so the check runs busybox as the sensor's user.
+check_image="public.ecr.aws/docker/library/busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 identity_modes() {
   kubectl -n "$ns" scale "$sensor" --replicas=0 >/dev/null
   kubectl -n "$ns" wait --for=delete pod -l app.kubernetes.io/component=sensor --timeout="${timeout}s" >/dev/null 2>&1 || true
@@ -153,7 +155,7 @@ spec:
     runAsGroup: 999
   containers:
     - name: check
-      image: $(kubectl -n "$ns" get "$sensor" -o jsonpath='{.spec.template.spec.containers[0].image}')
+      image: $check_image
       command: ["/bin/sh", "-c", "stat -c '%a %n' /state/identity /state/identity/*; find /content -type l -exec readlink {} ';' | sed 's/^/link /'"]
       volumeMounts:
         - name: state

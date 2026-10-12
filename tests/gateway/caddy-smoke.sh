@@ -4,8 +4,9 @@
 # capabilities) in Docker, in front of two stub upstreams
 # named like the chart's API and UI Services, and checks the routing over real
 # HTTPS (TLS mode `internal`) and plain HTTP (TLS mode `http`). With the
-# layer4 image (built from openctem api/deploy/gateway/Dockerfile at the
-# UPSTREAM commit, or L4_IMAGE), it checks the sensor ALPN routing
+# layer4 image (the chart's default gateway image; BUILD_L4=1 builds it from
+# openctem api/deploy/gateway/Dockerfile at the UPSTREAM commit, L4_IMAGE
+# names another), it checks the sensor ALPN routing
 # (gateway.caddy.sensorGateway=alpn): a ClientHello offering openctem-sensor/3
 # reaches the API's mTLS port behind a PROXY v2 header, everything else is
 # served as before. SKIP_L4=1 skips that part.
@@ -228,11 +229,17 @@ check "files: /metrics -> 404" " 404" "${r[@]}" "$base/metrics"
 # 4. Sensor gRPC binding by ALPN (layer4 image). A stub stands in for the API's
 #    mTLS listener and logs the first bytes it receives.
 if [ "${SKIP_L4:-}" != 1 ]; then
+  # The chart's default gateway image (published with every OpenCTEM release)
+  # carries the layer4 module. BUILD_L4=1 builds it from openctem
+  # api/deploy/gateway at the UPSTREAM commit instead; L4_IMAGE names another.
   l4="${L4_IMAGE:-}"
-  if [ -z "$l4" ]; then
+  if [ -z "$l4" ] && [ "${BUILD_L4:-}" = 1 ]; then
     commit="$(sed -n 's/^commit=//p' "$chart/files/gateway/UPSTREAM")"
     l4="octem-gw-l4-smoke:$commit"
     docker build -q -t "$l4" "${PLATFORM_REPO:-https://github.com/openctemio/openctem.git}#$commit:api/deploy/gateway" >/dev/null
+  fi
+  if [ -z "$l4" ]; then
+    l4="$(helm template t "$chart" "${common[@]}" -s templates/gateway-caddy.yaml | sed -n 's/^ *image: "\(.*\)"$/\1/p' | head -1)"
   fi
   docker run -d --name "$net-mtls" --network "$net" --network-alias t-openctem-sensor-stub python:3.13-alpine \
     python3 -u -c '

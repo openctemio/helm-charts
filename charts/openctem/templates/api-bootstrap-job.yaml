@@ -8,8 +8,9 @@ api.bootstrapAdmin -> /app/bootstrap-admin (shipped in the API image):
   the console (/admin) with TOTP.
 - optionally (api.bootstrapAdmin.org.*) creates the first ORGANIZATION through
   the normal, audited organization service. Its owner gets a one-time
-  set-password link: emailed when SMTP is configured, otherwise printed once
-  to the Job log.
+  set-password link: emailed when the platform has an SMTP server (admin
+  console, or BOOTSTRAP_SMTP_* in api.bootstrapAdmin.extraEnv), otherwise
+  printed once to the Job log.
 
 It runs as a post-install hook AFTER the migration Job (hook-weight 5 >
 migrations -5). The CLI is idempotent (existing admins are left unchanged, an
@@ -63,6 +64,15 @@ openctem.validateRemovedValues.
       key: {{ include "openctem.dbPasswordSecretKey" . }}
 - name: DB_SSLMODE
   value: {{ include "openctem.databaseSslMode" . | quote }}
+{{- /* bootstrap-admin builds a URL from DB_* without escaping: a password
+     with @ : / ? # broke it. DATABASE_URL wins over DB_*, and lib/pq takes the
+     user and password from PGUSER / PGPASSWORD. */}}
+{{ include "openctem.pgCredentialsEnv" . }}
+- name: DATABASE_URL
+  value: "postgres://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)"
+{{- with include "openctem.dbCaEnv" . }}
+{{ . | trim }}
+{{- end }}
 {{- end }}
 {{- if .Values.api.bootstrapAdmin.enabled }}
 {{- $ba := .Values.api.bootstrapAdmin }}
@@ -120,6 +130,7 @@ spec:
       {{- end }}
       restartPolicy: Never
       serviceAccountName: {{ include "openctem.apiServiceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.api.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -139,6 +150,14 @@ spec:
             {{- end }}
           env:
             {{- include "openctem.bootstrapDbEnv" . | nindent 12 }}
+            # Stores BOOTSTRAP_SMTP_PASSWORD encrypted and reads the platform
+            # SMTP settings to e-mail the owner's link; without it the link is
+            # only printed.
+            - name: APP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.apiEncryptionSecretName" . }}
+                  key: {{ include "openctem.apiEncryptionSecretKey" . }}
             {{- include "openctem.apiTenantCreationModeEnv" . | nindent 12 }}
             {{- with include "openctem.gatewayApiEnv" . }}
             # Gateway (gateway.*): the public origin (APP_URL, SMTP_BASE_URL)
@@ -146,8 +165,12 @@ spec:
             {{- . | nindent 12 }}
             {{- end }}
             {{- if .Values.api.extraEnv }}
-            # api.extraEnv (e.g. SMTP_*), so the owner link can be emailed
+            # api.extraEnv: the API's own settings the tool shares (APP_NAME, ...)
             {{- include "openctem.apiExtraEnv" . | nindent 12 }}
+            {{- end }}
+            {{- with $ba.extraEnv }}
+            # api.bootstrapAdmin.extraEnv (BOOTSTRAP_SMTP_*, ...)
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- if .Values.api.extraEnvFrom }}
           envFrom:
@@ -160,4 +183,16 @@ spec:
             limits:
               cpu: 250m
               memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- with include "openctem.dbCaVolumeMount" . }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- with include "openctem.dbCaVolume" . }}
+        {{- . | trim | nindent 8 }}
+        {{- end }}
 {{- end }}

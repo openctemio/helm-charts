@@ -51,7 +51,8 @@ reject "off: no mTLS port" "sensor-mtls" "$off"
 offgw="$(render --set api.sensorTransport.mode=off "${caddy[@]}" "${l4[@]}")"
 reject "off: the gateway routes no sensors" "name: OPENCTEM_SENSOR_GATEWAY" "$offgw"
 
-stock="$(render "${caddy[@]}")"
+stock_img=(--set gateway.caddy.image.repository=caddy --set gateway.caddy.image.tag=2.11.4-alpine --set gateway.caddy.image.layer4=false)
+stock="$(render "${caddy[@]}" "${stock_img[@]}")"
 reject "stock Caddy image: no layer-4 routing" "name: OPENCTEM_SENSOR_GATEWAY" "$stock"
 reject "stock Caddy image: no PROXY trust" "name: SENSOR_MTLS_TRUSTED_PROXIES" "$stock"
 expect "routing files mounted (all modes)" "path: sensors/alpn.wrappers" "$stock"
@@ -80,7 +81,13 @@ expect "passthrough: API public host" 'name: SENSOR_PUBLIC_HOST
               value: "sensors.example.com:443"' "$pt"
 
 refused "alpn on the stock image" "needs the gateway image with the layer4 module" \
-  "${caddy[@]}" --set gateway.caddy.sensorGateway=alpn
+  "${caddy[@]}" "${stock_img[@]}" --set gateway.caddy.sensorGateway=alpn
+dflt="$(render "${caddy[@]}")"
+expect "default gateway image: the OpenCTEM gateway (layer4)" 'image: "ghcr.io/openctemio/openctem-gateway:' "$dflt"
+expect "default gateway image: sensor ALPN routing on 443" 'name: OPENCTEM_SENSOR_GATEWAY
+              value: alpn' "$dflt"
+plain="$(render "${caddy[@]}" --set gateway.caddy.tls.mode=http --set gateway.caddy.tls.allowPlainHttp=true)"
+reject "default image in tls.mode=http: no ALPN routing" "name: OPENCTEM_SENSOR_GATEWAY" "$plain"
 refused "alpn in tls.mode=http" "needs a TLS mode" "${caddy[@]}" "${l4[@]}" \
   --set gateway.caddy.tls.mode=http --set gateway.caddy.tls.allowPlainHttp=true --set gateway.caddy.sensorGateway=alpn
 refused "passthrough without publicHost" "api.sensorTransport.publicHost is required" \

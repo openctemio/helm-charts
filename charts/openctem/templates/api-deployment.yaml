@@ -4,6 +4,8 @@ kind: Deployment
 {{- $redisSecretChecksumSource := include "openctem.redisSecretChecksumSource" . | trim }}
 {{- include "openctem.apiAttachmentsValidate" . }}
 {{- include "openctem.apiReplicasValidate" . }}
+{{- include "openctem.datastoresValidate" . }}
+{{- $redisCa := include "openctem.redisCaEnabled" . }}
 metadata:
   name: {{ include "openctem.apiFullname" . }}
   labels:
@@ -53,6 +55,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "openctem.apiServiceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.api.serviceAccount.automount }}
       {{- with .Values.api.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -168,12 +171,23 @@ spec:
               value: {{ .Values.api.redis.tlsEnabled | quote }}
             - name: REDIS_TLS_SKIP_VERIFY
               value: {{ .Values.api.redis.tlsSkipVerify | quote }}
+            {{- if $redisCa }}
+            - name: REDIS_TLS_CA_FILE
+              value: /etc/openctem/redis-ca/ca.crt
+            {{- end }}
+            {{- with include "openctem.dbCaEnv" . }}
+{{- . | trim | nindent 12 }}
+{{- end }}
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "openctem.redisPasswordSecretName" . }}
                   key: {{ include "openctem.redisPasswordSecretKey" . }}
             {{- include "openctem.apiTenantCreationModeEnv" . | nindent 12 }}
+            {{- with include "openctem.apiTuningEnv" . }}
+            # Sizing (api.goMemLimit, database.maxOpenConns)
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- with include "openctem.apiSensorReleaseEnv" . }}
             # Sensor release channel (api.sensorReleaseChannel)
             {{- . | nindent 12 }}
@@ -218,10 +232,21 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- $mounts := include "openctem.apiAttachmentsVolumeMount" . }}
-          {{- if or $mounts .Values.api.volumeMounts $v3 }}
           volumeMounts:
+            # The root filesystem is read-only; the API writes temporary files
+            # (feed chunks, uploads in flight) here.
+            - name: tmp
+              mountPath: /tmp
             {{- with $mounts }}
-            {{- . | nindent 12 }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
+            {{- with include "openctem.dbCaVolumeMount" . }}
+{{- . | trim | nindent 12 }}
+{{- end }}
+            {{- if $redisCa }}
+            - name: redis-ca
+              mountPath: /etc/openctem/redis-ca
+              readOnly: true
             {{- end }}
             {{- if $v3 }}
             - name: sensor-ca
@@ -231,12 +256,24 @@ spec:
             {{- with .Values.api.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- end }}
       {{- $vols := include "openctem.apiAttachmentsVolume" . }}
-      {{- if or $vols .Values.api.volumes $v3 }}
       volumes:
+        - name: tmp
+          emptyDir: {}
         {{- with $vols }}
-        {{- . | nindent 8 }}
+        {{- . | trim | nindent 8 }}
+        {{- end }}
+        {{- with include "openctem.dbCaVolume" . }}
+{{- . | trim | nindent 8 }}
+{{- end }}
+        {{- if $redisCa }}
+        - name: redis-ca
+          secret:
+            secretName: {{ .Values.api.redis.ca.existingSecret }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.api.redis.ca.key | default "ca.crt" }}
+                path: ca.crt
         {{- end }}
         {{- if $v3 }}
         - name: sensor-ca
@@ -247,7 +284,6 @@ spec:
         {{- with .Values.api.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- end }}
       {{- with .Values.api.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

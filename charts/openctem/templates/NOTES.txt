@@ -153,7 +153,7 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 - The first organization "{{ .name }}" was created; its owner is {{ .ownerEmail }}.
 {{- end }}{{ end }}
   The temporary passwords are printed ONCE in the Job log{{ if (.Values.api.bootstrapAdmin.org | default dict).name }} (so is the owner's
-  one-time set-password link when SMTP is not configured){{ end }}. The Job is
+  one-time set-password link when the platform has no SMTP server){{ end }}. The Job is
   kept until you delete it:
     kubectl logs -n {{ .Release.Namespace }} job/{{ $job }}
   Store the credentials (break-glass ones offline), then delete the Job:
@@ -162,8 +162,8 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
   authenticator (TOTP) and change the temporary password. Every use of the
   break-glass account alerts the other admins (log field alert=break_glass_sign_in).
 {{- if (.Values.api.bootstrapAdmin.org | default dict).name }}
-  Organization owner: set a password with the link (emailed when SMTP is
-  configured, valid 24h), sign in on /login, then invite users or configure
+  Organization owner: set a password with the link (emailed when the platform
+  has an SMTP server, valid 24h), sign in on /login, then invite users or configure
   SSO for the organization.
 {{- else }}
   Then create the first organization in the admin console (Organizations ->
@@ -179,7 +179,7 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
     kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "openctem.apiFullname" . }} -- /app/bootstrap-admin \
       -email=admin@example.com -backup-email=breakglass@example.com \
       -org-name="Your Org" -org-owner-email=owner@example.com
-  It prints the admins' temporary passwords (and, without SMTP, the owner's
+  It prints the admins' temporary passwords (and, without an SMTP server, the owner's
   set-password link) once. Admins sign in on /login and enroll TOTP at /admin;
   the owner sets a password with the link, then invites users / configures SSO.
 {{- end }}
@@ -187,7 +187,7 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 6. Smoke-test this release
     helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 {{- if .Values.tests.enabled }}
-  (curls the API /health and the UI / from an in-cluster Pod.)
+  (checks the API /health and /ready and the UI /api/health from an in-cluster Pod.)
 {{- else }}
   (disabled: tests.enabled=false)
 {{- end }}
@@ -212,8 +212,8 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 {{- if .Values.networkPolicy.enabled }}
 
 9. NetworkPolicy is ENABLED — default-deny ingress + allowed OpenCTEM flows.
-   Run OpenCTEM in a dedicated namespace (the default-deny selects every pod in
-   the namespace). API egress allowAll={{ .Values.networkPolicy.api.egress.allowAll }}.
+   The default-deny selects this release's pods only; a dedicated namespace is
+   still recommended. API egress allowAll={{ .Values.networkPolicy.api.egress.allowAll }}.
 {{- end }}
 {{- if $sensor.enabled }}
 

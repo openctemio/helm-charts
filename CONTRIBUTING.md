@@ -18,7 +18,8 @@ helm lint charts/openctem -f charts/openctem/values-production.yaml
 helm template charts/openctem --set api.appEnv=development
 ```
 
-and the render tests CI runs, for example `tests/sensor-hardening/run.sh` and
+and the render tests CI runs, for example `tests/production/run.sh`,
+`tests/sensor-hardening/run.sh` and
 `tests/gateway/run.sh` (see `.github/workflows/lint-test.yaml` for the full
 list). `tests/kubeconform/run.sh` validates the renders against the Kubernetes
 schemas ([kubeconform](https://github.com/yannh/kubeconform)), and
@@ -29,11 +30,10 @@ cluster (`kind create cluster --name chart-smoke` first).
 
 - Bump `version` in `Chart.yaml` for any chart change.
 - Keep `appVersion` in sync with the OpenCTEM release when applicable.
-- Document each new value with a `# --` comment in `values.yaml`, then refresh
-  the [values table](charts/openctem/README.md#values) in the chart README
-  (between the `values-table` markers) from helm-docs' `chart.valuesTable`
-  template. Escape `|` in descriptions and replace very long object defaults
-  with "see `values.yaml`".
+- Document each new value with a `# --` comment in `values.yaml` (and its type
+  in `charts/openctem/values.schema.json`), then refresh the
+  [values table](charts/openctem/README.md#values) with
+  `scripts/values-table.sh` (helm-docs; CI runs it with `--check`).
 - Never edit the copies under `charts/openctem/files/gateway/` and
   `charts/openctem/files/monitoring/` by hand: run `scripts/sync-gateway.sh`
   or `scripts/sync-monitoring.sh`.

@@ -11,11 +11,27 @@ description: "OpenCTEM (Continuous Threat Exposure Management) platform: the API
 # a dependency of application charts to inject those utilities and functions into the rendering
 # pipeline. Library charts do not define any templates and therefore cannot be deployed.
 type: application
+home: https://openctem.io
+icon: https://docs.openctem.io/brand/app-icon.svg
+sources:
+  - https://github.com/openctemio/helm-charts
+  - https://github.com/openctemio/openctem
+keywords:
+  - security
+  - ctem
+  - exposure-management
+  - vulnerability-management
+maintainers:
+  - name: OpenCTEM
+    email: info@openctem.io
+    url: https://openctem.io
+annotations:
+  artifacthub.io/license: Apache-2.0
 
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.21.0
+version: 0.22.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to

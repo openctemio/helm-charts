@@ -115,6 +115,25 @@ jobs:
           # files/monitoring/UPSTREAM), the NetworkPolicy opening for Prometheus.
           tests/monitoring/run.sh
 
+      - name: Production posture (render checks)
+        run: |
+          # Fail-fast on what the API refuses at boot in production, read-only
+          # root filesystems, no service account tokens, probes, datastore TLS
+          # trust, credentials outside URLs, presets keeping api.extraEnv.
+          tests/production/run.sh
+
+      - name: Install helm-docs
+        env:
+          HELM_DOCS_VERSION: 1.14.2
+          HELM_DOCS_SHA256: a8cf72ada34fad93285ba2a452b38bdc5bd52cc9a571236244ec31022928d6cc
+        run: |
+          curl -fsSLo /tmp/helm-docs.tar.gz "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz"
+          echo "${HELM_DOCS_SHA256}  /tmp/helm-docs.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/helm-docs.tar.gz -C /usr/local/bin helm-docs
+
+      - name: README values table is current
+        run: scripts/values-table.sh --check
+
       - name: Least-privilege database roles (render checks)
         run: |
           # database.migrator: migration Jobs use the schema owner, the API
@@ -143,11 +162,10 @@ jobs:
       - name: Default image tags are released
         run: |
           # appVersion (API, web and migrations images) must be a released
-          # OpenCTEM tag and sensor.image.tag a released sensor tag. Warning
-          # only while chart 0.5.0+ waits for OpenCTEM v0.9.0; set STRICT=1
-          # once it is tagged (openctemio/openctem RFC-037).
+          # OpenCTEM tag and sensor.image.tag a released sensor tag
+          # (openctemio/openctem RFC-037).
           tests/versions/run.sh
-          tests/versions/check-published.sh
+          STRICT=1 tests/versions/check-published.sh
 
       - name: Install kubeconform
         env:

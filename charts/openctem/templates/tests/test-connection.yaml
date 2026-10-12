@@ -1,6 +1,7 @@
 {{- if .Values.tests.enabled }}
 {{/*
-`helm test <release>` smoke check: curl the API /health and the UI /. Runs as a
+`helm test <release>` smoke check: the API /health and /ready (PostgreSQL and
+Redis reachable) and the UI /api/health. Runs as a
 Helm test hook and is deleted after it succeeds. Uses busybox wget (small,
 pinned) so it works on air-gapped mirrors that copy this one image.
 */}}
@@ -20,6 +21,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   restartPolicy: Never
+  automountServiceAccountToken: false
   securityContext:
     runAsNonRoot: true
     runAsUser: 65534
@@ -43,7 +45,11 @@ spec:
           echo "GET http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}/health"
           wget -q -T {{ .Values.tests.timeoutSeconds }} -O- "http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}/health"
           echo
-          echo "GET http://{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}/"
-          wget -q -T {{ .Values.tests.timeoutSeconds }} --spider "http://{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}/"
-          echo "OK: api /health and ui / both reachable"
+          echo "GET http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}/ready"
+          wget -q -T {{ .Values.tests.timeoutSeconds }} -O- "http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}/ready"
+          echo
+          echo "GET http://{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}/api/health"
+          wget -q -T {{ .Values.tests.timeoutSeconds }} -O- "http://{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}/api/health"
+          echo
+          echo "OK: api /health and /ready, ui /api/health"
 {{- end }}

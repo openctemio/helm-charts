@@ -36,6 +36,15 @@ sensor_tag="$(awk '
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cp -r "$chart" "$tmp/chart"
+# The check below passes a value the chart's schema does not know: allow it
+# in this copy only (the legacy agent: values still go through the schema).
+python3 - "$tmp/chart/values.schema.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+s = json.load(open(p))
+s["properties"]["zzCheckSensorDefaults"] = {"type": "boolean"}
+json.dump(s, open(p, "w"))
+PY
 cat > "$tmp/chart/templates/zz-notes.yaml" <<'EOT'
 apiVersion: v1
 kind: ConfigMap

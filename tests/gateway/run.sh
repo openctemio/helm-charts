@@ -199,7 +199,9 @@ reject "httpRoute: header routing can be turned off" "X-API-Key" "$out"
 # 6. mode caddy, TLS internal (default).
 out="$(only gateway-caddy.yaml "${GW[@]}" --set gateway.mode=caddy)"
 svc="$(awk '/^kind: Service$/,/^---/' <<<"$out")"
-expect "caddy: image pinned" 'image: "caddy:2.11.4-alpine"' "$out"
+expect "caddy: OpenCTEM gateway image at appVersion" "image: \"ghcr.io/openctemio/openctem-gateway:$(sed -n 's/^appVersion: *//p' "$chart/Chart.yaml" | tr -d '"')\"" "$out"
+expect "caddy: unprivileged ports for the non-root user" 'name: net.ipv4.ip_unprivileged_port_start
+          value: "0"' "$out"
 expect "caddy: service LoadBalancer" "type: LoadBalancer" "$svc"
 expect "caddy: service 443" 'name: https
       port: 443

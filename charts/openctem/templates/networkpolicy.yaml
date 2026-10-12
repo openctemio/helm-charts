@@ -1,19 +1,21 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $gwMode := include "openctem.gatewayMode" . }}
 {{/*
-Opt-in NetworkPolicy set. Baseline is default-DENY ingress for every pod in the
-namespace; the policies below re-open only the real OpenCTEM flows:
+Opt-in NetworkPolicy set. Baseline is default-DENY ingress for every pod of
+this release (the bundled datastores included); the policies below re-open
+only the real OpenCTEM flows:
   ingress-controller -> ui:3000, (ui|helm-test) -> api:8080,
   gateway.mode=caddy: anywhere -> gateway:443/80, gateway -> ui:3000/api:8080,
   gateway.mode=ingress|httpRoute: ingress-controller -> api:8080,
   api/migrations -> postgres:5432, api/migrations -> redis:6379,
   api egress (DNS + HTTPS threat-intel / CT feeds).
-Recommendation: run OpenCTEM in a dedicated namespace, since the default-deny
-below selects ALL pods in the namespace.
+The default-deny selects this release's pods only (app.kubernetes.io/instance),
+so other workloads in a shared namespace keep their own policies; a dedicated
+namespace is still recommended.
 */}}
 ---
-# Default-deny all ingress in the namespace (egress is left open unless the API
-# egress policy below narrows it).
+# Default-deny all ingress to this release's pods (egress is left open unless
+# the API egress policy below narrows it).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -21,7 +23,9 @@ metadata:
   labels:
     {{- include "openctem.labels" . | nindent 4 }}
 spec:
-  podSelector: {}
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes:
     - Ingress
 ---
@@ -67,6 +71,17 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "openctem.gatewaySelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 3000
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.tests.enabled }}
+    # The `helm test` Pod (it exists only while the test runs).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: test
       ports:
         - port: 3000
           protocol: TCP

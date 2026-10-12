@@ -7,6 +7,13 @@ fullnameOverride: ""
 # Shared image pull secrets for all components.
 imagePullSecrets: []
 
+global:
+  security:
+    # -- The bundled Bitnami subcharts (evaluation only) refuse images outside
+    # docker.io/bitnami unless this is true; postgresql.image and redis.image
+    # pin bitnamilegacy releases.
+    allowInsecureImages: true
+
 api:
   # Sensor protocol v3 (OpenCTEM RFC-059). The API serves it by itself: the
   # HTTPS binding (/api/v3/sensor, through the normal routing) always, and the
@@ -106,6 +113,12 @@ api:
     tlsEnabled: false
     # -- REDIS_TLS_SKIP_VERIFY — must stay false in production.
     tlsSkipVerify: false
+    # -- CA that signed the Redis server certificate, when it is not publicly
+    # trusted (REDIS_TLS_CA_FILE). A Secret in the release namespace; the chart
+    # mounts it read-only and points REDIS_TLS_CA_FILE at it.
+    ca:
+      existingSecret: ""
+      key: ca.crt
 
   image:
     # -- API image. Published by the openctemio/openctem monorepo from v0.9.0;
@@ -117,7 +130,9 @@ api:
 
   serviceAccount:
     create: true
-    automount: true
+    # -- Mount the service account token. The API never calls the Kubernetes
+    # API, so it is off: a token in the pod is a credential nobody uses.
+    automount: false
     annotations: {}
     name: ""
 
@@ -132,17 +147,23 @@ api:
     fsGroup: 1000
     seccompProfile:
       type: RuntimeDefault
-  # -- Container-level security context. readOnlyRootFilesystem is left OFF: the
-  # API writes local attachment storage under /app/data; enable it only with a
-  # writable volume mounted there.
+  # -- Container-level security context. The root filesystem is read-only: the
+  # API writes only /tmp (an emptyDir: feed chunks, uploads in flight) and,
+  # with api.attachments.storage=local, /app/data (the attachments volume).
   securityContext:
     runAsNonRoot: true
     runAsUser: 1000
     allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
     capabilities:
       drop:
         - ALL
-    # readOnlyRootFilesystem: true
+
+  # -- GOMEMLIMIT for the API (Go's soft memory limit, e.g. "1600MiB"), about
+  # 80% of resources.limits.memory, so the garbage collector works harder
+  # before the kernel OOM-kills the pod. Empty: not set. The size presets set
+  # it. A GOMEMLIMIT entry in api.extraEnv takes precedence.
+  goMemLimit: ""
 
   # -- Who may create organizations (TENANT_CREATION_MODE).
   #    admin_only    — only the platform administrator creates organizations:
@@ -197,10 +218,11 @@ api:
     force: false
     # -- First organization (optional). Set name AND ownerEmail together.
     #    Created through the normal, audited organization service. The owner
-    #    gets a one-time set-password link (valid 24h): emailed when SMTP is
-    #    configured (SMTP_* in api.extraEnv / api.extraEnvFrom; the link base
-    #    is SMTP_BASE_URL, set by gateway.* or api.extraEnv), otherwise
-    #    printed once to the Job log. The owner must not be one of the
+    #    gets a one-time set-password link (valid 24h): emailed when the
+    #    platform has an SMTP server (admin console, System > E-mail, or
+    #    BOOTSTRAP_SMTP_* in api.bootstrapAdmin.extraEnv; the link base is
+    #    SMTP_BASE_URL, set by gateway.* or api.extraEnv), otherwise printed
+    #    once to the Job log. The owner must not be one of the
     #    platform admins (admins cannot be organization members).
     org:
       # -- Organization name, e.g. "Acme Security".
@@ -215,6 +237,12 @@ api:
     #    would print a new log the operator has to find).
     backoffLimit: 0
     activeDeadlineSeconds: 300
+    # -- Extra environment for the bootstrap-admin Job only, for example
+    #    BOOTSTRAP_SMTP_HOST / _PORT / _USER / _PASSWORD / _FROM, the SMTP
+    #    server it stores as the platform e-mail setting when none is stored
+    #    (change it later in the admin console, System > E-mail). Take the
+    #    password from a Secret with valueFrom.secretKeyRef.
+    extraEnv: []
 
   # NOTE: api.bootstrapTenant (the /app/bootstrap-tenant Job) was removed in
   # chart 0.8.0. Use api.bootstrapAdmin.org.* to create the first organization;
@@ -280,14 +308,18 @@ api:
       port: http
     failureThreshold: 30
     periodSeconds: 5
+  # -- /health answers while the process runs; /ready also checks PostgreSQL
+  # and Redis (503 while either is unreachable), so a pod that lost its
+  # datastores leaves the Service without being restarted.
   livenessProbe:
     httpGet:
       path: /health
       port: http
   readinessProbe:
     httpGet:
-      path: /health
+      path: /ready
       port: http
+    timeoutSeconds: 6
 
   autoscaling:
     enabled: false
@@ -464,7 +496,9 @@ ui:
   
   serviceAccount:
     create: true
-    automount: true
+    # -- Mount the service account token (the console never calls the
+    # Kubernetes API).
+    automount: false
     annotations: {}
     name: ""
 
@@ -479,16 +513,19 @@ ui:
     fsGroup: 1001
     seccompProfile:
       type: RuntimeDefault
-  # -- Container-level security context. readOnlyRootFilesystem is left OFF:
-  # Next.js writes to .next/cache at runtime.
+  # -- Container-level security context. The root filesystem is read-only:
+  # Next.js writes only /tmp and /app/.next/cache, both emptyDirs.
   securityContext:
     runAsNonRoot: true
     runAsUser: 1001
     allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
     capabilities:
       drop:
         - ALL
-    # readOnlyRootFilesystem: true
+  # -- Size limit of the /app/.next/cache emptyDir (the image optimizer and
+  # fetch cache).
+  cacheSizeLimit: 256Mi
 
   deploymentStrategy: {}
     # type: RollingUpdate
@@ -544,13 +581,14 @@ ui:
     #   port: http
     # failureThreshold: 30
     # periodSeconds: 5
+  # -- /api/health answers without rendering a page or calling the API.
   livenessProbe:
     httpGet:
-      path: /
+      path: /api/health
       port: http
   readinessProbe:
     httpGet:
-      path: /
+      path: /api/health
       port: http
 
   autoscaling:
@@ -581,10 +619,10 @@ ui:
   #     matchLabels:
   #       app.kubernetes.io/component: ui
 
-  extraEnv:
+  extraEnv: []
   # - name: ENABLE_TOKEN_REFRESH
   #   value: "false"
-  extraEnvFrom:
+  extraEnvFrom: []
   # - configMapRef:
   #     name: openctem-extra-config
   # - secretRef:
@@ -701,13 +739,18 @@ gateway:
   # ---------------------------------------------------------------------------
   caddy:
     image:
-      repository: caddy
-      tag: "2.11.4-alpine"
+      # -- The OpenCTEM gateway image (Caddy plus the caddy-l4 module, built
+      # from openctemio/openctem api/deploy/gateway/Dockerfile and published
+      # with every release). The stock caddy image works too, with
+      # layer4=false (sensors then use the HTTPS binding).
+      repository: ghcr.io/openctemio/openctem-gateway
+      # -- Empty: the chart appVersion.
+      tag: ""
       pullPolicy: IfNotPresent
-      # -- The image carries the layer4 module: built from openctemio/openctem
-      # api/deploy/gateway/Dockerfile (Caddy plus caddy-l4). Needed by
-      # sensorGateway alpn and passthrough, and makes alpn the default.
-      layer4: false
+      # -- The image carries the layer4 module. Needed by sensorGateway alpn
+      # and passthrough, and makes alpn the default (sensor gRPC and the web
+      # share port 443).
+      layer4: true
     # -- OPENCTEM_SENSOR_GATEWAY: how this gateway carries the sensor gRPC
     # binding on its port 443. Empty: `alpn` when image.layer4 is true, else
     # `off`. `alpn`: a TLS connection that offers the sensor ALPN id
@@ -772,11 +815,15 @@ gateway:
       accessModes:
         - ReadWriteOnce
       size: 1Gi
-    # -- Caddy runs as a non-root user. The image's caddy binary carries the
-    # file capability cap_net_bind_service (to bind 443/80), so the container
-    # must keep NET_BIND_SERVICE: with every capability dropped the kernel
-    # refuses to execute it. Dropping ALL and adding back only
-    # NET_BIND_SERVICE is allowed by the "restricted" Pod Security Standard.
+    # -- Caddy runs as a non-root user and binds 443/80. The pod sets the
+    # namespaced sysctl net.ipv4.ip_unprivileged_port_start=0 (a "safe"
+    # sysctl, allowed by every Pod Security Standard), so the OpenCTEM image,
+    # whose binary has no file capability, can bind them on any runtime. The
+    # stock caddy image's binary carries the file capability
+    # cap_net_bind_service, so the container keeps NET_BIND_SERVICE in its
+    # bounding set: with every capability dropped the kernel refuses to
+    # execute it. Dropping ALL and adding back only NET_BIND_SERVICE is
+    # allowed by the "restricted" Pod Security Standard.
     podSecurityContext:
       runAsNonRoot: true
       runAsUser: 1000
@@ -784,6 +831,9 @@ gateway:
       fsGroup: 1000
       seccompProfile:
         type: RuntimeDefault
+      sysctls:
+        - name: net.ipv4.ip_unprivileged_port_start
+          value: "0"
     securityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
@@ -810,6 +860,19 @@ database:
   host: ""
   port: 5432
   name: openctem
+  # -- DB_MAX_OPEN_CONNS (bundled or external database): the API's pool size. Empty: the API
+  # default (25). The size presets set it; keep it below the server's
+  # max_connections. A DB_MAX_OPEN_CONNS entry in api.extraEnv takes
+  # precedence.
+  maxOpenConns: ""
+  tls:
+    # -- CA that signed the PostgreSQL server certificate, for
+    # api.migrations.sslMode verify-ca / verify-full with a private CA. A
+    # Secret in the release namespace; mounted read-only into the API, the
+    # migration and bootstrap Jobs, with PGSSLROOTCERT pointing at it.
+    ca:
+      existingSecret: ""
+      key: ca.crt
   auth:
     # -- Existing secret containing DB_USER and DB_PASSWORD keys.
     existingSecret: ""
@@ -846,6 +909,13 @@ database:
 postgresql:
   # -- Deploy bundled Bitnami PostgreSQL subchart. DEV/EVAL ONLY — see note above.
   enabled: true
+  # -- Pinned: the subchart's own default is the floating `latest` tag, which
+  # moved to PostgreSQL 18. OpenCTEM is tested on PostgreSQL 17 (the version
+  # the Compose stack runs). bitnamilegacy images get no more updates: one
+  # more reason to keep the bundled database to evaluation.
+  image:
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0-debian-12-r4
   auth:
     username: "openctem"
     password: ""
@@ -875,6 +945,10 @@ redis:
   # -- Deploy bundled Bitnami Redis subchart. DEV/EVAL ONLY — see note above.
   enabled: true
   architecture: standalone
+  # -- Pinned for reproducible installs (the subchart's default is `latest`).
+  image:
+    repository: bitnamilegacy/redis
+    tag: 8.2.1-debian-12-r0
   auth:
     enabled: true
     password: ""
@@ -976,10 +1050,10 @@ extraManifests: []
 #     target:
 #       name: openctem-api-secret
 #   data:
-#     - secretKey: DB_USERNAME
+#     - secretKey: DB_USER
 #       remoteRef:
 #         key: openctem-api-secret
-#         property: DB_USERNAME
+#         property: DB_USER
 
 # =============================================================================
 # Bundled sensor (optional, opt-in)

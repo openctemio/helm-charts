@@ -85,6 +85,9 @@ spec:
         {{- end }}
     spec:
       terminationGracePeriodSeconds: {{ $sensor.terminationGracePeriodSeconds | default 45 }}
+      # The sensor runs scanners against untrusted targets and never calls the
+      # Kubernetes API: no service account token in the pod.
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

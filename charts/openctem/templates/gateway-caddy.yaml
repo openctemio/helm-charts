@@ -127,7 +127,7 @@ spec:
       {{- end }}
       containers:
         - name: caddy
-          image: "{{ $c.image.repository }}:{{ $c.image.tag }}"
+          image: "{{ $c.image.repository }}:{{ $c.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ $c.image.pullPolicy }}
           command: ["/bin/sh", "/etc/caddy/entrypoint.sh"]
           {{- with $c.securityContext }}
@@ -191,10 +191,15 @@ spec:
             {{- with $c.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          # Caddy loads its config only once every listener is bound, so the
+          # admin API answering means the public port is served. A TCP probe
+          # of the port instead logs a layer4 "matching connection" error
+          # every period with the sensor ALPN routing.
           readinessProbe:
-            tcpSocket:
-              port: {{ if $plain }}http{{ else }}https{{ end }}
+            exec:
+              command: ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             exec:
               command: ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]

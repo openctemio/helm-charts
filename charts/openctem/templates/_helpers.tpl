@@ -438,9 +438,12 @@ openctem/sensor-{{ .Files.Get "files/seccomp/openctem-sensor.json" | sha256sum |
 {{- end }}
 
 {{/*
-The API's retired settings: the pre-rename AGENT_<X> (renamed SENSOR_<X> in
-RFC-023 §9.5) and SENSOR_TRANSPORT_V3_ENABLED (sensor protocol v3 is
-automatic; api.sensorTransport.mode sets SENSOR_TRANSPORT_V3). The API no longer reads them and refuses to start while one is set, so the
+The API's retired and removed settings (retiredEnv and removedEnv in the
+API's internal/config/config.go): the pre-rename AGENT_<X> (renamed SENSOR_<X>
+in RFC-023 §9.5), SENSOR_TRANSPORT_V3_ENABLED (sensor protocol v3 is
+automatic; api.sensorTransport.mode sets SENSOR_TRANSPORT_V3), the SMTP_*
+server settings (now in the admin console) and knobs that switched nothing.
+The API no longer reads them and refuses to start while one is set, so the
 render fails first, naming the replacement.
 */}}
 {{- define "openctem.apiRetiredEnv" -}}
@@ -455,6 +458,28 @@ AGENT_LB_NETWORK_WEIGHT: SENSOR_LB_NETWORK_WEIGHT
 AGENT_LB_MAX_DISK_THROUGHPUT_MBPS: SENSOR_LB_MAX_DISK_THROUGHPUT_MBPS
 AGENT_LB_MAX_NETWORK_THROUGHPUT_MBPS: SENSOR_LB_MAX_NETWORK_THROUGHPUT_MBPS
 SENSOR_TRANSPORT_V3_ENABLED: api.sensorTransport.mode (auto or off)
+SCOPE_ACTIVE_PROOF: "nothing: a platform administrator sets it in Console > System > Platform scanning"
+APP_DEBUG: "nothing: it switched nothing on (LOG_LEVEL=debug outside production)"
+GRPC_PORT: "nothing: sensors reach protocol v3 on the mTLS listener (api.sensorTransport)"
+LOG_SKIP_HEALTH: "nothing: probe requests are never logged"
+AI_MAX_CONCURRENT_JOBS: "nothing: it limited nothing"
+AUTH_ALLOW_REGISTRATION: "nothing: who may sign up is set in Console > System > Sign-up"
+SMTP_ENABLED: "nothing: the platform SMTP server is set in Console > System > E-mail (BOOTSTRAP_SMTP_* in api.bootstrapAdmin.extraEnv for a headless install)"
+SMTP_HOST: "nothing: the platform SMTP server is set in Console > System > E-mail (BOOTSTRAP_SMTP_* in api.bootstrapAdmin.extraEnv for a headless install)"
+SMTP_PORT: "nothing: see SMTP_HOST"
+SMTP_USER: "nothing: see SMTP_HOST"
+SMTP_PASSWORD: "nothing: see SMTP_HOST"
+SMTP_FROM: "nothing: see SMTP_HOST"
+SMTP_FROM_NAME: "nothing: see SMTP_HOST"
+SMTP_TLS: "nothing: see SMTP_HOST"
+SMTP_SKIP_VERIFY: "nothing: see SMTP_HOST"
+SMTP_TIMEOUT: "nothing: see SMTP_HOST"
+APP_ALLOW_PLAINTEXT_CREDENTIALS: "nothing: credentials are always encrypted"
+CTEM_ENFORCE_COVERAGE_SLO: "nothing: set per organization on the Cycles page"
+AUTH_ACCESS_TOKEN_COOKIE_NAME: "nothing: the session cookie is always auth_token"
+AUTH_REFRESH_TOKEN_COOKIE_NAME: "nothing: the refresh cookie is always refresh_token"
+AUTH_TENANT_COOKIE_NAME: "nothing: the organization cookie is always app_tenant"
+JIRA_WEBHOOK_SECRET: "nothing: each organization rotates its own Jira webhook secret"
 {{- end }}
 
 {{- define "openctem.apiExtraEnv" -}}
@@ -469,7 +494,7 @@ SENSOR_TRANSPORT_V3_ENABLED: api.sensorTransport.mode (auto or off)
 {{- end -}}
 {{- end -}}
 {{- if $bad -}}
-{{- fail (printf "\n\napi.extraEnv uses retired names that the API no longer reads (it refuses to start with them). Replace:\n  - %s\n" (join "\n  - " $bad)) -}}
+{{- fail (printf "\n\napi.extraEnv uses retired names that the API no longer reads (it refuses to start with them). Replace them with:\n  - %s\n" (join "\n  - " $bad)) -}}
 {{- end -}}
 {{- toYaml (.Values.api.extraEnv | default list) -}}
 {{- end }}
@@ -995,10 +1020,12 @@ the image has the layer4 module (gateway.caddy.image.layer4), else off.
 {{- if or (ne (include "openctem.gatewayMode" .) "caddy") (not (include "openctem.sensorTransportOn" .)) -}}
 off
 {{- else -}}
-{{- if eq $sg "" -}}{{- $sg = ternary "alpn" "off" (eq (toString $img.layer4) "true") -}}{{- end -}}
+{{- /* Default: alpn with the layer4 image and a TLS mode (in tls.mode=http
+     the gateway never sees a ClientHello), else off. */}}
+{{- if eq $sg "" -}}{{- $sg = ternary "alpn" "off" (and (eq (toString $img.layer4) "true") (ne (include "openctem.gatewayCaddyTlsMode" .) "http")) -}}{{- end -}}
 {{- if ne $sg "off" -}}
 {{- if ne (toString $img.layer4) "true" -}}
-{{- fail (printf "\n\ngateway.caddy.sensorGateway=%s needs the gateway image with the layer4 module: build it from openctemio/openctem api/deploy/gateway/Dockerfile, set gateway.caddy.image to it and gateway.caddy.image.layer4=true. Without it leave sensorGateway empty: sensors use the HTTPS binding.\n" $sg) -}}
+{{- fail (printf "\n\ngateway.caddy.sensorGateway=%s needs the gateway image with the layer4 module: the default ghcr.io/openctemio/openctem-gateway (gateway.caddy.image.layer4=true), or your own build of openctemio/openctem api/deploy/gateway/Dockerfile. Without it leave sensorGateway empty: sensors use the HTTPS binding.\n" $sg) -}}
 {{- end -}}
 {{- if eq (include "openctem.gatewayCaddyTlsMode" .) "http" -}}
 {{- fail (printf "\n\ngateway.caddy.sensorGateway=%s needs a TLS mode (the gateway must see the TLS ClientHello to route it); gateway.caddy.tls.mode=http cannot. Set sensorGateway=off.\n" $sg) -}}
@@ -1029,4 +1056,130 @@ port), required by gateway.caddy.sensorGateway=passthrough.
 {{/* The sensor CA secret name (existing or chart-made). */}}
 {{- define "openctem.sensorCASecret" -}}
 {{- .Values.api.sensorTransport.mtls.ca.existingSecret | default (printf "%s-sensor-ca" (include "openctem.apiFullname" .)) -}}
+{{- end }}
+
+{{/*
+Datastore TLS trust: the CA of a private PostgreSQL / Redis certificate.
+PGSSLROOTCERT is read by lib/pq (the API, bootstrap-admin and golang-migrate
+all use it), so sslmode verify-ca / verify-full work without a CA bundle in
+the image. REDIS_TLS_CA_FILE is the API's own setting.
+*/}}
+{{- define "openctem.dbCaEnabled" -}}
+{{- if and (not .Values.postgresql.enabled) (dig "tls" "ca" "existingSecret" "" .Values.database) -}}true{{- end -}}
+{{- end }}
+
+{{- define "openctem.redisCaEnabled" -}}
+{{- if and (not .Values.redis.enabled) (dig "ca" "existingSecret" "" .Values.api.redis) -}}true{{- end -}}
+{{- end }}
+
+{{- define "openctem.dbCaEnv" -}}
+{{- if include "openctem.dbCaEnabled" . }}
+- name: PGSSLROOTCERT
+  value: /etc/openctem/db-ca/ca.crt
+{{- end }}
+{{- end }}
+
+{{- define "openctem.dbCaVolumeMount" -}}
+{{- if include "openctem.dbCaEnabled" . }}
+- name: db-ca
+  mountPath: /etc/openctem/db-ca
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "openctem.dbCaVolume" -}}
+{{- if include "openctem.dbCaEnabled" . }}
+- name: db-ca
+  secret:
+    secretName: {{ .Values.database.tls.ca.existingSecret }}
+    defaultMode: 0444
+    items:
+      - key: {{ .Values.database.tls.ca.key | default "ca.crt" }}
+        path: ca.crt
+{{- end }}
+{{- end }}
+
+{{/*
+Libpq-style credentials for the Jobs that connect with a URL (golang-migrate,
+bootstrap-admin): the user and password go in PGUSER / PGPASSWORD, never in
+the URL, so a password with @ : / ? # % or spaces works unescaped. Needs
+DB_USER and DB_PASSWORD defined earlier in the same env list.
+*/}}
+{{- define "openctem.pgCredentialsEnv" -}}
+- name: PGUSER
+  value: "$(DB_USER)"
+- name: PGPASSWORD
+  value: "$(DB_PASSWORD)"
+{{- end }}
+
+{{/*
+The API's sizing knobs (api.goMemLimit, database.maxOpenConns). A name set in
+api.extraEnv wins, so presets layered over a values file never replace that
+file's api.extraEnv list.
+*/}}
+{{- define "openctem.apiTuningEnv" -}}
+{{- $have := include "openctem.apiExtraEnvNames" . | fromJsonArray -}}
+{{- $env := list -}}
+{{- with .Values.api.goMemLimit -}}
+{{- if not (has "GOMEMLIMIT" $have) -}}
+{{- $env = append $env (dict "name" "GOMEMLIMIT" "value" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- with .Values.database.maxOpenConns -}}
+{{- if not (has "DB_MAX_OPEN_CONNS" $have) -}}
+{{- $env = append $env (dict "name" "DB_MAX_OPEN_CONNS" "value" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- if $env -}}
+{{- toYaml $env -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Fail at render time on what the API would refuse at boot, so a broken
+configuration never reaches the cluster:
+- external datastores without a host or credentials;
+- with api.appEnv=production, the API's production checks that only values
+  decide: TLS to PostgreSQL and Redis (the bundled Redis has none), certificate
+  verification and secure cookies.
+*/}}
+{{- define "openctem.datastoresValidate" -}}
+{{- if not .Values.postgresql.enabled -}}
+{{- if not .Values.database.host -}}
+{{- fail "\n\npostgresql.enabled=false needs database.host: the external PostgreSQL server the API connects to.\n" -}}
+{{- end -}}
+{{- if and .Values.database.auth.createSecret (not .Values.database.auth.existingSecret) -}}
+{{- if or (not .Values.database.auth.username) (not .Values.database.auth.password) -}}
+{{- fail "\n\nThe external database needs credentials: database.auth.existingSecret (keys database.auth.userKey / passwordKey, recommended), or database.auth.username and database.auth.password.\n" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not .Values.redis.enabled -}}
+{{- if not .Values.redisConfig.host -}}
+{{- fail "\n\nredis.enabled=false needs redisConfig.host: the external Redis server the API connects to.\n" -}}
+{{- end -}}
+{{- if and .Values.redisConfig.auth.createSecret (not .Values.redisConfig.auth.existingSecret) (not .Values.redisConfig.auth.password) -}}
+{{- fail "\n\nThe external Redis needs a password: redisConfig.auth.existingSecret (key redisConfig.auth.passwordKey, recommended), or redisConfig.auth.password.\n" -}}
+{{- end -}}
+{{- end -}}
+{{- if eq (toString .Values.api.appEnv) "production" -}}
+{{- $bad := list -}}
+{{- if .Values.redis.enabled -}}
+{{- $bad = append $bad "redis.enabled=true: the bundled Redis has no TLS. Use an external Redis with TLS (redis.enabled=false, redisConfig.*)." -}}
+{{- else if not .Values.api.redis.tlsEnabled -}}
+{{- $bad = append $bad "api.redis.tlsEnabled=false: production requires TLS to Redis." -}}
+{{- end -}}
+{{- if .Values.api.redis.tlsSkipVerify -}}
+{{- $bad = append $bad "api.redis.tlsSkipVerify=true: production refuses unverified Redis TLS (set api.redis.ca.existingSecret for a private CA)." -}}
+{{- end -}}
+{{- if eq (include "openctem.databaseSslMode" .) "disable" -}}
+{{- $bad = append $bad "PostgreSQL sslmode is disable (the bundled PostgreSQL, or api.migrations.sslMode=disable): production requires require, verify-ca or verify-full." -}}
+{{- end -}}
+{{- if not .Values.api.auth.cookieSecure -}}
+{{- $bad = append $bad "api.auth.cookieSecure=false: production requires secure cookies (HTTPS)." -}}
+{{- end -}}
+{{- if $bad -}}
+{{- fail (printf "\n\napi.appEnv=production, and the API would refuse to start:\n  - %s\nFix these, or set api.appEnv=development for an evaluation install.\n" (join "\n  - " $bad)) -}}
+{{- end -}}
+{{- end -}}
 {{- end }}

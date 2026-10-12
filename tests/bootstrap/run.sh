@@ -56,7 +56,8 @@ BA=(--set api.bootstrapAdmin.enabled=true --set api.bootstrapAdmin.email=admin@a
 out="$(render "${BA[@]}" --set 'api.bootstrapAdmin.org.name=Acme Security' \
   --set api.bootstrapAdmin.org.ownerEmail=owner@acme.io \
   --set 'api.bootstrapAdmin.org.ownerName=Jo $(DB_PASSWORD)' \
-  --set 'api.extraEnv[0].name=SMTP_HOST' --set 'api.extraEnv[0].value=smtp.acme.io' \
+  --set 'api.extraEnv[0].name=APP_NAME' --set 'api.extraEnv[0].value=acme-ctem' \
+  --set 'api.bootstrapAdmin.extraEnv[0].name=BOOTSTRAP_SMTP_HOST' --set 'api.bootstrapAdmin.extraEnv[0].value=smtp.acme.io' \
   --set 'api.extraEnvFrom[0].secretRef.name=smtp' -s templates/api-bootstrap-job.yaml)"
 expect "job: no shell" 'command: ["/app/bootstrap-admin"]' "$out"
 reject "job: no failure swallowing" "|| echo" "$out"
@@ -70,9 +71,21 @@ expect "job: -org-name with a space" '- "-org-name=Acme Security"' "$out"
 expect "job: -org-owner-email" '- "-org-owner-email=owner@acme.io"' "$out"
 expect "job: \$ escaped for k8s expansion" '- "-org-owner-name=Jo $$(DB_PASSWORD)"' "$out"
 reject "job: no -org-slug when unset" "-org-slug" "$out"
-expect "job: api.extraEnv (SMTP)" "name: SMTP_HOST" "$out"
+expect "job: api.extraEnv" "name: APP_NAME" "$out"
+expect "job: api.bootstrapAdmin.extraEnv (BOOTSTRAP_SMTP_*)" "name: BOOTSTRAP_SMTP_HOST" "$out"
 expect "job: api.extraEnvFrom" "name: smtp" "$out"
 expect "job: TENANT_CREATION_MODE" "name: TENANT_CREATION_MODE" "$out"
+expect "job: APP_ENCRYPTION_KEY (stores and reads the platform SMTP settings)" "name: APP_ENCRYPTION_KEY" "$out"
+expect "job: credentials outside the URL" 'value: "postgres://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)"' "$out"
+expect "job: PGPASSWORD" 'name: PGPASSWORD' "$out"
+expect "job: no service account token" "automountServiceAccountToken: false" "$out"
+expect "job: /tmp writable" "mountPath: /tmp" "$out"
+reject "api: BOOTSTRAP_SMTP_* stay out of the API" "BOOTSTRAP_SMTP" "$(render "${BA[@]}" --set 'api.bootstrapAdmin.extraEnv[0].name=BOOTSTRAP_SMTP_HOST' --set 'api.bootstrapAdmin.extraEnv[0].value=x' -s templates/api-deployment.yaml)"
+
+# 5b. The SMTP server moved to the admin console: SMTP_* in api.extraEnv makes
+#     the API refuse to start, so the render fails first and says where it went.
+must_fail "SMTP_HOST in api.extraEnv fails" "BOOTSTRAP_SMTP_* in api.bootstrapAdmin.extraEnv" \
+  --set 'api.extraEnv[0].name=SMTP_HOST' --set 'api.extraEnv[0].value=smtp.acme.io'
 
 # 6. Admin only, no org: no -org-* flags.
 out="$(render "${BA[@]}" -s templates/api-bootstrap-job.yaml)"

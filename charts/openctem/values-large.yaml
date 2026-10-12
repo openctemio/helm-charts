@@ -1,0 +1,77 @@
+# =============================================================================
+# OpenCTEM: resource preset "large" (up to 5000 users, 1M assets, 200 sensors).
+#
+# Layer it over your production values; the later file wins:
+#   helm upgrade --install openctem openctemio/openctem -n openctem \
+#     -f values-production.yaml -f values-large.yaml
+#
+# Only resources, replica counts, connection pool and volume sizes are set
+# here. The numbers come from the sizing guide (docs.openctem.io/install/sizing),
+# which says which are measured and which are extrapolated. PostgreSQL and
+# Redis are external in production: size them from the same guide.
+#
+# api.extraEnv below replaces an api.extraEnv list from an earlier file
+# (Helm does not merge lists): if you set your own, copy these two entries in.
+# =============================================================================
+
+api:
+  # One API instance (background jobs are not yet coordinated across
+  # instances); give it CPU and memory instead.
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "4"
+      memory: 4Gi
+    limits:
+      cpu: "8"
+      memory: 8Gi
+  extraEnv:
+    # The Go runtime collects garbage before it reaches the container limit.
+    - name: GOMEMLIMIT
+      value: "6800MiB"
+    # Keep below PostgreSQL max_connections minus the migration job and
+    # admin sessions.
+    - name: DB_MAX_OPEN_CONNS
+      value: "80"
+
+ui:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 250m
+      memory: 384Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 8
+
+gateway:
+  caddy:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+# Applies when sensor.enabled is true (a sensor running in this cluster).
+sensor:
+  resources:
+    requests:
+      cpu: "4"
+      memory: 8Gi
+    limits:
+      cpu: "8"
+      memory: 16Gi
+  data:
+    persistence:
+      size: 50Gi
+  content:
+    persistence:
+      size: 20Gi
+  outbox:
+    persistence:
+      size: 10Gi

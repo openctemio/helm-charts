@@ -10,8 +10,8 @@
 # which says which are measured and which are extrapolated. PostgreSQL and
 # Redis are external in production: size them from the same guide.
 #
-# api.extraEnv below replaces an api.extraEnv list from an earlier file
-# (Helm does not merge lists): if you set your own, copy these two entries in.
+# The API's memory limit and connection pool are api.goMemLimit and
+# database.maxOpenConns, so this file never replaces your api.extraEnv list.
 # =============================================================================
 
 api:
@@ -25,14 +25,13 @@ api:
     limits:
       cpu: "2"
       memory: 2Gi
-  extraEnv:
-    # The Go runtime collects garbage before it reaches the container limit.
-    - name: GOMEMLIMIT
-      value: "1600MiB"
-    # Keep below PostgreSQL max_connections minus the migration job and
-    # admin sessions.
-    - name: DB_MAX_OPEN_CONNS
-      value: "25"
+  # The Go runtime collects garbage before it reaches the container limit.
+  goMemLimit: "1600MiB"
+
+database:
+  # Keep below PostgreSQL max_connections minus the migration job and admin
+  # sessions.
+  maxOpenConns: "25"
 
 ui:
   replicaCount: 1

@@ -30,7 +30,8 @@ that does not exist (`tests/versions/check-published.sh`).
 | Chart | appVersion (OpenCTEM) | Default images |
 |---|---|---|
 | 0.4.1 | v0.8.0 | `openctemio/api`, `openctemio/ui`, `openctemio/migrations` (Docker Hub, never published) |
-| 0.5.0 and later | v0.9.0 | `ghcr.io/openctemio/openctem-api`, `ghcr.io/openctemio/openctem-web`, `ghcr.io/openctemio/migrations` |
+| 0.5.0 – 0.22.0 | v0.9.0 | `ghcr.io/openctemio/openctem-api`, `ghcr.io/openctemio/openctem-web`, `ghcr.io/openctemio/migrations` |
+| 0.22.1 and later | v0.9.1 | same |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).
@@ -43,9 +44,11 @@ api.migrations.image.repository=ghcr.io/openctemio/migrations`). Do not point
 chart 0.5.0+ at v0.8.0 images: those charts rename the agent to the sensor,
 which needs the v0.9.0 API.
 
-The database must be PostgreSQL 17: OpenCTEM v0.9.0's migrations stop at
-migration 001483 on PostgreSQL 18, which records NOT NULL constraints the
-migration does not expect. The bundled evaluation database is pinned to 17.
+PostgreSQL 17 or 18 with OpenCTEM v0.9.1 (chart 0.22.1) and later. v0.9.0's
+migrations stop at migration 001483 on PostgreSQL 18 (it records NOT NULL
+constraints that migration did not expect); a database left dirty by that is
+recovered with `migrate force 1481` and `up` on v0.9.1. The bundled evaluation
+database stays pinned to 17.
 
 ## Quick start (dev / eval)
 

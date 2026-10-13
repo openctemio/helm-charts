@@ -159,7 +159,7 @@ mode: daemon
 replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
-  tag: v0.17.0
+  tag: v0.18.0
   pullPolicy: IfNotPresent
 region: default
 apiUrl: ""
@@ -258,7 +258,7 @@ securityContext:
 netRaw: false
 sandbox:
   network: auto
-  seccompProfile: runtime-default
+  seccompProfile: openctem
   installProfile: true
   kubeletRoot: /var/lib/kubelet
   installerImage: ""

@@ -1097,7 +1097,7 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.17.0"
+    tag: "v0.18.0"
     pullPolicy: IfNotPresent
   # -- SENSOR_REGION reported by the sensor.
   region: default
@@ -1342,15 +1342,17 @@ sensor:
     # -- auto: confine when the node allows it, else run unconfined and
     #    report it; required: refuse to run a task unconfined; off: never.
     network: auto
-    # -- runtime-default: the container runtime's seccomp profile, which
-    #    blocks the namespaces confinement needs (tasks then run unconfined
-    #    under auto, and fail under required). openctem: the sensor's own
-    #    profile (the runtime's default plus clone/unshare of new namespaces),
-    #    installed on the nodes by a DaemonSet (installProfile) and used as a
-    #    Localhost profile. The node must also allow unprivileged user
-    #    namespaces (on Ubuntu 23.10+, kernel.apparmor_restrict_unprivileged_userns=0
-    #    or an AppArmor profile that permits them).
-    seccompProfile: runtime-default
+    # -- openctem (default): the sensor's own profile (the runtime's default
+    #    plus clone/unshare of new namespaces), installed on the nodes by a
+    #    DaemonSet (installProfile) and used as a Localhost profile, so each
+    #    task runs network-confined and the sensor can take jobs that need it
+    #    (a web scope). The node must also allow unprivileged user namespaces
+    #    (on Ubuntu 23.10+, kernel.apparmor_restrict_unprivileged_userns=0 or
+    #    an AppArmor profile that permits them). runtime-default: the container
+    #    runtime's seccomp profile, which blocks the namespaces confinement
+    #    needs (tasks then run unconfined under auto, and fail under required);
+    #    use it where a DaemonSet with a hostPath cannot run.
+    seccompProfile: openctem
     # -- With seccompProfile openctem: install the profile with a DaemonSet
     #    (root, no capabilities, read-only root filesystem, writes only the
     #    kubelet's seccomp/openctem directory). false: install it yourself at

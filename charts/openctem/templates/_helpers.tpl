@@ -159,7 +159,7 @@ mode: daemon
 replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
-  tag: v0.17.0
+  tag: v0.18.0
   pullPolicy: IfNotPresent
 region: default
 apiUrl: ""
@@ -258,10 +258,10 @@ securityContext:
 netRaw: false
 sandbox:
   network: auto
-  seccompProfile: runtime-default
+  seccompProfile: openctem
   installProfile: true
   kubeletRoot: /var/lib/kubelet
-  installerImage: ""
+  installerImage: "docker.io/library/busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 writableDirs:
   - /tmp
 writableDirsSizeLimit: ""

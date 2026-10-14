@@ -159,7 +159,7 @@ mode: daemon
 replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
-  tag: v0.20.0
+  tag: v0.21.1
   pullPolicy: IfNotPresent
 region: default
 apiUrl: ""

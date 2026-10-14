@@ -128,10 +128,8 @@ spec:
           imagePullPolicy: {{ $sensor.image.pullPolicy }}
           # The image entrypoint is /usr/local/bin/openctemio-sensor.
           args:
-            # Server-controlled daemon: scans only what the platform
-            # dispatches, with these scanners.
-            - "-daemon"
-            - "-enable-commands"
+            # Sensor v0.21+ runs as the daemon and takes platform commands by
+            # default, and detects the scanners installed in the image.
             {{- with $sensor.tools }}
             - "-tools={{ . }}"
             {{- end }}

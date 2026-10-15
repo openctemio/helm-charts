@@ -140,11 +140,13 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 {{- end }}
 
 5. First login
-- Organization creation: api.tenantCreationMode={{ .Values.api.tenantCreationMode | default "admin_only" }}
-{{- if eq (toString (.Values.api.tenantCreationMode | default "admin_only")) "self_service" }}
-  (any signed-in user may create organizations; meant for SaaS / trial installs).
+- Sign-up: api.signupMode={{ .Values.api.signupMode | default "disabled" }}
+{{- if eq (toString (.Values.api.signupMode | default "disabled")) "open" }}
+  (anyone may sign up and create an organization; meant for the hosted service).
+{{- else if eq (toString (.Values.api.signupMode | default "disabled")) "domain" }}
+  (sign-up only for addresses on an organization's verified domain; only the platform administrator creates organizations).
 {{- else }}
-  (only the platform administrator creates organizations: admin console or bootstrap-admin).
+  (no public sign-up; only the platform administrator creates organizations: admin console or bootstrap-admin).
 {{- end }}
 {{- if .Values.api.bootstrapAdmin.enabled }}
 {{- $job := printf "%s-bootstrap-admin" (include "openctem.apiFullname" .) }}

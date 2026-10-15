@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Render checks for organization creation and the bootstrap-admin Job
-# (api.tenantCreationMode, api.bootstrapAdmin.*, the removed api.bootstrapTenant).
+# (api.signupMode, api.bootstrapAdmin.*, the removed api.bootstrapTenant).
 # Usage: tests/bootstrap/run.sh  (needs helm; dependencies built)
 set -euo pipefail
 
@@ -29,26 +29,32 @@ must_fail() { # must_fail <description> <message pattern> <helm args...>
   fi
 }
 
-# 1. Defaults: admin_only, no bootstrap Job.
+# 1. Defaults: disabled, no bootstrap Job.
 out="$(render)"
 reject "default: no bootstrap Job" "bootstrap-admin" "$out"
 out="$(render -s templates/api-deployment.yaml)"
-expect "default: TENANT_CREATION_MODE on the API" "name: TENANT_CREATION_MODE" "$out"
-expect "default: admin_only" "value: admin_only" "$out"
+expect "default: SIGNUP_MODE on the API" "name: SIGNUP_MODE" "$out"
+expect "default: disabled" "value: disabled" "$out"
+reject "default: no TENANT_CREATION_MODE" "TENANT_CREATION_MODE" "$out"
 
-# 2. self_service opt-in.
-out="$(render --set api.tenantCreationMode=self_service)"
-expect "self_service: rendered" "value: self_service" "$out"
-reject "self_service: no admin_only" "value: admin_only" "$out"
+# 2. open and domain opt-ins.
+out="$(render --set api.signupMode=open -s templates/api-deployment.yaml)"
+expect "open: rendered" "value: open" "$out"
+reject "open: no disabled" "value: disabled" "$out"
+out="$(render --set api.signupMode=domain -s templates/api-deployment.yaml)"
+expect "domain: rendered" "value: domain" "$out"
 
-# 3. Unknown mode fails.
-must_fail "bad mode fails" 'api.tenantCreationMode="open" is not supported' --set api.tenantCreationMode=open
+# 3. Unknown mode and the removed value fail.
+must_fail "bad mode fails" 'api.signupMode="self_service" is not supported' --set api.signupMode=self_service
+must_fail "removed api.tenantCreationMode fails" 'api.tenantCreationMode (TENANT_CREATION_MODE) is removed' --set api.tenantCreationMode=admin_only
+must_fail "TENANT_CREATION_MODE in extraEnv fails" 'set api.signupMode instead' \
+  --set 'api.extraEnv[0].name=TENANT_CREATION_MODE' --set 'api.extraEnv[0].value=self_service'
 
 # 4. api.extraEnv wins, without a duplicate env name.
-out="$(render --set 'api.extraEnv[0].name=TENANT_CREATION_MODE' --set 'api.extraEnv[0].value=self_service' -s templates/api-deployment.yaml)"
-n="$(grep -c 'name: TENANT_CREATION_MODE' <<<"$out" || true)"
-if [ "$n" = "1" ]; then pass "extraEnv override: one TENANT_CREATION_MODE"; else fail "extraEnv override: $n TENANT_CREATION_MODE entries"; fi
-expect "extraEnv override: value kept" "value: self_service" "$out"
+out="$(render --set 'api.extraEnv[0].name=SIGNUP_MODE' --set 'api.extraEnv[0].value=open' -s templates/api-deployment.yaml)"
+n="$(grep -c 'name: SIGNUP_MODE' <<<"$out" || true)"
+if [ "$n" = "1" ]; then pass "extraEnv override: one SIGNUP_MODE"; else fail "extraEnv override: $n SIGNUP_MODE entries"; fi
+expect "extraEnv override: value kept" "value: open" "$out"
 
 # 5. Full bootstrap: admin + backup + first org.
 BA=(--set api.bootstrapAdmin.enabled=true --set api.bootstrapAdmin.email=admin@acme.io
@@ -74,7 +80,7 @@ reject "job: no -org-slug when unset" "-org-slug" "$out"
 expect "job: api.extraEnv" "name: APP_NAME" "$out"
 expect "job: api.bootstrapAdmin.extraEnv (BOOTSTRAP_SMTP_*)" "name: BOOTSTRAP_SMTP_HOST" "$out"
 expect "job: api.extraEnvFrom" "name: smtp" "$out"
-expect "job: TENANT_CREATION_MODE" "name: TENANT_CREATION_MODE" "$out"
+expect "job: SIGNUP_MODE" "name: SIGNUP_MODE" "$out"
 expect "job: APP_ENCRYPTION_KEY (stores and reads the platform SMTP settings)" "name: APP_ENCRYPTION_KEY" "$out"
 expect "job: credentials outside the URL" 'value: "postgres://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)"' "$out"
 expect "job: PGPASSWORD" 'name: PGPASSWORD' "$out"

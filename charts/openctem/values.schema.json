@@ -260,6 +260,9 @@
           "type": "string",
           "pattern": "^$|^[0-9]+(B|KiB|MiB|GiB|TiB)?$"
         },
+        "signupMode": {
+          "type": "string"
+        },
         "tenantCreationMode": {
           "type": "string"
         },

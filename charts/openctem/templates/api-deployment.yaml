@@ -183,7 +183,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.redisPasswordSecretName" . }}
                   key: {{ include "openctem.redisPasswordSecretKey" . }}
-            {{- include "openctem.apiTenantCreationModeEnv" . | nindent 12 }}
+            {{- include "openctem.apiSignupModeEnv" . | nindent 12 }}
             {{- with include "openctem.apiTuningEnv" . }}
             # Sizing (api.goMemLimit, database.maxOpenConns)
             {{- . | nindent 12 }}

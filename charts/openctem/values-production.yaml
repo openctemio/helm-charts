@@ -117,8 +117,9 @@ api:
         matchLabels:
           app.kubernetes.io/component: api
 
-  # Only the platform administrator creates organizations (the default).
-  tenantCreationMode: admin_only
+  # No public sign-up; only the platform administrator creates organizations
+  # (the default).
+  signupMode: disabled
 
   # Give a fresh install its first logins: the platform admin + a break-glass
   # backup (temporary passwords in the Job log), and the first organization,

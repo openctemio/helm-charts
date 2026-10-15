@@ -95,7 +95,7 @@ jobs:
 
       - name: Organization bootstrap (render checks)
         run: |
-          # api.tenantCreationMode, the bootstrap-admin Job (no shell, no
+          # api.signupMode, the bootstrap-admin Job (no shell, no
           # failure swallowing, kept for its one-time credentials, org flags),
           # and the removed api.bootstrapTenant failing with a pointer.
           tests/bootstrap/run.sh

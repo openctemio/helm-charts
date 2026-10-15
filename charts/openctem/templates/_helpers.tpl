@@ -917,19 +917,23 @@ Build checksum source for Redis-related secret refs.
 {{- end }}
 
 {{/*
-TENANT_CREATION_MODE from api.tenantCreationMode (admin_only | self_service).
-The value is validated even when api.extraEnv sets TENANT_CREATION_MODE (the
-extraEnv entry then wins and this one is not rendered, so there is no
-duplicate env name).
+SIGNUP_MODE from api.signupMode (disabled | domain | open). The value is
+validated even when api.extraEnv sets SIGNUP_MODE (the extraEnv entry then
+wins and this one is not rendered, so there is no duplicate env name). The
+removed api.tenantCreationMode, and TENANT_CREATION_MODE in api.extraEnv, fail
+the render with the replacement: the API refuses to start while it is set.
 */}}
-{{- define "openctem.apiTenantCreationModeEnv" -}}
-{{- $mode := toString (.Values.api.tenantCreationMode | default "admin_only") -}}
-{{- if not (has $mode (list "admin_only" "self_service")) -}}
-{{- fail (printf "\n\napi.tenantCreationMode=%q is not supported. Use \"admin_only\" (only the platform administrator creates organizations, the default) or \"self_service\" (any signed-in user may create organizations).\n" $mode) -}}
-{{- end -}}
+{{- define "openctem.apiSignupModeEnv" -}}
 {{- $have := include "openctem.apiExtraEnvNames" . | fromJsonArray -}}
-{{- if not (has "TENANT_CREATION_MODE" $have) -}}
-{{- toYaml (list (dict "name" "TENANT_CREATION_MODE" "value" $mode)) -}}
+{{- if or .Values.api.tenantCreationMode (has "TENANT_CREATION_MODE" $have) -}}
+{{- fail "\n\napi.tenantCreationMode (TENANT_CREATION_MODE) is removed: set api.signupMode instead. admin_only is \"disabled\" (the default), self_service is \"open\".\n" -}}
+{{- end -}}
+{{- $mode := toString (.Values.api.signupMode | default "disabled") -}}
+{{- if not (has $mode (list "disabled" "domain" "open")) -}}
+{{- fail (printf "\n\napi.signupMode=%q is not supported. Use \"disabled\" (no public sign-up, the default), \"domain\" (sign-up for an organization's verified domain) or \"open\" (anyone may sign up).\n" $mode) -}}
+{{- end -}}
+{{- if not (has "SIGNUP_MODE" $have) -}}
+{{- toYaml (list (dict "name" "SIGNUP_MODE" "value" $mode)) -}}
 {{- end -}}
 {{- end }}
 

@@ -37,7 +37,7 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.23.2 | v0.9.4 | same |
 | 0.23.3 | v0.9.5 | same |
 | 0.23.4 | v0.9.6 | same |
-| 0.23.5 and later | v0.9.7 | same |
+| 0.23.5 – 0.24.0 and later | v0.9.7 | same |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).
@@ -143,7 +143,7 @@ Bootstrap the administrators and the first organization in the install itself:
 
 ```yaml
 api:
-  tenantCreationMode: admin_only        # the default
+  signupMode: disabled                  # the default: no public sign-up
   bootstrapAdmin:
     enabled: true
     email: admin@example.com                # platform administrator
@@ -199,7 +199,7 @@ owner link expires in 24h.
 
 | Value | Default | |
 |---|---|---|
-| `api.tenantCreationMode` | `admin_only` | `TENANT_CREATION_MODE`. `admin_only`: only the platform administrator creates organizations (admin console or the bootstrap-admin org flags). `self_service`: any signed-in user may create organizations (SaaS / trial opt-in). Any other value fails the render. A `TENANT_CREATION_MODE` in `api.extraEnv` wins. |
+| `api.signupMode` | `disabled` | `SIGNUP_MODE`, the sign-up ceiling no console change can exceed. `disabled`: no public sign-up; only the platform administrator creates organizations (admin console or the bootstrap-admin org flags). `domain`: sign-up only for addresses on an organization's verified domain, who join that organization. `open`: anyone may sign up and create an organization (hosted service; see "Hosted-service sign-up"). Any other value, and the removed `api.tenantCreationMode`, fail the render. A `SIGNUP_MODE` in `api.extraEnv` wins. |
 | `api.sensorReleaseChannel.latestVersion` | `""` | `SENSOR_LATEST_VERSION`: the newest sensor release. The Sensors page shows "update available" for older sensors and its install commands pin this tag. Empty: `sensor.image.tag`. An entry in `api.extraEnv` wins (`none` turns the comparison off). |
 | `api.sensorReleaseChannel.minVersion` | `""` | `SENSOR_MIN_VERSION`: the oldest supported sensor release. A heartbeating sensor below it shows as degraded. Empty: no minimum. |
 | `api.bootstrapAdmin.enabled` | `false` | Run the post-install bootstrap Job. |
@@ -682,6 +682,38 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Upgrading to 0.24.0 (sign-up ceiling)
+
+- **`api.tenantCreationMode` is removed**, replaced by `api.signupMode`
+  (`SIGNUP_MODE` on the API, which refuses to start while
+  `TENANT_CREATION_MODE` is set). The render fails while
+  `api.tenantCreationMode` or a `TENANT_CREATION_MODE` entry in `api.extraEnv`
+  is set: `admin_only` is `api.signupMode: disabled` (the default, so just
+  delete the line), `self_service` is `api.signupMode: open`.
+- The admin console's sign-up setting can now only keep sign-up at or below
+  `api.signupMode`; existing users, organizations and sessions are unaffected.
+- `SIGNUP_MODE` is read by OpenCTEM releases after v0.9.7. An older API ignores
+  it and keeps public sign-up closed, whatever `api.signupMode` says.
+
+### Hosted-service sign-up
+
+`api.signupMode: open` verifies every self-registered address, so the API
+refuses to start until the platform e-mail is set (`api.bootstrapAdmin` with
+`BOOTSTRAP_SMTP_*` in `api.bootstrapAdmin.extraEnv`, or install once with
+`disabled` and set System → E-mail). In production it also needs Cloudflare
+Turnstile:
+
+```yaml
+api:
+  signupMode: open
+  extraEnv:
+    - name: CAPTCHA_TURNSTILE_SITE_KEY
+      value: "0x4AAAA..."
+  extraEnvFrom:
+    - secretRef:
+        name: openctem-turnstile   # holds CAPTCHA_TURNSTILE_SECRET
+```
+
 ## Upgrading to 0.23.0 (the sensor runs confined by default)
 
 The bundled sensor now runs under its own seccomp profile
@@ -1095,8 +1127,8 @@ description from its `# --` comment (generated with
 | `api.serviceAccount.automount` | bool | `false` | Mount the service account token. The API never calls the Kubernetes API, so it is off: a token in the pod is a credential nobody uses. |
 | `api.serviceAccount.create` | bool | `true` |  |
 | `api.serviceAccount.name` | string | `""` |  |
+| `api.signupMode` | string | `"disabled"` | The API's sign-up ceiling (SIGNUP_MODE); no API or admin console change can exceed it. disabled — no public sign-up: accounts come from the platform administrator, invitations or an organization's SSO, and only the platform administrator creates organizations (admin console, or api.bootstrapAdmin.org). The default, and the right setting for self-hosted and on-prem installs. domain — sign-up only for addresses on an organization's verified domain; those people join that organization (internal portals). open — anyone may sign up and create an organization (hosted service). The API refuses to start without the platform e-mail and, in production, the Turnstile keys (CAPTCHA_TURNSTILE_SITE_KEY in api.extraEnv, CAPTCHA_TURNSTILE_SECRET from a Secret in api.extraEnvFrom). A SIGNUP_MODE entry in api.extraEnv takes precedence. |
 | `api.startupProbe` | object | `{"failureThreshold":30,"httpGet":{"path":"/health","port":"http"},"periodSeconds":5}` | startupProbe is ENABLED by default: first boot can be slow (app init + threat-intel load) and without it a slow start trips livenessProbe and the kubelet kills the pod in a crash loop. failureThreshold*periodSeconds = 30*5 = up to 150s of grace before liveness takes over. Set to {} to disable. |
-| `api.tenantCreationMode` | string | `"admin_only"` | Who may create organizations (TENANT_CREATION_MODE). admin_only — only the platform administrator creates organizations: in the admin console (/admin -> Organizations) or with the bootstrap-admin org flags (api.bootstrapAdmin.org). The default, and the right setting for self-hosted and on-prem installs. self_service — any signed-in user may create organizations (and owns each one). SaaS / trial opt-in only. A TENANT_CREATION_MODE entry in api.extraEnv takes precedence. |
 | `api.tolerations` | list | `[]` |  |
 | `api.topologySpreadConstraints` | list | `[]` | topologySpreadConstraints (values-driven, templated). Keeps the >= 2 replicas off a single node/zone. Empty by default; values-production.yaml ships a soft (ScheduleAnyway) hostname spread. Supports `tpl` for dynamic label values. |
 | `api.volumeMounts` | list | `[]` |  |

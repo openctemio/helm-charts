@@ -35,8 +35,8 @@ release each chart version installs.
 The chart installs no login by default. For the first platform administrator
 (plus a break-glass backup) and the first organization, enable
 `api.bootstrapAdmin` with `api.bootstrapAdmin.org.*`; organizations are
-created by the platform administrator only (`api.tenantCreationMode:
-admin_only`, the default). See
+created by the platform administrator only and public sign-up is off
+(`api.signupMode: disabled`, the default). See
 [First install](charts/openctem/README.md#first-install-platform-admin-and-first-organization)
 for the walkthrough.
 

@@ -165,16 +165,21 @@ api:
   # it. A GOMEMLIMIT entry in api.extraEnv takes precedence.
   goMemLimit: ""
 
-  # -- Who may create organizations (TENANT_CREATION_MODE).
-  #    admin_only    — only the platform administrator creates organizations:
-  #                    in the admin console (/admin -> Organizations) or with
-  #                    the bootstrap-admin org flags (api.bootstrapAdmin.org).
-  #                    The default, and the right setting for self-hosted and
-  #                    on-prem installs.
-  #    self_service  — any signed-in user may create organizations (and owns
-  #                    each one). SaaS / trial opt-in only.
-  #    A TENANT_CREATION_MODE entry in api.extraEnv takes precedence.
-  tenantCreationMode: admin_only
+  # -- The API's sign-up ceiling (SIGNUP_MODE); no API or admin console change can exceed it.
+  #    disabled — no public sign-up: accounts come from the platform
+  #               administrator, invitations or an organization's SSO, and
+  #               only the platform administrator creates organizations (admin
+  #               console, or api.bootstrapAdmin.org). The default, and the
+  #               right setting for self-hosted and on-prem installs.
+  #    domain   — sign-up only for addresses on an organization's verified
+  #               domain; those people join that organization (internal portals).
+  #    open     — anyone may sign up and create an organization (hosted
+  #               service). The API refuses to start without the platform
+  #               e-mail and, in production, the Turnstile keys
+  #               (CAPTCHA_TURNSTILE_SITE_KEY in api.extraEnv, CAPTCHA_TURNSTILE_SECRET
+  #               from a Secret in api.extraEnvFrom).
+  #    A SIGNUP_MODE entry in api.extraEnv takes precedence.
+  signupMode: disabled
 
   # -- The sensor release channel the Sensors page compares each sensor's
   #    version with, and the tag the page's install commands pin.

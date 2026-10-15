@@ -158,7 +158,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.apiEncryptionSecretName" . }}
                   key: {{ include "openctem.apiEncryptionSecretKey" . }}
-            {{- include "openctem.apiTenantCreationModeEnv" . | nindent 12 }}
+            {{- include "openctem.apiSignupModeEnv" . | nindent 12 }}
             {{- with include "openctem.gatewayApiEnv" . }}
             # Gateway (gateway.*): the public origin (APP_URL, SMTP_BASE_URL)
             # used for the owner's set-password link

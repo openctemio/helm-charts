@@ -750,6 +750,42 @@ Secret holding the migrator credentials.
 {{- end }}
 
 {{/*
+True when the console's identity tables use their own role (database.console).
+*/}}
+{{- define "openctem.dbConsoleEnabled" -}}
+{{- if and (not .Values.postgresql.enabled) (or .Values.database.console.username .Values.database.console.existingSecret) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Secret holding the console role's credentials.
+*/}}
+{{- define "openctem.dbConsoleSecretName" -}}
+{{- default (include "openctem.dbCredentialsSecretName" .) .Values.database.console.existingSecret -}}
+{{- end }}
+
+{{/*
+DB_ADMIN_USER / DB_ADMIN_PASSWORD for the API and bootstrap-admin, when
+database.console is set.
+*/}}
+{{- define "openctem.dbConsoleEnv" -}}
+{{- if include "openctem.dbConsoleEnabled" . }}
+{{- if not (include "openctem.dbMigratorEnabled" .) }}
+{{- fail "database.console needs database.migrator (the least-privilege layout)" }}
+{{- end }}
+- name: DB_ADMIN_USER
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openctem.dbConsoleSecretName" . }}
+      key: {{ .Values.database.console.userKey }}
+- name: DB_ADMIN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openctem.dbConsoleSecretName" . }}
+      key: {{ .Values.database.console.passwordKey }}
+{{- end }}
+{{- end }}
+
+{{/*
 DB_USER / DB_PASSWORD env for the migration Jobs: the migrator when the
 least-privilege split is configured, otherwise the API's credentials.
 */}}

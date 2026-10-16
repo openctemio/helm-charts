@@ -506,6 +506,16 @@ then set `database.auth.username=openctem_app` and
 `database.migrator` empty keeps the single-role layout, where migrations use
 `database.auth`. The bundled dev Postgres has one user and ignores it.
 
+Optionally a third role, `openctem_console`, alone writes the platform
+console's identity tables (administrators, console sessions and credentials,
+the platform identity provider); the API's role then only reads
+`admin_users`. Add `-v admin_user=openctem_console -v admin_password="$CONSOLE_PW"`
+to the script above, then set `database.console.username=openctem_console`
+and `database.console.password` (or `database.console.existingSecret` with
+`DB_ADMIN_USER` / `DB_ADMIN_PASSWORD`). The API opens a second small pool as
+it, and the bootstrap Job connects as it. Re-run the script with `admin_user`
+after each upgrade that adds a console table (it is idempotent).
+
 ## Attachment storage
 
 Uploaded attachments and finding evidence (`api.attachments`) live either on a
@@ -1188,6 +1198,8 @@ description from its `# --` comment (generated with
 | `database.auth.passwordKey` | string | `"DB_PASSWORD"` |  |
 | `database.auth.userKey` | string | `"DB_USER"` |  |
 | `database.auth.username` | string | `""` |  |
+| `database.console` | object | see `values.yaml` | The platform console's own role (openctem api/docs/deployment/database-roles.md, "The console role"): when set, the API writes administrators, console sessions and the platform identity provider through a second small pool as this role (DB_ADMIN_USER), and bootstrap-admin connects as it. Run least-privilege-roles.sql with `-v admin_user=... -v admin_password=...` first: it creates the role and takes write on those tables away from the API's role. Needs `migrator`. Empty = the API's role writes them (as before). External databases only. |
+| `database.console.existingSecret` | string | `""` | Existing secret holding the console role's user and password keys. Empty = the database.auth secret (created with these keys when createSecret). |
 | `database.host` | string | `""` | Settings in this section are used only when postgresql.enabled=false. |
 | `database.maxOpenConns` | string | `""` | DB_MAX_OPEN_CONNS (bundled or external database): the API's pool size. Empty: the API default (25). The size presets set it; keep it below the server's max_connections. A DB_MAX_OPEN_CONNS entry in api.extraEnv takes precedence. |
 | `database.migrator` | object | see `values.yaml` | Least-privilege split (openctem api/docs/deployment/database-roles.md): the API cannot change the schema. When `username` (or an existing secret) is set, the migration Jobs connect as this schema owner (openctem_migrator) and only the API keeps `database.auth` above, which should then be the DML-only role (openctem_app). Run the openctem api/deploy/postgres/least-privilege-roles.sql once as the Postgres superuser before the first install. Empty = migrations use database.auth (the old single-role layout). External databases only. |

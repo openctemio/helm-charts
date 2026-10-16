@@ -1020,6 +1020,53 @@ monitoring:
   prometheusNamespaceSelector: {}
   prometheusPodSelector: {}
 
+# -----------------------------------------------------------------------------
+# Platform administration console (OpenCTEM RFC-022 revision 20)
+# -----------------------------------------------------------------------------
+admin:
+  listener:
+    # -- Serve the console API on its own listener in the API pod
+    # (ADMIN_LISTEN_ADDR); the main port then answers 404 for /api/v1/admin.
+    # The UI's console proxy reaches it through the <api>-admin Service.
+    enabled: true
+    # -- Port of the console listener (plain HTTP, cluster-internal only).
+    port: 8081
+    # -- Bind the pod IP (a private address, as the API requires). Set false
+    # for IPv6-only pods: the listener then binds every interface with
+    # ADMIN_LISTEN_ALLOW_ALL_INTERFACES=true; enable networkPolicy so only the
+    # UI pods reach it.
+    bindPodIP: true
+  # -- Client networks that may reach the console (ADMIN_ALLOWED_CIDRS, and
+  # the bundled Caddy's console site). Default: private networks only. Add
+  # your office/VPN range, or 0.0.0.0/0 and ::/0 for an internet-facing console.
+  allowedCidrs:
+    - 127.0.0.0/8
+    - ::1/128
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - fc00::/7
+  # The console's own site on the bundled Caddy (gateway.mode=caddy only).
+  # With it, the UI serves the console only there (OPENCTEM_ADMIN_PLANE=
+  # separate) and the main site answers 404 for /admin and /api/v1/admin.
+  # Other gateway modes keep the console on the main host (shared).
+  site:
+    # -- Turn the console site on (gateway.mode=caddy).
+    enabled: true
+    # -- The console's own DNS name (OPENCTEM_ADMIN_SITE=host, served on the
+    # gateway's port 443 by name). Empty: a second port of gateway.host
+    # (OPENCTEM_ADMIN_SITE=port).
+    host: ""
+    # -- Port of the console site in port mode.
+    port: 8444
+    service:
+      # -- Service for the console port (port mode). ClusterIP keeps it off the
+      # network: kubectl port-forward svc/<release>-gateway-admin 8444, then
+      # https://localhost:8444/admin. LoadBalancer/NodePort publish it (the
+      # allow-list above still applies).
+      type: ClusterIP
+      annotations: {}
+
 networkPolicy:
   # -- Master switch for all NetworkPolicy resources in this chart.
   enabled: false

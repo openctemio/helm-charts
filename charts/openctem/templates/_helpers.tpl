@@ -139,6 +139,20 @@ Call with: (dict "context" . "sensor" $sensor), $sensor = the resolved
 {{- printf "%s-credentials" (include "openctem.sensorFullname" .context) }}
 {{- end }}
 {{- end }}
+{{- /* The Secret holding the shared sensor enrollment token
+       (sensor.enrollment=instance). Takes the resolved sensor dict. */ -}}
+{{- define "openctem.sensorEnrollmentSecretName" -}}
+{{- $ie := .sensor.instanceEnrollment | default dict -}}
+{{- if $ie.existingSecret }}
+{{- $ie.existingSecret }}
+{{- else }}
+{{- printf "%s-enrollment" (include "openctem.sensorFullname" .context) }}
+{{- end }}
+{{- end }}
+{{- define "openctem.sensorEnrollmentSecretKey" -}}
+{{- $ie := .sensor.instanceEnrollment | default dict -}}
+{{- $ie.existingSecretKey | default "token" }}
+{{- end }}
 {{- define "openctem.sensorSecretKey" -}}
 {{- if .sensor.existingSecretKey }}
 {{- .sensor.existingSecretKey }}
@@ -169,6 +183,10 @@ platformKey: ""
 apiKey: ""
 existingSecret: ""
 existingSecretKey: ""
+enrollment: pairing
+instanceEnrollment:
+  existingSecret: ""
+  existingSecretKey: ""
 tools: ""
 keyAutoRenew: ""
 verbose: false

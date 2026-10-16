@@ -903,6 +903,23 @@ database:
     passwordKey: DB_MIGRATE_PASSWORD
     username: ""
     password: ""
+  # -- The platform console's own role (openctem
+  # api/docs/deployment/database-roles.md, "The console role"): when set, the
+  # API writes administrators, console sessions and the platform identity
+  # provider through a second small pool as this role (DB_ADMIN_USER), and
+  # bootstrap-admin connects as it. Run least-privilege-roles.sql with
+  # `-v admin_user=... -v admin_password=...` first: it creates the role and
+  # takes write on those tables away from the API's role. Needs `migrator`.
+  # Empty = the API's role writes them (as before). External databases only.
+  console:
+    # -- Existing secret holding the console role's user and password keys.
+    # Empty = the database.auth secret (created with these keys when
+    # createSecret).
+    existingSecret: ""
+    userKey: DB_ADMIN_USER
+    passwordKey: DB_ADMIN_PASSWORD
+    username: ""
+    password: ""
 
 # =============================================================================
 # Bundled Bitnami PostgreSQL — DEV / EVAL ONLY.

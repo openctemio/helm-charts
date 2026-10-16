@@ -1527,6 +1527,25 @@
         "existingSecretKey": {
           "type": "string"
         },
+        "enrollment": {
+          "type": "string",
+          "enum": [
+            "pairing",
+            "instance"
+          ]
+        },
+        "instanceEnrollment": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
         "tools": {
           "type": "string"
         },

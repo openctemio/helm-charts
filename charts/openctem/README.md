@@ -37,7 +37,7 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.23.2 | v0.9.4 | same |
 | 0.23.3 | v0.9.5 | same |
 | 0.23.4 | v0.9.6 | same |
-| 0.23.5 – 0.24.0 and later | v0.9.7 | same |
+| 0.23.5 – 0.25.0 and later | v0.9.7 | same |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).
@@ -644,6 +644,36 @@ has to be paired again), `outbox/` (results the platform has not accepted
 yet) and `content/` (the scanner cache). Back it up like a credential; the
 `content/` cache can be left out.
 
+### As a shared sensor of the instance (`sensor.enrollment=instance`)
+
+`sensor.enrollment=instance` enrolls the bundled sensor as a **shared
+sensor**: it belongs to the instance, not to an organization, and no one
+approves it. The chart generates a single-use enrollment token (`octe_` and
+49 letters or digits) into the Secret `<release>-openctem-sensor-enrollment`
+and keeps it across upgrades. A post-install/post-upgrade Job
+(`<release>-openctem-api-sensor-enrollment`) registers the token with
+`bootstrap-admin sensor-token -from-env SENSOR_INSTANCE_ENROLLMENT_TOKEN`. The
+API stores only its keyed hash, valid one hour, and the first sensor that
+presents it spends it. The sensor reads the token from the Secret
+(`SENSOR_INSTANCE_ENROLLMENT_TOKEN`), pairs with its own key on first start,
+and ignores the token once its identity is in the data volume. Until the Job
+has run, the sensor's start is refused and the pod restarts.
+
+```bash
+helm upgrade openctem charts/openctem -n openctem -f values.yaml \
+  --set sensor.enabled=true --set sensor.enrollment=instance
+kubectl -n openctem logs deploy/openctem-openctem-sensor   # "Enrolled: shared sensor ..."
+```
+
+A shared sensor takes no organization's jobs until a super administrator
+turns shared sensors on (Console > System > Platform scanning). Until that is
+possible on your version, keep the default `pairing` for a sensor that must
+scan now. Under GitOps, put the token in your own Secret
+(`sensor.instanceEnrollment.existingSecret` / `existingSecretKey`, default key
+`token`). If the token expired before the sensor enrolled, delete the Secret,
+run `helm upgrade` (a new token is generated and registered), then
+`kubectl rollout restart deployment/<release>-openctem-sensor`.
+
 An organization that still allows API-key sensors can use a key instead:
 
 ```bash
@@ -659,6 +689,8 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.name` | empty | `SENSOR_NAME`: the name the sensor proposes when it pairs (the approving administrator may change it). Empty: the Deployment name, `<release>-openctem-sensor`. |
 | `sensor.caFingerprint` / `sensor.platformKey` | empty | Pairing pins from the platform's pairing instructions (public values): `SENSOR_CA_FINGERPRINT`, the SHA-256 of the platform CA the sensor must see in the TLS chain (needs an `https` `sensor.apiUrl` with a host name), and `SENSOR_PLATFORM_KEY`, the thumbprint of the platform's pairing key. |
 | `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | An API key, for an organization that allows API-key sensors. Empty (the default): the sensor pairs. Prefer `existingSecret`. |
+| `sensor.enrollment` | `pairing` | How a sensor without an API key gets its identity: `pairing` (an organization sensor, approved under Sensors > Pair a sensor) or `instance` (a shared sensor of the instance, enrolled with a single-use token the chart generates and a Job registers; see above). `instance` with an API key fails the render. |
+| `sensor.instanceEnrollment.existingSecret` / `.existingSecretKey` | — / `token` | A Secret you manage holding the enrollment token instead of the generated one. |
 | `sensor.tools` | empty | Optional list of the scanners the sensor offers (`-tools`), e.g. `nuclei,httpx`. Empty (recommended): every scanner installed in the image, which the sensor detects at start and reports on its heartbeat. Deprecated from sensor v0.21.0: it only narrows the detected tools and logs a warning; narrow tools with the local policy's `tools.allow` (`sensor.localPolicy`) instead. |
 | `sensor.allowPrivateTargets` | empty | `"1"` sets `SENSOR_ALLOW_PRIVATE_TARGETS=1` (RFC1918 / ULA targets allowed). Empty keeps them blocked. Any other value fails the render: the sensor only recognises `1`. Reaching the in-cluster API needs nothing (the sensor's API client allows the platform's private address). |
 | `sensor.scanRoots` | empty | `SENSOR_SCAN_ROOTS` for dispatched code scans; empty = `/scan`. |
@@ -681,6 +713,23 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.25.0 (bundled sensor as a shared sensor)
+
+- New `sensor.enrollment` (default `pairing`, unchanged behavior) and
+  `sensor.instanceEnrollment.*`. `instance` enrolls the bundled sensor as a
+  shared sensor of the instance with a single-use token the chart generates
+  and a post-install/post-upgrade Job registers. It needs an OpenCTEM release
+  that serves instance enrollment tokens (`bootstrap-admin sensor-token`) and
+  a sensor image with `SENSOR_INSTANCE_ENROLLMENT_TOKEN`.
+- **Existing installs whose bundled sensor is an organization sensor keep it:**
+  nothing changes while `sensor.enrollment` stays `pairing`. Setting
+  `instance` on such a release does not move the sensor either. It keeps the
+  identity in its data volume and ignores the token (the scope of a sensor is
+  fixed when it is created). To make it a shared sensor, retire it in the
+  organization's Sensors page, delete its data volume (or give it a new
+  `sensor.data.persistence.existingClaim`), set `sensor.enrollment=instance`
+  and upgrade: it enrolls afresh as a shared sensor.
 
 ## Upgrading to 0.24.0 (sign-up ceiling)
 
@@ -1228,6 +1277,7 @@ description from its `# --` comment (generated with
 | `sensor.data.persistence.size` | string | `"8Gi"` | The state is tiny; the outbox is capped by sensor.outbox.maxBytes and the content cache takes most of it (the trivy DB ~1.5 GB per version). |
 | `sensor.data.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |
 | `sensor.enabled` | bool | `false` | Enable the bundled co-located sensor. Disabled by default (opt-in). |
+| `sensor.enrollment` | string | `"pairing"` | How a sensor without an API key gets its identity. "pairing" (the default): an organization sensor, approved by an organization administrator under Sensors > Pair a sensor. "instance": a shared sensor of the instance (api RFC-100). The chart generates a single-use enrollment token into a Secret, a post-install/post-upgrade Job registers it with `bootstrap-admin sensor-token` (valid one hour), and the sensor enrolls with it (SENSOR_INSTANCE_ENROLLMENT_TOKEN) on first start, without anyone approving it. A shared sensor takes no organization's jobs until a super administrator turns shared sensors on (Console > System > Platform scanning). A sensor that is already paired keeps its identity (no forced migration); see the README. |
 | `sensor.existingSecret` | string | `""` | Name of a pre-created Secret holding the API key. Takes precedence over apiKey; nothing secret is then rendered by Helm. |
 | `sensor.existingSecretKey` | string | `""` | Key within the secret. Empty: "api-key". |
 | `sensor.extraEnv` | list | `[]` |  |
@@ -1236,6 +1286,8 @@ description from its `# --` comment (generated with
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
 | `sensor.image.tag` | string | `"v0.23.0"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
+| `sensor.instanceEnrollment.existingSecret` | string | `""` | Pre-created Secret holding the token (octe_ and 49 letters or digits) instead of the generated one, for GitOps. |
+| `sensor.instanceEnrollment.existingSecretKey` | string | `""` | Key within the secret. Empty: "token". |
 | `sensor.keyAutoRenew` | string | `""` | Renew the sensor API key before it expires and when the platform asks (SENSOR_KEY_AUTORENEW). The renewed key is kept in the state volume (/var/lib/openctem/state/sensor-credentials.json), not the Secret: the renewal retires the key in the Secret. Empty (default): on exactly when state.persistence.enabled (a renewed key on an emptyDir is lost with the pod, which then starts with the retired key). true / false force it. |
 | `sensor.localPolicy` | object | see `values.yaml` | The sensor-local policy (api RFC-040 §5.7): a read-only file the network owner writes, mounted at /etc/openctem/sensor-policy.yaml. The sensor refuses every job outside it (targets, ports, tools, job types, custom templates, interactsh, rate, kill switch) whatever the platform sends; a policy it cannot load stops it. Off by default so an upgrade keeps today's behavior (the sensor then reports local_policy "absent"); new installs should turn it on and replace the example ranges. Keys: docs/LOCAL_POLICY.md in openctemio/sensor. Needs sensor >= the release that ships the local policy (older images ignore the file). |
 | `sensor.localPolicy.existingConfigMap` | string | `""` | A pre-created ConfigMap holding sensor-policy.yaml (kept out of this release so whoever installs the platform need not own the policy). Takes precedence over policy. |

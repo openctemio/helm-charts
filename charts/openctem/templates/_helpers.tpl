@@ -139,6 +139,20 @@ Call with: (dict "context" . "sensor" $sensor), $sensor = the resolved
 {{- printf "%s-credentials" (include "openctem.sensorFullname" .context) }}
 {{- end }}
 {{- end }}
+{{- /* The Secret holding the shared sensor enrollment token
+       (sensor.enrollment=instance). Takes the resolved sensor dict. */ -}}
+{{- define "openctem.sensorEnrollmentSecretName" -}}
+{{- $ie := .sensor.instanceEnrollment | default dict -}}
+{{- if $ie.existingSecret }}
+{{- $ie.existingSecret }}
+{{- else }}
+{{- printf "%s-enrollment" (include "openctem.sensorFullname" .context) }}
+{{- end }}
+{{- end }}
+{{- define "openctem.sensorEnrollmentSecretKey" -}}
+{{- $ie := .sensor.instanceEnrollment | default dict -}}
+{{- $ie.existingSecretKey | default "token" }}
+{{- end }}
 {{- define "openctem.sensorSecretKey" -}}
 {{- if .sensor.existingSecretKey }}
 {{- .sensor.existingSecretKey }}
@@ -169,6 +183,10 @@ platformKey: ""
 apiKey: ""
 existingSecret: ""
 existingSecretKey: ""
+enrollment: pairing
+instanceEnrollment:
+  existingSecret: ""
+  existingSecretKey: ""
 tools: ""
 keyAutoRenew: ""
 verbose: false
@@ -729,6 +747,42 @@ Secret holding the migrator credentials.
 */}}
 {{- define "openctem.dbMigratorSecretName" -}}
 {{- default (include "openctem.dbCredentialsSecretName" .) .Values.database.migrator.existingSecret -}}
+{{- end }}
+
+{{/*
+True when the console's identity tables use their own role (database.console).
+*/}}
+{{- define "openctem.dbConsoleEnabled" -}}
+{{- if and (not .Values.postgresql.enabled) (or .Values.database.console.username .Values.database.console.existingSecret) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Secret holding the console role's credentials.
+*/}}
+{{- define "openctem.dbConsoleSecretName" -}}
+{{- default (include "openctem.dbCredentialsSecretName" .) .Values.database.console.existingSecret -}}
+{{- end }}
+
+{{/*
+DB_ADMIN_USER / DB_ADMIN_PASSWORD for the API and bootstrap-admin, when
+database.console is set.
+*/}}
+{{- define "openctem.dbConsoleEnv" -}}
+{{- if include "openctem.dbConsoleEnabled" . }}
+{{- if not (include "openctem.dbMigratorEnabled" .) }}
+{{- fail "database.console needs database.migrator (the least-privilege layout)" }}
+{{- end }}
+- name: DB_ADMIN_USER
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openctem.dbConsoleSecretName" . }}
+      key: {{ .Values.database.console.userKey }}
+- name: DB_ADMIN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openctem.dbConsoleSecretName" . }}
+      key: {{ .Values.database.console.passwordKey }}
+{{- end }}
 {{- end }}
 
 {{/*

@@ -14,6 +14,13 @@
 {{- $lp := $sensor.localPolicy | default dict -}}
 {{- /* No API key: the sensor pairs and keeps its identity in the state volume. */ -}}
 {{- $pairing := not (or $sensor.apiKey $sensor.existingSecret) -}}
+{{- $instance := eq ($sensor.enrollment | default "pairing") "instance" -}}
+{{- if not (has ($sensor.enrollment | default "pairing") (list "pairing" "instance")) }}
+{{- fail "\n\nsensor.enrollment must be pairing or instance.\n" }}
+{{- end }}
+{{- if and $instance (not $pairing) }}
+{{- fail "\n\nsensor.enrollment=instance enrolls the sensor with its own key as a shared sensor: leave sensor.apiKey and sensor.existingSecret empty.\n" }}
+{{- end }}
 {{- if and $pairing $split (not $statePersist.enabled) }}
 {{- fail "\n\nThe sensor pairs (no sensor.apiKey or sensor.existingSecret), so its identity must survive the pod: set sensor.state.persistence.enabled=true (the default), or give it an API key.\n" }}
 {{- end }}
@@ -151,6 +158,16 @@ spec:
             # Sensors > Pair a sensor; then it signs every request.
             - name: SENSOR_NAME
               value: {{ $sensor.name | default (include "openctem.sensorFullname" .) | quote }}
+            {{- if $instance }}
+            # sensor.enrollment=instance: a single-use token the
+            # sensor-enrollment Job registered; the sensor enrolls as a shared
+            # sensor on first start and ignores it once it has an identity.
+            - name: SENSOR_INSTANCE_ENROLLMENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.sensorEnrollmentSecretName" (dict "context" . "sensor" $sensor) }}
+                  key: {{ include "openctem.sensorEnrollmentSecretKey" (dict "sensor" $sensor) }}
+            {{- end }}
             {{- else }}
             {{- with $sensor.name }}
             - name: SENSOR_NAME

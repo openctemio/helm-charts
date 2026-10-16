@@ -210,6 +210,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.redisPasswordSecretName" . }}
                   key: {{ include "openctem.redisPasswordSecretKey" . }}
+            {{- with include "openctem.dbConsoleEnv" . }}
+            # The console's identity tables through their own role (database.console)
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- include "openctem.apiSignupModeEnv" . | nindent 12 }}
             {{- with include "openctem.apiTuningEnv" . }}
             # Sizing (api.goMemLimit, database.maxOpenConns)

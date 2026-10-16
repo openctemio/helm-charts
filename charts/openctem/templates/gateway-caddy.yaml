@@ -145,6 +145,11 @@ spec:
               containerPort: 80
               protocol: TCP
             {{- end }}
+            {{- if and (include "openctem.adminSiteOn" .) (not .Values.admin.site.host) }}
+            - name: admin
+              containerPort: {{ .Values.admin.site.port }}
+              protocol: TCP
+            {{- end }}
           env:
             - name: OPENCTEM_TLS_MODE
               value: {{ $tlsMode | quote }}
@@ -188,6 +193,19 @@ spec:
             {{- end }}
             - name: OPENCTEM_ALLOW_PLAIN_HTTP
               value: {{ $c.tls.allowPlainHttp | toString | quote }}
+            {{- if include "openctem.adminSiteOn" . }}
+            # The platform console's own site, private networks only by default.
+            - name: OPENCTEM_ADMIN_SITE
+              value: {{ ternary "host" "port" (ne .Values.admin.site.host "") | quote }}
+            {{- with .Values.admin.site.host }}
+            - name: OPENCTEM_ADMIN_HOST
+              value: {{ . | quote }}
+            {{- end }}
+            - name: OPENCTEM_ADMIN_PORT
+              value: {{ .Values.admin.site.port | quote }}
+            - name: OPENCTEM_ADMIN_ALLOWED_CIDRS
+              value: {{ include "openctem.adminAllowedCidrs" . | quote }}
+            {{- end }}
             {{- with $c.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -242,6 +260,10 @@ spec:
               {{- range $path, $_ := .Files.Glob "files/gateway/sensors/*" }}
               - key: sensors-{{ base $path }}
                 path: sensors/{{ base $path }}
+              {{- end }}
+              {{- range $path, $_ := .Files.Glob "files/gateway/admin/*" }}
+              - key: admin-{{ base $path }}
+                path: admin/{{ base $path }}
               {{- end }}
         - name: data
           {{- if $c.persistence.enabled }}

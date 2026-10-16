@@ -72,6 +72,13 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            {{- if .Values.admin.listener.enabled }}
+            # The platform console API (ADMIN_LISTEN_ADDR): the <api>-admin
+            # Service, for the UI's console proxy only.
+            - name: admin
+              containerPort: {{ .Values.admin.listener.port }}
+              protocol: TCP
+            {{- end }}
             {{- $st := .Values.api.sensorTransport }}
             {{- $v3 := include "openctem.sensorTransportOn" . }}
             {{- if $v3 }}
@@ -113,6 +120,26 @@ spec:
               value: "0.0.0.0"
             - name: SERVER_PORT
               value: "8080"
+            {{- if .Values.admin.listener.enabled }}
+            # The console API on its own listener; the main port answers 404
+            # for /api/v1/admin. The pod IP is a private address, which the
+            # API requires for this plain-HTTP listener.
+            {{- if .Values.admin.listener.bindPodIP }}
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: ADMIN_LISTEN_ADDR
+              value: "$(POD_IP):{{ .Values.admin.listener.port }}"
+            {{- else }}
+            - name: ADMIN_LISTEN_ADDR
+              value: ":{{ .Values.admin.listener.port }}"
+            - name: ADMIN_LISTEN_ALLOW_ALL_INTERFACES
+              value: "true"
+            {{- end }}
+            {{- end }}
+            - name: ADMIN_ALLOWED_CIDRS
+              value: {{ include "openctem.adminAllowedCidrs" . | quote }}
             - name: APP_NAME
               value: {{ include "openctem.name" . }}
             # -- APP_ENV=production (the default) turns validateProduction() into

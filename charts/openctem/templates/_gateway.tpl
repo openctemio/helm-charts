@@ -65,6 +65,20 @@ modes-{{ base $path }}: |-
 sensors-{{ base $path }}: |-
 {{ $.Files.Get $path | indent 2 }}
 {{- end }}
+{{- range $path, $_ := .Files.Glob "files/gateway/admin/*" }}
+admin-{{ base $path }}: |-
+{{ $.Files.Get $path | indent 2 }}
+{{- end }}
+{{- end }}
+
+{{/* "true" when the bundled Caddy serves the platform console's own site. */}}
+{{- define "openctem.adminSiteOn" -}}
+{{- if and (eq (include "openctem.gatewayMode" .) "caddy") .Values.admin.site.enabled -}}true{{- end -}}
+{{- end }}
+
+{{/* The console allow-list, space-separated. */}}
+{{- define "openctem.adminAllowedCidrs" -}}
+{{- join " " .Values.admin.allowedCidrs -}}
 {{- end }}
 
 {{/* The gateway mode, validated. Empty string when the gateway is off. */}}

@@ -313,6 +313,41 @@ apinp="$(awk '/name: t-openctem-api-allow-ingress/,/^---/' <<<"$out")"
 expect "netpol ingress: controller -> api:8080" "kubernetes.io/metadata.name: ingress-nginx" "$apinp"
 reject "netpol ingress: no gateway policy" "t-openctem-gateway-allow-ingress" "$out"
 
+
+# The platform console: its own API listener, and its own site on the bundled
+# Caddy (private networks only), the UI serving it only there.
+CAD=("${GW[@]}" --set gateway.mode=caddy)
+out="$(render "${CAD[@]}")"
+expect "console: API listener on the pod IP" 'value: "$(POD_IP):8081"' "$out"
+expect "console: API allow-list" 'value: "127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7"' "$out"
+expect "console: <api>-admin Service" "name: t-openctem-api-admin" "$out"
+expect "console: UI talks to the console listener" 'value: "http://t-openctem-api-admin:8081"' "$out"
+expect "console: UI serves the console only on its site" "name: OPENCTEM_ADMIN_PLANE
+              value: separate" "$out"
+expect "console: gateway console site (port mode)" 'name: OPENCTEM_ADMIN_SITE
+              value: "port"' "$out"
+expect "console: gateway console port" "containerPort: 8444" "$out"
+expect "console: console Service is ClusterIP" "name: t-openctem-gateway-admin" "$out"
+expect "console: admin site files mounted" "path: admin/on.site" "$out"
+gwadm="$(awk '/name: t-openctem-gateway-admin$/,/^---/' <<<"$out")"
+expect "console: console Service ClusterIP" "type: ClusterIP" "$gwadm"
+out="$(render "${CAD[@]}" --set admin.site.host=admin.ctem.example.com)"
+expect "console: host mode" 'name: OPENCTEM_ADMIN_SITE
+              value: "host"' "$out"
+reject "console: host mode has no console port Service" "name: t-openctem-gateway-admin" "$out"
+out="$(render "${GW[@]}" --set gateway.mode=ingress)"
+reject "console: no console site without the bundled Caddy" "OPENCTEM_ADMIN_PLANE" "$out"
+expect "console: listener on in every gateway mode" "name: t-openctem-api-admin" "$out"
+out="$(render "${CAD[@]}" --set admin.listener.bindPodIP=false)"
+expect "console: IPv6 pods bind every interface explicitly" 'name: ADMIN_LISTEN_ALLOW_ALL_INTERFACES
+              value: "true"' "$out"
+out="$(render "${CAD[@]}" --set admin.listener.enabled=false --set admin.site.enabled=false)"
+reject "console: everything off" "ADMIN_LISTEN_ADDR" "$out"
+out="$(only networkpolicy.yaml "${CAD[@]}" --set networkPolicy.enabled=true)"
+apinp="$(awk '/name: t-openctem-api-allow-ingress/,/^---/' <<<"$out")"
+expect "netpol: console listener from the UI pods only" "- port: 8081" "$apinp"
+refuse "console: allow-list entries are CIDRs" "allowedCidrs" "${CAD[@]}" --set 'admin.allowedCidrs={office}'
+
 echo
 if [ "$fails" -gt 0 ]; then
   echo "$fails check(s) failed"

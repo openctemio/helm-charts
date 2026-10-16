@@ -682,6 +682,34 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Upgrading to 0.25.0 (the platform console as its own plane)
+
+The platform administration console moves off the public surface:
+
+- **`admin.listener`** (on by default): the API serves the console API only on
+  its own listener in the pod (`ADMIN_LISTEN_ADDR`, the pod IP and port 8081,
+  plain HTTP inside the cluster) behind the `<release>-openctem-api-admin`
+  Service; the main port answers 404 for `/api/v1/admin`. The UI's console
+  proxy talks to it (`ADMIN_API_URL`). With `networkPolicy.enabled`, only the UI
+  pods reach that port. IPv6-only pods: `admin.listener.bindPodIP=false`.
+- **`admin.allowedCidrs`**: the client networks that may reach the console
+  (`ADMIN_ALLOWED_CIDRS`; default private networks only). Add your office or
+  VPN range, or `0.0.0.0/0` and `::/0` for an internet-facing console.
+- **`admin.site`** (gateway.mode=caddy only, on by default): the bundled Caddy
+  serves the console on its own site, on a second port of `gateway.host`
+  (`admin.site.port`, 8444) behind the ClusterIP Service
+  `<release>-openctem-gateway-admin` (reach it with
+  `kubectl port-forward svc/<release>-openctem-gateway-admin 8444`, then
+  `https://localhost:8444/admin`), or on its own DNS name
+  (`admin.site.host`, served on port 443 by name: the browser then isolates it
+  from the main site entirely). The UI then serves the console only there and
+  the main site answers 404 for `/admin` and `/api/v1/admin`. Other gateway
+  modes keep the console on the main host.
+
+Administrators sign in again on the console's own sign-in page (email,
+password, then the authenticator code). To keep the old layout:
+`admin.listener.enabled=false` and `admin.site.enabled=false`.
+
 ## Upgrading to 0.24.0 (sign-up ceiling)
 
 - **`api.tenantCreationMode` is removed**, replaced by `api.signupMode`
@@ -1025,6 +1053,15 @@ description from its `# --` comment (generated with
 <!-- values-table:start -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `admin` | object | see `values.yaml` | --------------------------------------------------------------------------- |
+| `admin.allowedCidrs` | list | `["127.0.0.0/8","::1/128","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","fc00::/7"]` | Client networks that may reach the console (ADMIN_ALLOWED_CIDRS, and the bundled Caddy's console site). Default: private networks only. Add your office/VPN range, or 0.0.0.0/0 and ::/0 for an internet-facing console. |
+| `admin.listener.bindPodIP` | bool | `true` | Bind the pod IP (a private address, as the API requires). Set false for IPv6-only pods: the listener then binds every interface with ADMIN_LISTEN_ALLOW_ALL_INTERFACES=true; enable networkPolicy so only the UI pods reach it. |
+| `admin.listener.enabled` | bool | `true` | Serve the console API on its own listener in the API pod (ADMIN_LISTEN_ADDR); the main port then answers 404 for /api/v1/admin. The UI's console proxy reaches it through the <api>-admin Service. |
+| `admin.listener.port` | int | `8081` | Port of the console listener (plain HTTP, cluster-internal only). |
+| `admin.site.enabled` | bool | `true` | Turn the console site on (gateway.mode=caddy). |
+| `admin.site.host` | string | `""` | The console's own DNS name (OPENCTEM_ADMIN_SITE=host, served on the gateway's port 443 by name). Empty: a second port of gateway.host (OPENCTEM_ADMIN_SITE=port). |
+| `admin.site.port` | int | `8444` | Port of the console site in port mode. |
+| `admin.site.service.type` | string | `"ClusterIP"` | Service for the console port (port mode). ClusterIP keeps it off the network: kubectl port-forward svc/<release>-gateway-admin 8444, then https://localhost:8444/admin. LoadBalancer/NodePort publish it (the allow-list above still applies). |
 | `api.affinity` | object | `{}` | Pod affinity/anti-affinity. For HA, spread replicas across nodes. See topologySpreadConstraints below for a lighter-weight alternative; use one or the other. Example soft anti-affinity is in values-production.yaml. |
 | `api.allowMultipleReplicas` | bool | `false` | Opt in to more than one API replica. Only set this once the deployed API version documents multi-replica support. |
 | `api.appEnv` | string | `"production"` | Application environment. "production" (the secure default) turns validateProduction() into a HARD BOOT GATE: it requires DB TLS, Redis TLS + a >=32-char Redis password, a >=64-char JWT secret, an encryption key, and secure cookies — the API refuses to start otherwise. Set to "development" or "staging" ONLY as a conscious opt-out (e.g. to run the bundled, non-TLS Redis for a demo). See values-production.yaml for the required prod values. |

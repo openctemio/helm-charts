@@ -144,8 +144,13 @@ routes() { # routes <base url> <curl args...>
     check "$p -> api" "api " "$@" "$u$p"
   done
   # Browser planes reach the API only by credential, never by path.
-  for p in /api/v1/platform/x /api/v1/validation/coverage /api/v1/admin/tenants /api/v1/me/permissions; do
+  for p in /api/v1/platform/x /api/v1/validation/coverage /api/v1/me/permissions; do
     check "$p (no credential) -> ui" "ui " "$@" "$u$p"
+  done
+  # The platform console has its own site (admin.site, port 8444): the main
+  # site has no console, neither its pages nor its API.
+  for p in /admin /admin/x /api/v1/admin /api/v1/admin/tenants; do
+    check "$p (console is on its own site) -> 404" " 404" "$@" "$u$p"
   done
   for p in /metrics /metrics/x /ready /ready/x /debug/pprof/; do
     check "$p -> 404" " 404" "$@" "$u$p"
@@ -165,7 +170,7 @@ common=(--set api.appEnv=development --set gateway.mode=caddy --set gateway.host
 # 1. TLS mode internal (the default): HTTPS on 443 only.
 d="$tmp/internal"; mkdir -p "$d"
 extract "$d" "${common[@]}"
-if [ "$(cat "$d/ports")" = "443" ]; then pass "internal: container port 443 only"; else fail "internal: ports $(cat "$d/ports")"; fi
+if [ "$(tr \\n " " < "$d/ports")" = "443 8444 " ]; then pass "internal: container ports 443 and the console site 8444"; else fail "internal: ports $(cat "$d/ports")"; fi
 start_gateway "$d" 443
 ca="$tmp/root.crt"
 for _ in $(seq 1 30); do
@@ -203,7 +208,7 @@ if docker exec "$net-gw" id -u | grep -qx 1000; then pass "internal: runs as uid
 # 2. TLS mode http (behind a TLS proxy): port 80 only.
 d="$tmp/http"; mkdir -p "$d"
 extract "$d" "${common[@]}" --set gateway.caddy.tls.mode=http --set gateway.caddy.tls.allowPlainHttp=true
-if [ "$(cat "$d/ports")" = "80" ]; then pass "http: container port 80 only"; else fail "http: ports $(cat "$d/ports")"; fi
+if [ "$(tr \\n " " < "$d/ports")" = "80 8444 " ]; then pass "http: container ports 80 and the console site 8444"; else fail "http: ports $(cat "$d/ports")"; fi
 start_gateway "$d" 80
 base="http://127.0.0.1:$hostport"
 wait_up "$base/" && pass "http: up" || fail "http: did not come up"

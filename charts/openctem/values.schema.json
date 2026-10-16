@@ -1283,6 +1283,27 @@
             }
           },
           "additionalProperties": true
+        },
+        "console": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "userKey": {
+              "type": "string"
+            },
+            "passwordKey": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true
@@ -1526,6 +1547,25 @@
         },
         "existingSecretKey": {
           "type": "string"
+        },
+        "enrollment": {
+          "type": "string",
+          "enum": [
+            "pairing",
+            "instance"
+          ]
+        },
+        "instanceEnrollment": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         },
         "tools": {
           "type": "string"

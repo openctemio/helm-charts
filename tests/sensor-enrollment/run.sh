@@ -68,7 +68,7 @@ must_fail "instance with an API key" "leave sensor.apiKey and sensor.existingSec
   --set sensor.enrollment=instance --set sensor.apiKey=octs_x
 must_fail "instance with an API key Secret" "leave sensor.apiKey and sensor.existingSecret empty" \
   --set sensor.enrollment=instance --set sensor.existingSecret=k
-must_fail "unknown enrollment" "sensor.enrollment" --set sensor.enrollment=bogus
+must_fail "unknown enrollment" "enrollment" --set sensor.enrollment=bogus
 must_fail "instance without a persistent identity" "identity must survive the pod" \
   --set sensor.enrollment=instance --set sensor.data.persistence.enabled=false
 

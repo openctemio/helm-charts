@@ -1,0 +1,25 @@
+{{- if and (include "openctem.adminSiteOn" .) (not .Values.admin.site.host) }}
+{{- $s := .Values.admin.site.service }}
+# The platform console's own site (port mode): its own Service, ClusterIP by
+# default, so the console is not on the network unless chosen
+# (kubectl port-forward svc/{{ include "openctem.gatewayFullname" . }}-admin {{ .Values.admin.site.port }}).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openctem.gatewayFullname" . }}-admin
+  labels:
+    {{- include "openctem.gatewayLabels" . | nindent 4 }}
+  {{- with $s.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $s.type }}
+  ports:
+    - name: admin
+      port: {{ .Values.admin.site.port }}
+      targetPort: admin
+      protocol: TCP
+  selector:
+    {{- include "openctem.gatewaySelectorLabels" . | nindent 4 }}
+{{- end }}

@@ -34,6 +34,11 @@
 # mode is a pair of small files under modes/. Environment placeholders
 # {$NAME:default} are substituted when the file is read.
 #
+# Platform console (RFC-022 revision 20): OPENCTEM_ADMIN_SITE=port serves it on
+# https://<OPENCTEM_HOSTNAME>:<OPENCTEM_ADMIN_PORT, 8444>, =host on
+# https://<OPENCTEM_ADMIN_HOST>, only to OPENCTEM_ADMIN_ALLOWED_CIDRS (default
+# private networks), and the main site then answers 404 for it (admin/).
+#
 # Sensor protocol v3 gRPC binding (RFC-059): with OPENCTEM_SENSOR_GATEWAY=alpn,
 # a TLS connection that offers the sensor ALPN id openctem-sensor/3 is passed
 # through at layer 4 to the API's mTLS listener on this same port
@@ -63,11 +68,17 @@
 		# cannot choose its own address. Set only for the `http` mode or an L4/L7
 		# load balancer in front: space-separated CIDRs.
 		trusted_proxies static {$OPENCTEM_TRUSTED_PROXIES:127.0.0.1/32}
-		client_ip_headers X-Forwarded-For
+		# Which header such a proxy puts the client's address in, tried in
+		# order (OPENCTEM_CLIENT_IP_HEADERS, checked by the entrypoint):
+		# X-Forwarded-For (default), or Cf-Connecting-Ip behind a Cloudflare
+		# Tunnel, whose edge sets that header to the one visitor address.
+		# Read only when the connecting peer is one of the proxies above;
+		# from any other peer the headers are ignored.
+		client_ip_headers {$OPENCTEM_CLIENT_IP_HEADERS:X-Forwarded-For}
 		# Read X-Forwarded-For right to left: the client is the right-most
 		# entry that is not one of the proxies above. The default (left-most)
 		# is whatever the client typed when the front proxy appends, and
-		# {client_ip} is what this gateway writes into X-Real-IP for the API.
+		# {client_ip} is what this gateway sends the API (see `forwarded`).
 		trusted_proxies_strict
 
 		# Layer-4 routing ahead of TLS (sensor protocol v3); empty when off.
@@ -122,12 +133,42 @@ import planes.caddy
 		?Referrer-Policy strict-origin-when-cross-origin
 	}
 
+	# Compress read responses: API JSON shrinks 6-13x (a 100-row findings
+	# page 179 KB -> 27 KB, the dashboard overview 69 KB -> 8 KB). Bodies
+	# already encoded upstream (the web image's own gzip) pass through.
+	# Only GET/HEAD and only the listed types are compressed: event streams
+	# are never held in a compressor buffer, and write responses, which may
+	# return a freshly issued secret (API keys, sensor keys, tokens) next to
+	# request-controlled text, stay uncompressed so no compression side
+	# channel (BREACH) applies. The sign-in, OAuth and sensor APIs are left
+	# out entirely for the same reason.
+	@compressible {
+		method GET HEAD
+		not path /api/v1/auth/* /api/v1/admin/auth/* /oauth/* /api/v1/oauth/* /api/v2/sensor/*
+	}
+	encode @compressible zstd gzip {
+		match {
+			header Content-Type application/json*
+			header Content-Type application/problem+json*
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+			header Content-Type text/csv*
+			header Content-Type application/javascript*
+			header Content-Type text/javascript*
+			header Content-Type image/svg+xml*
+		}
+	}
+
 	# Never public: debug handlers (no plane). Metrics and readiness are the
 	# ops plane's internal paths, in planes.caddy.
 	@debug path /debug /debug/*
 	handle @debug {
 		respond 404
 	}
+
+	# With the console on its own site, it does not exist on this one.
+	import admin/{$OPENCTEM_ADMIN_SITE_FILE:off}.tenant
 
 	# The planes the gateway sends straight to the API (generated).
 	import planes
@@ -151,7 +192,7 @@ import planes.caddy
 	@token_no_session {
 		path /api/*
 		header Authorization "Bearer *"
-		not header Cookie *{$AUTH_COOKIE_NAME:auth_token}=*
+		not header Cookie *auth_token=*
 	}
 	handle @token_no_session {
 		import to_api
@@ -170,13 +211,23 @@ import planes.caddy
 	}
 }
 
-# The client address for the API's audit log, rate limits and IP allowlists.
-# Caddy already sets X-Forwarded-For/-Proto/-Host and drops any a client sent;
-# X-Real-IP is not touched by Caddy, so it is overwritten here (the API reads
-# it first, and only from SERVER_TRUSTED_PROXIES peers; see
-# pkg/httpsec/clientip.go). Responses are flushed immediately (long polls, SSE, streaming).
+# The client address for the API's audit log, rate limits and IP allowlists:
+# the gateway resolves it once ({client_ip}, above) and hands the API exactly
+# that, in both headers the API reads (pkg/httpsec/clientip.go, only from
+# SERVER_TRUSTED_PROXIES peers; X-Forwarded-For first). Caddy's own
+# X-Forwarded-For keeps a trusted front proxy's list and appends that proxy's
+# address, which the API does not know: it would record the proxy (e.g. the
+# tunnel connector) as the client. So both are overwritten, and the
+# front-proxy headers the gateway may read are not passed on (a client cannot
+# hand the API a second opinion). Responses are flushed immediately (long
+# polls, SSE, streaming).
 (forwarded) {
+	header_up X-Forwarded-For {client_ip}
 	header_up X-Real-IP {client_ip}
+	header_up -Cf-Connecting-Ip
+	header_up -True-Client-Ip
+	# Only the admin site (admin/on.site) may mark a request as the console's.
+	header_up -X-OpenCTEM-Plane
 	flush_interval -1
 }
 
@@ -193,3 +244,6 @@ import planes.caddy
 }
 
 import modes/{$OPENCTEM_TLS_MODE}.site
+
+# The platform console's own site, or nothing (OPENCTEM_ADMIN_SITE).
+import admin/{$OPENCTEM_ADMIN_SITE_FILE:off}.site

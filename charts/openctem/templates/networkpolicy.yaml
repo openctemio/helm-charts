@@ -108,6 +108,16 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+    {{- if .Values.admin.listener.enabled }}
+    # The console listener: the UI pods (its console proxy) only.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "openctem.uiSelectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.admin.listener.port }}
+          protocol: TCP
+    {{- end }}
     {{- $st := .Values.api.sensorTransport }}
     {{- if include "openctem.sensorTransportOn" . }}
     # Sensor protocol v3 gRPC binding (mutual TLS): from the release's pods

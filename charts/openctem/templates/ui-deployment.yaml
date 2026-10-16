@@ -56,6 +56,17 @@ spec:
               {{- else }}
               value: "http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}"
               {{- end }}
+            {{- if .Values.admin.listener.enabled }}
+            # The platform console's proxy talks to the API's console listener.
+            - name: ADMIN_API_URL
+              value: "http://{{ include "openctem.apiFullname" . }}-admin:{{ .Values.admin.listener.port }}"
+            {{- end }}
+            {{- if include "openctem.adminSiteOn" . }}
+            # The console has its own site on the bundled gateway: serve it
+            # only there, and never on the main site.
+            - name: OPENCTEM_ADMIN_PLANE
+              value: separate
+            {{- end }}
             - name: NODE_ENV
               value: {{ .Values.ui.config.nodeEnv | quote }}
             {{- if include "openctem.gatewayMode" . }}

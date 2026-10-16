@@ -87,6 +87,12 @@ jobs:
           # read-only policy mount (OpenCTEM RFC-040).
           tests/sensor-hardening/run.sh
 
+      - name: Bundled sensor enrollment (render checks)
+        run: |
+          # sensor.enrollment=instance: the token Secret, the registering Job,
+          # the sensor's SENSOR_INSTANCE_ENROLLMENT_TOKEN, and the refusals.
+          tests/sensor-enrollment/run.sh
+
       - name: Attachment storage (render checks)
         run: |
           # api.attachments: default RWO volume (Recreate), S3, RWX with

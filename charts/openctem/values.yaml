@@ -1133,6 +1133,24 @@ sensor:
   existingSecret: ""
   # -- Key within the secret. Empty: "api-key".
   existingSecretKey: ""
+  # -- How a sensor without an API key gets its identity. "pairing" (the
+  #    default): an organization sensor, approved by an organization
+  #    administrator under Sensors > Pair a sensor. "instance": a shared
+  #    sensor of the instance (api RFC-100). The chart generates a
+  #    single-use enrollment token into a Secret, a post-install/post-upgrade
+  #    Job registers it with `bootstrap-admin sensor-token` (valid one hour),
+  #    and the sensor enrolls with it (SENSOR_INSTANCE_ENROLLMENT_TOKEN) on
+  #    first start, without anyone approving it. A shared sensor takes no
+  #    organization's jobs until a super administrator turns shared sensors
+  #    on (Console > System > Platform scanning). A sensor that is already
+  #    paired keeps its identity (no forced migration); see the README.
+  enrollment: pairing
+  instanceEnrollment:
+    # -- Pre-created Secret holding the token (octe_ and 49 letters or
+    #    digits) instead of the generated one, for GitOps.
+    existingSecret: ""
+    # -- Key within the secret. Empty: "token".
+    existingSecretKey: ""
   # -- Optional comma-separated allowlist of the scanners the sensor offers
   #    (-tools). Empty (default): every scanner installed in the image, which
   #    the sensor detects at start and reports on its heartbeat.

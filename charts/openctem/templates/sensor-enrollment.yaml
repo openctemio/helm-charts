@@ -1,0 +1,130 @@
+{{- /*
+sensor.enrollment=instance: the bundled sensor enrolls as a shared sensor of
+the instance (api docs/rfcs/RFC-100-shared-sensors.md §7).
+
+- A Secret holds a single-use enrollment token, octe_ and 49 letters or
+  digits. It is generated on install and kept across upgrades (lookup); with
+  sensor.instanceEnrollment.existingSecret nothing secret is rendered.
+- A post-install/post-upgrade Job runs `bootstrap-admin sensor-token
+  -from-env SENSOR_INSTANCE_ENROLLMENT_TOKEN`: the API stores the token's
+  keyed hash, valid one hour, spent by the first sensor that presents it. A
+  value already registered (an upgrade) is left alone.
+- The sensor reads the token from the Secret, enrolls on first start and
+  ignores it once its identity is in the state volume. Until the Job ran, the
+  sensor's start is refused and the pod restarts.
+
+A token that expired before the sensor enrolled: delete the Secret, run
+`helm upgrade` (a new token is generated and registered) and restart the
+sensor (`kubectl rollout restart deployment/<release>-openctem-sensor`).
+*/ -}}
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- if and $sensor.enabled (eq ($sensor.enrollment | default "pairing") "instance") }}
+{{- $ie := $sensor.instanceEnrollment | default dict -}}
+{{- $secretName := include "openctem.sensorEnrollmentSecretName" (dict "context" . "sensor" $sensor) -}}
+{{- $secretKey := include "openctem.sensorEnrollmentSecretKey" (dict "sensor" $sensor) -}}
+{{- if not $ie.existingSecret }}
+{{- $token := printf "octe_%s" (randAlphaNum 49) -}}
+{{- with (lookup "v1" "Secret" .Release.Namespace $secretName) }}
+{{- with (index (.data | default dict) $secretKey) }}
+{{- $token = b64dec . -}}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels:
+    {{- include "openctem.sensorLabels" . | nindent 4 }}
+type: Opaque
+stringData:
+  {{ $secretKey }}: {{ $token | quote }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "openctem.apiFullname" . }}-sensor-enrollment
+  labels:
+    {{- include "openctem.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sensor-enrollment
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # After the bootstrap-admin Job (5): the migrations ran before (-5).
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "openctem.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: sensor-enrollment
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      serviceAccountName: {{ include "openctem.apiServiceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.api.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sensor-enrollment
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          {{- with .Values.api.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["/app/bootstrap-admin"]
+          args:
+            - "sensor-token"
+            - "-from-env"
+            - "SENSOR_INSTANCE_ENROLLMENT_TOKEN"
+            - {{ printf "-name=%s" ($sensor.name | default (include "openctem.sensorFullname" .)) | replace "$" "$$" | quote }}
+            - {{ printf "-reason=bundled sensor of the Helm release %s" .Release.Name | quote }}
+          env:
+            {{- include "openctem.bootstrapDbEnv" . | nindent 12 }}
+            # The token is stored as the keyed hash the API checks: the API's
+            # encryption key (and SENSOR_KEY_PEPPER when api.extraEnv sets it).
+            - name: APP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openctem.apiEncryptionSecretName" . }}
+                  key: {{ include "openctem.apiEncryptionSecretKey" . }}
+            - name: SENSOR_INSTANCE_ENROLLMENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $secretKey }}
+            {{- if .Values.api.extraEnv }}
+            {{- include "openctem.apiExtraEnv" . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.api.extraEnvFrom }}
+          envFrom:
+            {{- toYaml .Values.api.extraEnvFrom | nindent 12 }}
+          {{- end }}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- with include "openctem.dbCaVolumeMount" . }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- with include "openctem.dbCaVolume" . }}
+        {{- . | trim | nindent 8 }}
+        {{- end }}
+{{- end }}

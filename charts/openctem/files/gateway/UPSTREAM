@@ -1,11 +1,6 @@
 # The gateway files listed below are copies of openctemio/openctem
-# api/deploy/gateway. Do not edit them here: change the monorepo, then run
-# scripts/sync-gateway.sh <ref>. CI (tests/gateway/upstream.sh) fails when a
-# copy differs from this commit.
-#
-# PENDING RE-SYNC: these copies are the merge of two open openctem branches
-# (feat/console-app a39a77e4 and fix/gateway-alpn-main-listener 5d3913a6), not
-# one commit. Once both are on develop, run scripts/sync-gateway.sh develop to
-# replace this pin; until then tests/gateway/upstream.sh cannot pass.
-commit=a39a77e40ba58c6c04ffc913ee52ea6b0425d287
+# api/deploy/gateway at this commit. Do not edit them here: change the
+# monorepo, then run scripts/sync-gateway.sh <ref>. CI
+# (tests/gateway/upstream.sh) fails when a copy differs from this commit.
+commit=05f1cd187d1838ec529c3c84ded73cecaf49946f
 files=Caddyfile planes.caddy entrypoint.sh servers.common sensors/off.wrappers sensors/alpn.wrappers sensors/passthrough.wrappers admin/off.site admin/off.tenant admin/on.site admin/on.tenant

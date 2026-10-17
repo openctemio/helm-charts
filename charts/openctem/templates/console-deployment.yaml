@@ -1,0 +1,136 @@
+{{- if .Values.console.enabled }}
+{{- $c := .Values.console -}}
+# The platform console: its own app and process (OpenCTEM RFC-022), on its own
+# origin (admin.site). It holds no tenant data and talks only to the API's
+# console listener (and the API for the brand); the tenant web app has no
+# console. Reached only through the bundled gateway's console site, or the
+# console Ingress, never published by itself (ClusterIP).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openctem.consoleFullname" . }}
+  labels:
+    {{- include "openctem.consoleLabels" . | nindent 4 }}
+spec:
+  replicas: {{ $c.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "openctem.consoleSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with $c.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "openctem.consoleLabels" . | nindent 8 }}
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      {{- with $c.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: console
+          {{- with $c.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ $c.image.repository }}:{{ $c.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ $c.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # The console API: the API's console listener when it is on,
+            # otherwise the API service.
+            - name: ADMIN_API_URL
+              {{- if .Values.admin.listener.enabled }}
+              value: "http://{{ include "openctem.apiFullname" . }}-admin:{{ .Values.admin.listener.port }}"
+              {{- else }}
+              value: "http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}"
+              {{- end }}
+            # The tenant API, for the brand shown on the sign-in page.
+            - name: BACKEND_API_URL
+              value: "http://{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}"
+            - name: SECURE_COOKIES
+              value: "true"
+            - name: NODE_ENV
+              value: "production"
+            {{- $envNames := list }}
+            {{- range $e := $c.extraEnv }}
+            {{- if kindIs "map" $e }}{{- $envNames = append $envNames (toString ($e.name | default "")) }}{{- end }}
+            {{- end }}
+            {{- if and (eq (include "openctem.gatewayMode" .) "caddy") (not (has "TRUST_PROXY_HEADERS" $envNames)) }}
+            # The bundled gateway overwrites the client-address headers, so the
+            # console passes them on to the API (audit log, allow-lists).
+            - name: TRUST_PROXY_HEADERS
+              value: "true"
+            {{- end }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $c.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            # The root filesystem is read-only; Next.js writes only these.
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/console/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: next-cache
+          emptyDir:
+            {{- with $c.cacheSizeLimit }}
+            sizeLimit: {{ . }}
+            {{- end }}
+      {{- with $c.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openctem.consoleFullname" . }}
+  labels:
+    {{- include "openctem.consoleLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $c.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "openctem.consoleSelectorLabels" . | nindent 4 }}
+{{- end }}

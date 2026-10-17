@@ -1,0 +1,70 @@
+{{- if and .Values.console.enabled .Values.console.ingress.enabled (ne (include "openctem.gatewayMode" .) "caddy") }}
+{{- include "openctem.consoleValidate" . -}}
+{{- $c := .Values.console -}}
+{{- $host := required "admin.site.host is required for console.ingress.enabled" .Values.admin.site.host -}}
+{{- if eq (include "openctem.gatewayMode" .) "httpRoute" }}
+# The console's own host (admin.site.mode=host), straight to the console
+# Service. The client-network gate is the Gateway's own: the chart's
+# admin.allowedCidrs does not apply here (the API's console listener still
+# enforces it on the address the console passes on).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "openctem.consoleFullname" . }}
+  labels:
+    {{- include "openctem.consoleLabels" . | nindent 4 }}
+  {{- with $c.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml (required "console.ingress.parentRefs is required for gateway.mode=httpRoute" $c.ingress.parentRefs) | nindent 4 }}
+  hostnames:
+    - {{ $host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "openctem.consoleFullname" . }}
+          port: {{ $c.service.port }}
+{{- else }}
+# The console's own host (admin.site.mode=host), straight to the console
+# Service. The client-network gate is the ingress controller's own (for
+# example an allowlist-source-range annotation in console.ingress.annotations):
+# the chart's admin.allowedCidrs does not apply here.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "openctem.consoleFullname" . }}
+  labels:
+    {{- include "openctem.consoleLabels" . | nindent 4 }}
+  {{- with $c.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $c.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $c.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ $host | quote }}
+      secretName: {{ $c.ingress.tls.secretName | default (printf "%s-tls" (include "openctem.consoleFullname" .)) }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "openctem.consoleFullname" . }}
+                port:
+                  number: {{ $c.service.port }}
+{{- end }}
+{{- end }}

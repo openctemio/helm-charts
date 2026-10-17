@@ -9,7 +9,7 @@
 {{- end -}}
 {{- $fullName := include "openctem.gatewayFullname" . -}}
 {{- $claim := $c.persistence.existingClaim | default (printf "%s-data" $fullName) -}}
-# The Caddyfile, planes.caddy and entrypoint are the OpenCTEM gateway's,
+# The Caddyfile, planes.caddy, servers.common and entrypoint are the OpenCTEM gateway's,
 # unchanged (charts/openctem/files/gateway/, see UPSTREAM there).
 apiVersion: v1
 kind: ConfigMap
@@ -145,7 +145,7 @@ spec:
               containerPort: 80
               protocol: TCP
             {{- end }}
-            {{- if and (include "openctem.adminSiteOn" .) (not .Values.admin.site.host) }}
+            {{- if include "openctem.adminSitePort" . }}
             - name: admin
               containerPort: {{ .Values.admin.site.port }}
               protocol: TCP
@@ -159,6 +159,10 @@ spec:
               value: "{{ include "openctem.apiFullname" . }}:{{ .Values.api.service.port }}"
             - name: OPENCTEM_WEB_UPSTREAM
               value: "{{ include "openctem.uiFullname" . }}:{{ .Values.ui.service.port }}"
+            {{- if .Values.console.enabled }}
+            - name: OPENCTEM_CONSOLE_UPSTREAM
+              value: "{{ include "openctem.consoleFullname" . }}:{{ .Values.console.service.port }}"
+            {{- end }}
             - name: GATEWAY_MAX_BODY_SIZE
               value: {{ $c.maxBodySize | quote }}
             {{- $sg := include "openctem.sensorGateway" . }}
@@ -194,9 +198,10 @@ spec:
             - name: OPENCTEM_ALLOW_PLAIN_HTTP
               value: {{ $c.tls.allowPlainHttp | toString | quote }}
             {{- if include "openctem.adminSiteOn" . }}
-            # The platform console's own site, private networks only by default.
+            # The platform console's own site (its own origin), private
+            # networks only by default.
             - name: OPENCTEM_ADMIN_SITE
-              value: {{ ternary "host" "port" (ne .Values.admin.site.host "") | quote }}
+              value: {{ include "openctem.adminSiteMode" . | quote }}
             {{- with .Values.admin.site.host }}
             - name: OPENCTEM_ADMIN_HOST
               value: {{ . | quote }}
@@ -253,6 +258,8 @@ spec:
                 path: planes.caddy
               - key: entrypoint.sh
                 path: entrypoint.sh
+              - key: servers.common
+                path: servers.common
               {{- range $path, $_ := .Files.Glob "files/gateway/modes/*" }}
               - key: modes-{{ base $path }}
                 path: modes/{{ base $path }}

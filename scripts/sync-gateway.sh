@@ -8,6 +8,7 @@
 #                 (OpenCTEM RFC-041); the chart's Ingress/HTTPRoute path lists
 #                 are read from it at render time
 #   entrypoint.sh TLS-mode validation
+#   servers.common listener protocols and client-address rules, imported by the Caddyfile
 #   admin/        the platform console's own site (OPENCTEM_ADMIN_SITE)
 #   sensors/      layer-4 routing of the sensor host (sensor protocol v3,
 #                 OpenCTEM RFC-059), imported by the Caddyfile
@@ -29,7 +30,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$ROOT/charts/openctem/files/gateway"
 PLATFORM_REPO="${PLATFORM_REPO:-https://github.com/openctemio/openctem.git}"
 ref="${1:-develop}"
-files=(Caddyfile planes.caddy entrypoint.sh sensors/off.wrappers sensors/alpn.wrappers sensors/passthrough.wrappers admin/off.site admin/off.tenant admin/on.site admin/on.tenant)
+files=(Caddyfile planes.caddy entrypoint.sh servers.common sensors/off.wrappers sensors/alpn.wrappers sensors/passthrough.wrappers admin/off.site admin/off.tenant admin/on.site admin/on.tenant)
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

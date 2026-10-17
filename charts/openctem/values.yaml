@@ -15,6 +15,11 @@ global:
     allowInsecureImages: true
 
 api:
+  # -- Which planes the API serves (OPENCTEM_PLANE): all | tenant | admin. Only
+  # `all` is supported: this chart runs one API Deployment. Serving the tenant
+  # plane and the console plane from separate API deployments needs two
+  # releases (a follow-up); any other value fails the render.
+  plane: all
   # Sensor protocol v3 (OpenCTEM RFC-059). The API serves it by itself: the
   # HTTPS binding (/api/v3/sensor, through the normal routing) always, and the
   # gRPC binding (mutual TLS) only while its self-probe reaches it through the
@@ -32,8 +37,10 @@ api:
     # sensors only while the self-probe passes either way.
     publicHost: ""
     mtls:
-      # -- The API's mTLS listener port (container and Service).
-      port: 8443
+      # -- The API's mTLS listener port (container and Service). 9443 keeps
+      # 8443 free for the console's own port (admin.site.port); sensors still
+      # dial 443.
+      port: 9443
       # -- Client certificate lifetime (1h..720h).
       certTTL: 168h
       # -- SENSOR_MTLS_TRUSTED_PROXIES: CIDRs whose PROXY protocol v2 header
@@ -199,7 +206,7 @@ api:
   # The primary admin and a break-glass backup super admin are each created as
   # a sign-in account with a temporary password printed ONCE to the Job log.
   # Both sign in on /login, enroll an authenticator when opening the admin
-  # console (/admin), and must change the temporary password first. The backup
+  # console (its own site, admin.site), and must change the temporary password first. The backup
   # is local (never bound to the platform identity provider, exempt from
   # "require IdP"); every sign-in with it is audited (high), logged with
   # alert=break_glass_sign_in and emailed to the other admins (system SMTP).
@@ -1021,20 +1028,25 @@ monitoring:
   prometheusPodSelector: {}
 
 # -----------------------------------------------------------------------------
-# Platform administration console (OpenCTEM RFC-022 revision 20)
+# Platform administration console (OpenCTEM RFC-022 revision 21)
+#
+# The console is its own app and process (the `console` Deployment below) on
+# its own origin: separate cookies, CSP and CSRF scope from the tenant web app,
+# which has no console at all. The API serves the console API only on its own
+# listener (admin.listener), reached only by the console pods.
 # -----------------------------------------------------------------------------
 admin:
   listener:
     # -- Serve the console API on its own listener in the API pod
     # (ADMIN_LISTEN_ADDR); the main port then answers 404 for /api/v1/admin.
-    # The UI's console proxy reaches it through the <api>-admin Service.
+    # The console reaches it through the <api>-admin Service (ADMIN_API_URL).
     enabled: true
     # -- Port of the console listener (plain HTTP, cluster-internal only).
     port: 8081
     # -- Bind the pod IP (a private address, as the API requires). Set false
     # for IPv6-only pods: the listener then binds every interface with
     # ADMIN_LISTEN_ALLOW_ALL_INTERFACES=true; enable networkPolicy so only the
-    # UI pods reach it.
+    # console pods reach it.
     bindPodIP: true
   # -- Client networks that may reach the console (ADMIN_ALLOWED_CIDRS, and
   # the bundled Caddy's console site). Default: private networks only. Add
@@ -1046,26 +1058,114 @@ admin:
     - 172.16.0.0/12
     - 192.168.0.0/16
     - fc00::/7
-  # The console's own site on the bundled Caddy (gateway.mode=caddy only).
-  # With it, the UI serves the console only there (OPENCTEM_ADMIN_PLANE=
-  # separate) and the main site answers 404 for /admin and /api/v1/admin.
-  # Other gateway modes keep the console on the main host (shared).
+  # The console's own site on the bundled Caddy (gateway.mode=caddy), at the
+  # root of its own origin (no /admin path). Never publish the console through
+  # a public tunnel without a zero-trust (identity-aware) proxy in front.
+  # The platform identity provider's redirect URI is <console origin>/login/callback.
   site:
-    # -- Turn the console site on (gateway.mode=caddy).
-    enabled: true
-    # -- The console's own DNS name (OPENCTEM_ADMIN_SITE=host, served on the
-    # gateway's port 443 by name). Empty: a second port of gateway.host
-    # (OPENCTEM_ADMIN_SITE=port).
+    # -- How the console is reached:
+    #   host: its own DNS name (admin.site.host, for example
+    #         admin.example.com) on the gateway's port 443. RECOMMENDED for
+    #         production: a different host is a different origin for the
+    #         browser (the strongest isolation) and needs no extra port.
+    #   port: a second port of gateway.host (admin.site.port) behind a
+    #         ClusterIP Service (kubectl port-forward). Different ports are
+    #         NOT a security control: browsers share cookies across ports of one
+    #         host, so use it for evaluation or a private network.
+    #   off:  no console site (the console is not published).
+    # Only the bundled Caddy (gateway.mode=caddy) serves it; for ingress or
+    # httpRoute use console.ingress with mode=host.
+    mode: port
+    # -- The console's own DNS name, for mode=host (example: admin.example.com).
     host: ""
     # -- Port of the console site in port mode.
-    port: 8444
+    port: 8443
     service:
       # -- Service for the console port (port mode). ClusterIP keeps it off the
-      # network: kubectl port-forward svc/<release>-gateway-admin 8444, then
-      # https://localhost:8444/admin. LoadBalancer/NodePort publish it (the
+      # network: kubectl port-forward svc/<release>-gateway-admin 8443, then
+      # https://localhost:8443/. LoadBalancer/NodePort publish it (the
       # allow-list above still applies).
       type: ClusterIP
       annotations: {}
+
+# -----------------------------------------------------------------------------
+# The platform console app (ghcr.io/openctemio/openctem-console). Holds no
+# tenant data and no secrets of its own; it proxies the console API to the
+# API's console listener.
+# -----------------------------------------------------------------------------
+console:
+  # -- Deploy the console. false: no console in the cluster (the console API
+  # stays reachable for the bootstrap CLI only).
+  enabled: true
+  replicaCount: 1
+  image:
+    # -- Console image (console/ in openctemio/openctem). Needs an appVersion
+    # that publishes it: the release after openctem PR 2443.
+    repository: ghcr.io/openctemio/openctem-console
+    pullPolicy: IfNotPresent
+    # -- Defaults to the chart's appVersion.
+    tag: ""
+  service:
+    # -- ClusterIP only; the gateway or console.ingress publishes it.
+    port: 3000
+  # -- Console behind your own Ingress / HTTPRoute (gateway.mode=ingress,
+  # httpRoute or none), on admin.site.host (needs admin.site.mode=host). The
+  # client-network gate is then your ingress's own (for example an
+  # nginx.ingress.kubernetes.io/whitelist-source-range annotation), not
+  # admin.allowedCidrs. Not for gateway.mode=caddy (the bundled gateway serves
+  # the console site).
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    tls:
+      enabled: false
+      # -- Defaults to <console fullname>-tls.
+      secretName: ""
+    # -- HTTPRoute parentRefs when gateway.mode=httpRoute.
+    parentRefs: []
+  podAnnotations: {}
+  podLabels: {}
+  # -- Pod-level security context (the console image runs as uid 1001).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container-level security context. The root filesystem is read-only:
+  # Next.js writes only /tmp and /app/console/.next/cache, both emptyDirs.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # -- Size limit of the /app/console/.next/cache emptyDir.
+  cacheSizeLimit: 128Mi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+  # -- Extra environment variables (list of name/value or valueFrom).
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 
 networkPolicy:
   # -- Master switch for all NetworkPolicy resources in this chart.

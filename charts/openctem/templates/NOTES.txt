@@ -95,6 +95,28 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
 {{- end }}
 {{- end }}
 
+{{- if .Values.console.enabled }}
+Platform console: Deployment/Service `{{ include "openctem.consoleFullname" . }}` (ClusterIP, its own origin, no /admin path).
+{{- $am := include "openctem.adminSiteMode" . }}
+{{- if include "openctem.adminSiteOn" . }}
+{{- if eq $am "host" }}
+- Open https://{{ .Values.admin.site.host }}/ (private networks only: admin.allowedCidrs; {{ .Values.admin.site.host }} must resolve to the gateway).
+{{- else }}
+- Port mode (evaluation or private network; ports are not a security boundary):
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "openctem.gatewayFullname" . }}-admin {{ .Values.admin.site.port }}
+  then open https://localhost:{{ .Values.admin.site.port }}/ . Production: admin.site.mode=host with admin.site.host.
+{{- end }}
+{{- else if .Values.console.ingress.enabled }}
+- Open https://{{ .Values.admin.site.host }}/ ; the network gate is your ingress's own, not admin.allowedCidrs.
+{{- else }}
+- Not published (admin.site.mode={{ $am }}, gateway.mode={{ include "openctem.gatewayMode" . | default "none" }}): reach it with
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "openctem.consoleFullname" . }} 3000:{{ .Values.console.service.port }}
+  or publish it with admin.site.mode=host (bundled Caddy) or console.ingress.
+{{- end }}
+- The platform identity provider's redirect URI is <console origin>/login/callback.
+- Never publish the console through a public tunnel without a zero-trust (identity-aware) proxy.
+{{- end }}
+
 3. Deployment mode
 - APP_ENV: {{ .Values.api.appEnv }}
 {{- if eq .Values.api.appEnv "production" }}
@@ -160,7 +182,7 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
     kubectl logs -n {{ .Release.Namespace }} job/{{ $job }}
   Store the credentials (break-glass ones offline), then delete the Job:
     kubectl delete -n {{ .Release.Namespace }} job/{{ $job }}
-  Admins: sign in on /login, open the admin console (/admin), enroll an
+  Admins: sign in on /login, open the platform console (its own site, see below), enroll an
   authenticator (TOTP) and change the temporary password. Every use of the
   break-glass account alerts the other admins (log field alert=break_glass_sign_in).
 {{- if (.Values.api.bootstrapAdmin.org | default dict).name }}
@@ -182,7 +204,7 @@ Gateway: one entry point for the UI and the API (gateway.mode={{ $gwMode }})
       -email=admin@example.com -backup-email=breakglass@example.com \
       -org-name="Your Org" -org-owner-email=owner@example.com
   It prints the admins' temporary passwords (and, without an SMTP server, the owner's
-  set-password link) once. Admins sign in on /login and enroll TOTP at /admin;
+  set-password link) once. Admins sign in on /login and enroll TOTP on the platform console;
   the owner sets a password with the link, then invites users / configures SSO.
 {{- end }}
 

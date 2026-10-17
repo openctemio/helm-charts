@@ -57,6 +57,8 @@ planes.caddy: |-
 {{ .Files.Get "files/gateway/planes.caddy" | indent 2 }}
 entrypoint.sh: |-
 {{ .Files.Get "files/gateway/entrypoint.sh" | indent 2 }}
+servers.common: |-
+{{ .Files.Get "files/gateway/servers.common" | indent 2 }}
 {{- range $path, $_ := .Files.Glob "files/gateway/modes/*" }}
 modes-{{ base $path }}: |-
 {{ $.Files.Get $path | indent 2 }}
@@ -71,9 +73,74 @@ admin-{{ base $path }}: |-
 {{- end }}
 {{- end }}
 
+{{/*
+admin.site.mode, validated: port | host | off. The removed admin.site.enabled
+fails the render with the replacement.
+*/}}
+{{- define "openctem.adminSiteMode" -}}
+{{- $site := .Values.admin.site -}}
+{{- if hasKey $site "enabled" -}}
+{{- fail "\n\nadmin.site.enabled was removed: set admin.site.mode instead (port | host | off). enabled=false is mode=off; enabled=true with admin.site.host set is mode=host, without it mode=port.\n" -}}
+{{- end -}}
+{{- $m := toString ($site.mode | default "port") -}}
+{{- if not (has $m (list "port" "host" "off")) -}}
+{{- fail (printf "\n\nadmin.site.mode=%q is not supported. Use one of: port, host, off.\n" $m) -}}
+{{- end -}}
+{{- $m -}}
+{{- end }}
+
 {{/* "true" when the bundled Caddy serves the platform console's own site. */}}
 {{- define "openctem.adminSiteOn" -}}
-{{- if and (eq (include "openctem.gatewayMode" .) "caddy") .Values.admin.site.enabled -}}true{{- end -}}
+{{- if and (eq (include "openctem.gatewayMode" .) "caddy") .Values.console.enabled (ne (include "openctem.adminSiteMode" .) "off") -}}true{{- end -}}
+{{- end }}
+
+{{/* "true" when the console site is on and reached by port (not by host name). */}}
+{{- define "openctem.adminSitePort" -}}
+{{- if and (include "openctem.adminSiteOn" .) (eq (include "openctem.adminSiteMode" .) "port") -}}true{{- end -}}
+{{- end }}
+
+{{/* Console component names and labels. */}}
+{{- define "openctem.consoleFullname" -}}
+{{ include "openctem.componentFullname" (dict "context" . "component" "console") }}
+{{- end }}
+
+{{- define "openctem.consoleLabels" -}}
+{{ include "openctem.labels" . }}
+app.kubernetes.io/component: console
+{{- end }}
+
+{{- define "openctem.consoleSelectorLabels" -}}
+{{ include "openctem.selectorLabels" . }}
+app.kubernetes.io/component: console
+{{- end }}
+
+{{/*
+Fail the render on console / plane settings that cannot work. Called from the
+API Deployment, which every render includes.
+*/}}
+{{- define "openctem.consoleValidate" -}}
+{{- $mode := include "openctem.adminSiteMode" . -}}
+{{- $plane := toString (.Values.api.plane | default "all") -}}
+{{- if not (has $plane (list "all" "tenant" "admin")) -}}
+{{- fail (printf "\n\napi.plane=%q is not valid. Use all, tenant or admin.\n" $plane) -}}
+{{- end -}}
+{{- if ne $plane "all" -}}
+{{- fail (printf "\n\napi.plane=%s: this chart runs one API Deployment, which serves both planes (all). Splitting the API into a tenant plane and a console plane needs two releases or deployments and is not supported by this chart yet.\n" $plane) -}}
+{{- end -}}
+{{- if and .Values.console.ingress.enabled (not .Values.console.enabled) -}}
+{{- fail "\n\nconsole.ingress.enabled=true needs console.enabled=true.\n" -}}
+{{- end -}}
+{{- if .Values.console.ingress.enabled -}}
+{{- if eq (include "openctem.gatewayMode" .) "caddy" -}}
+{{- fail "\n\nconsole.ingress.enabled=true is for gateway.mode=ingress, httpRoute or none: with gateway.mode=caddy the bundled gateway serves the console site (admin.site.mode=host).\n" -}}
+{{- end -}}
+{{- if ne $mode "host" -}}
+{{- fail "\n\nconsole.ingress.enabled=true needs admin.site.mode=host and admin.site.host (the console's own DNS name): port mode is served only by the bundled Caddy gateway (gateway.mode=caddy).\n" -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq $mode "host") (not .Values.admin.site.host) (or (eq (include "openctem.gatewayMode" .) "caddy") .Values.console.ingress.enabled) -}}
+{{- fail "\n\nadmin.site.mode=host needs admin.site.host: the console's own DNS name (for example admin.example.com).\n" -}}
+{{- end -}}
 {{- end }}
 
 {{/* The console allow-list, space-separated. */}}
@@ -148,7 +215,7 @@ API Deployment, which every render includes.
 {{- fail "\n\ngateway.caddy.tls.mode=http needs gateway.publicUrl (the https:// origin of the TLS proxy in front) or gateway.host.\n" -}}
 {{- end -}}
 {{- if not (include "openctem.gatewayTrustedProxies" .) -}}
-{{- fail (printf "\n\ngateway.mode=%s needs gateway.trustedProxies: the CIDRs of the pods that connect to the API (the gateway or ingress controller, and the UI), usually the cluster's pod CIDR, e.g. [10.244.0.0/16] (kubeadm/flannel) or [10.42.0.0/16] (k3s). Find it with: kubectl cluster-info dump | grep -m1 -- --cluster-cidr\n" $mode) -}}
+{{- fail (printf "\n\ngateway.mode=%s needs gateway.trustedProxies: the CIDRs of the pods that connect to the API (the gateway or ingress controller, the UI and the console), usually the cluster's pod CIDR, e.g. [10.244.0.0/16] (kubeadm/flannel) or [10.42.0.0/16] (k3s). Find it with: kubectl cluster-info dump | grep -m1 -- --cluster-cidr\n" $mode) -}}
 {{- end -}}
 {{- end -}}
 {{- end }}

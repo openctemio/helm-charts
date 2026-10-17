@@ -756,9 +756,18 @@ the tenant web app has no console at all (RFC-022 revision 21):
   `<console origin>/login/callback`; update it at the identity provider.
 - **`console.ingress`** (gateway.mode ingress, httpRoute or none; needs
   `admin.site.mode=host`): an Ingress or HTTPRoute for `admin.site.host` to
-  the console Service. The client-network gate is then your ingress's own (for
-  example a source-range annotation); `admin.allowedCidrs` does not apply.
-  Port mode exists only with the bundled Caddy.
+  the console Service. The console passes the client address the controller
+  saw to the API, which checks `admin.allowedCidrs` on it, so the render
+  requires: `console.ingress.allowedSourceRanges` (the controller's source
+  range list; for an HTTPRoute enforce the same ranges in the Gateway's
+  policy), `gateway.trustedProxies` covering the console pods, and
+  `networkPolicy.enabled` with the ingress controller selector (only the
+  controller may reach the console, which believes the address its caller
+  sends). The controller must see the real client address (for example
+  `externalTrafficPolicy: Local`). Port mode exists only with the bundled
+  Caddy. With more than one API replica or autoscaling the console needs
+  `api.auth.jwtSecret` or `api.auth.existingSecret` (its CSRF key derives from
+  it).
 - **`api.plane`** (`OPENCTEM_PLANE`, default `all`): only `all` is supported;
   serving the tenant and console planes from separate API deployments needs two
   releases and is a follow-up. Other values fail the render.

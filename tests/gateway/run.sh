@@ -376,16 +376,40 @@ reject "console: no console site without the bundled Caddy" "name: OPENCTEM_ADMI
 expect "console: listener on in every gateway mode" "name: t-openctem-api-admin" "$out"
 reject "console: no TRUST_PROXY_HEADERS outside caddy mode" "TRUST_PROXY_HEADERS
               value" "$(only console-deployment.yaml "${GW[@]}" --set gateway.mode=ingress)"
-# Console behind the operator's own ingress / HTTPRoute (host mode).
+# Console behind the operator's own ingress / HTTPRoute (host mode). The
+# console believes the client address its caller sends, so the chart demands a
+# source-range allow-list, the trusted proxies and a network policy naming the
+# ingress controller.
 CING=("${GW[@]}" --set admin.site.mode=host --set admin.site.host=admin.ctem.example.com --set console.ingress.enabled=true)
-out="$(only console-ingress.yaml "${CING[@]}" --set gateway.mode=ingress \
-  --set 'console.ingress.annotations.nginx\.ingress\.kubernetes\.io/whitelist-source-range=10.0.0.0/8')"
+CNP=(--set networkPolicy.enabled=true --set 'networkPolicy.ingressControllerNamespaceSelector.kubernetes\.io/metadata\.name=ingress-nginx')
+CSR=(--set 'console.ingress.allowedSourceRanges={10.0.0.0/8,192.0.2.0/24}')
+refuse "console ingress: needs a source-range allow-list" "console.ingress.allowedSourceRanges" "${CING[@]}" --set gateway.mode=ingress "${CNP[@]}"
+refuse "console ingress: needs a network policy" "needs networkPolicy.enabled=true" "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}"
+refuse "console ingress: network policy needs the ingress controller selector" "networkPolicy.ingressControllerNamespaceSelector" "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}" --set networkPolicy.enabled=true
+refuse "console ingress: needs the trusted proxies" "needs gateway.trustedProxies" "${CING[@]}" --set gateway.mode=none --set 'gateway.trustedProxies={}' "${CSR[@]}" "${CNP[@]}"
+out="$(only console-ingress.yaml "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}" "${CNP[@]}" \
+  --set 'console.ingress.annotations.nginx\.ingress\.kubernetes\.io/whitelist-source-range=0.0.0.0/0')"
 expect "console ingress: own host" 'host: "admin.ctem.example.com"' "$out"
 expect "console ingress: to the console Service" "name: t-openctem-console" "$out"
-expect "console ingress: the ingress's own network gate" "whitelist-source-range" "$out"
-out="$(only console-ingress.yaml "${CING[@]}" --set gateway.mode=httpRoute \
+expect "console ingress: the allow-list is the ingress's source range" 'nginx.ingress.kubernetes.io/whitelist-source-range: 10.0.0.0/8,192.0.2.0/24' "$out"
+reject "console ingress: an annotation cannot widen the allow-list" "0.0.0.0/0" "$out"
+cdep="$(only console-deployment.yaml "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}" "${CNP[@]}")"
+expect "console ingress: the console forwards the controller's client address" 'name: TRUST_PROXY_HEADERS
+              value: "true"' "$cdep"
+out="$(only networkpolicy.yaml "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}" "${CNP[@]}")"
+cnp="$(awk '/name: t-openctem-console-allow-ingress/,/^---/' <<<"$out")"
+expect "netpol: console ingress from the ingress controller only" "kubernetes.io/metadata.name: ingress-nginx" "$cnp"
+reject "netpol: console ingress is not open to every namespace" "namespaceSelector: {}" "$cnp"
+out="$(only console-ingress.yaml "${CING[@]}" --set gateway.mode=httpRoute "${CSR[@]}" "${CNP[@]}" \
   --set 'gateway.httpRoute.parentRefs[0].name=gw' --set 'console.ingress.parentRefs[0].name=gw')"
 expect "console route: HTTPRoute for its own host" "kind: HTTPRoute" "$out"
+refuse "console route: needs a source-range allow-list too" "console.ingress.allowedSourceRanges" "${CING[@]}" --set gateway.mode=httpRoute --set 'gateway.httpRoute.parentRefs[0].name=gw' "${CNP[@]}"
+# More than one API replica needs a session secret the operator set (the
+# console's CSRF key is derived from it).
+refuse "console: API replicas need an explicit session secret" "api.auth.jwtSecret or api.auth.existingSecret" "${CAD[@]}" --set api.allowMultipleReplicas=true --set api.attachments.storage=s3 --set api.attachments.s3.bucket=b --set api.attachments.s3.existingSecret=s3sec --set api.replicaCount=2
+refuse "console: API autoscaling needs an explicit session secret" "api.auth.jwtSecret or api.auth.existingSecret" "${CAD[@]}" --set api.allowMultipleReplicas=true --set api.attachments.storage=s3 --set api.attachments.s3.bucket=b --set api.attachments.s3.existingSecret=s3sec --set api.autoscaling.enabled=true
+out="$(render "${CAD[@]}" --set api.allowMultipleReplicas=true --set api.attachments.storage=s3 --set api.attachments.s3.bucket=b --set api.attachments.s3.existingSecret=s3sec --set api.replicaCount=2 --set api.auth.existingSecret=my-session)"
+expect "console: API replicas with an existing secret render" "kind: Deployment" "$out"
 refuse "console ingress: not with the bundled Caddy" "console.ingress.enabled=true is for gateway.mode=ingress" "${CING[@]}" --set gateway.mode=caddy
 refuse "console ingress: port mode is caddy-only" "needs admin.site.mode=host" "${GW[@]}" --set gateway.mode=ingress --set console.ingress.enabled=true
 out="$(render "${CAD[@]}" --set admin.listener.bindPodIP=false)"

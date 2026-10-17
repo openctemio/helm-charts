@@ -4,9 +4,11 @@
 {{- $host := required "admin.site.host is required for console.ingress.enabled" .Values.admin.site.host -}}
 {{- if eq (include "openctem.gatewayMode" .) "httpRoute" }}
 # The console's own host (admin.site.mode=host), straight to the console
-# Service. The client-network gate is the Gateway's own: the chart's
-# admin.allowedCidrs does not apply here (the API's console listener still
-# enforces it on the address the console passes on).
+# Service. The Gateway's own policy is the first client-network gate (this
+# chart cannot render one for a Gateway: console.ingress.allowedSourceRanges
+# only has to be set, as the operator's statement of what that policy allows).
+# The console passes the client address the Gateway saw on to the API, which
+# checks admin.allowedCidrs against it.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -32,19 +34,19 @@ spec:
           port: {{ $c.service.port }}
 {{- else }}
 # The console's own host (admin.site.mode=host), straight to the console
-# Service. The client-network gate is the ingress controller's own (for
-# example an allowlist-source-range annotation in console.ingress.annotations):
-# the chart's admin.allowedCidrs does not apply here.
+# Service. The first client-network gate is the ingress controller's source
+# range allow-list, rendered from the required console.ingress.allowedSourceRanges
+# (annotation key: console.ingress.sourceRangeAnnotation; it wins over
+# console.ingress.annotations). The console also passes the client address the
+# controller saw on to the API, which checks admin.allowedCidrs against it.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "openctem.consoleFullname" . }}
   labels:
     {{- include "openctem.consoleLabels" . | nindent 4 }}
-  {{- with $c.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- toYaml (merge (dict $c.ingress.sourceRangeAnnotation (join "," $c.ingress.allowedSourceRanges)) ($c.ingress.annotations | default dict)) | nindent 4 }}
 spec:
   {{- with $c.ingress.className }}
   ingressClassName: {{ . }}

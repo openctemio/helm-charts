@@ -69,9 +69,13 @@ spec:
             {{- range $e := $c.extraEnv }}
             {{- if kindIs "map" $e }}{{- $envNames = append $envNames (toString ($e.name | default "")) }}{{- end }}
             {{- end }}
-            {{- if and (eq (include "openctem.gatewayMode" .) "caddy") (not (has "TRUST_PROXY_HEADERS" $envNames)) }}
-            # The bundled gateway overwrites the client-address headers, so the
-            # console passes them on to the API (audit log, allow-lists).
+            {{- if and (or (eq (include "openctem.gatewayMode" .) "caddy") $c.ingress.enabled) (not (has "TRUST_PROXY_HEADERS" $envNames)) }}
+            # The bundled gateway, or the ingress controller in front of the
+            # console (console.ingress), sets the client-address headers, so
+            # the console passes them on to the API: the API's admin network
+            # check (admin.allowedCidrs), audit log and rate limits then see
+            # the client, not this pod. networkPolicy lets only that caller
+            # reach the console (required with console.ingress).
             - name: TRUST_PROXY_HEADERS
               value: "true"
             {{- end }}

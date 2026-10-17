@@ -137,6 +137,25 @@ API Deployment, which every render includes.
 {{- if ne $mode "host" -}}
 {{- fail "\n\nconsole.ingress.enabled=true needs admin.site.mode=host and admin.site.host (the console's own DNS name): port mode is served only by the bundled Caddy gateway (gateway.mode=caddy).\n" -}}
 {{- end -}}
+{{- if not .Values.console.ingress.allowedSourceRanges -}}
+{{- fail "\n\nconsole.ingress.enabled=true needs console.ingress.allowedSourceRanges: the client networks that may reach the console (CIDRs, for example your office or VPN range). Without it nothing limits who reaches the console from the internet. Use [0.0.0.0/0, ::/0] only if an identity-aware proxy in front is the gate.\n" -}}
+{{- end -}}
+{{- if not (include "openctem.gatewayTrustedProxies" .) -}}
+{{- fail "\n\nconsole.ingress.enabled=true needs gateway.trustedProxies (the CIDRs of the pods that connect to the API: the ingress controller and the console): the API takes the client address from the console only when it trusts it, and checks admin.allowedCidrs on that address.\n" -}}
+{{- end -}}
+{{- if not .Values.networkPolicy.enabled -}}
+{{- fail "\n\nconsole.ingress.enabled=true needs networkPolicy.enabled=true: the console believes the client address its caller sends, so only the ingress controller may reach it.\n" -}}
+{{- end -}}
+{{- if not (or .Values.networkPolicy.ingressControllerNamespaceSelector .Values.networkPolicy.ingressControllerPodSelector) -}}
+{{- fail "\n\nconsole.ingress.enabled=true needs networkPolicy.ingressControllerNamespaceSelector (and/or ingressControllerPodSelector) naming the ingress controller: the console believes the client address its caller sends.\n" -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.console.enabled -}}
+{{- $api := .Values.api | default dict -}}
+{{- $as := $api.autoscaling | default dict -}}
+{{- if and (or (gt (int ($api.replicaCount | default 1)) 1) $as.enabled) (not $api.auth.existingSecret) (not $api.auth.jwtSecret) -}}
+{{- fail "\n\nMore than one API replica (api.replicaCount > 1, or api.autoscaling.enabled) with the console needs a session secret you set: api.auth.jwtSecret or api.auth.existingSecret. The console's CSRF tokens are signed with a key derived from it, so every replica must hold the same, stable value (a chart-generated one is not reproducible under helm template or GitOps renders).\n" -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq $mode "host") (not .Values.admin.site.host) (or (eq (include "openctem.gatewayMode" .) "caddy") .Values.console.ingress.enabled) -}}
 {{- fail "\n\nadmin.site.mode=host needs admin.site.host: the console's own DNS name (for example admin.example.com).\n" -}}

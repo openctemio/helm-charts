@@ -1808,6 +1808,15 @@
             "className": {
               "type": "string"
             },
+            "allowedSourceRanges": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "sourceRangeAnnotation": {
+              "type": "string"
+            },
             "annotations": {
               "type": "object"
             },

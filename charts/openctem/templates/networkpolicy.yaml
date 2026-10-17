@@ -129,7 +129,7 @@ spec:
               {{- toYaml .Values.networkPolicy.ingressControllerPodSelector | nindent 14 }}
           {{- end }}
         {{- else }}
-        - namespaceSelector: {}
+        {{- fail "\n\nconsole.ingress.enabled=true with networkPolicy.enabled needs networkPolicy.ingressControllerNamespaceSelector (and/or ingressControllerPodSelector): the console believes the client address its caller sends, so it must not be open to every namespace.\n" }}
         {{- end }}
       ports:
         - port: 3000

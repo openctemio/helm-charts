@@ -1110,12 +1110,26 @@ console:
     port: 3000
   # -- Console behind your own Ingress / HTTPRoute (gateway.mode=ingress,
   # httpRoute or none), on admin.site.host (needs admin.site.mode=host). The
-  # client-network gate is then your ingress's own (for example an
-  # nginx.ingress.kubernetes.io/whitelist-source-range annotation), not
-  # admin.allowedCidrs. Not for gateway.mode=caddy (the bundled gateway serves
-  # the console site).
+  # client-network gate is then your ingress controller's source range list
+  # (allowedSourceRanges, required), and the console passes the client address
+  # the controller saw to the API, which also checks admin.allowedCidrs on it.
+  # For that the controller must see the real client address (for example
+  # externalTrafficPolicy: Local or the PROXY protocol on the load balancer)
+  # and overwrite X-Forwarded-For, gateway.trustedProxies must cover the
+  # console pods, and networkPolicy must be enabled with the ingress
+  # controller selector (rendering fails otherwise): the console believes the
+  # address its caller sends. Not for gateway.mode=caddy (the bundled gateway
+  # serves the console site).
   ingress:
     enabled: false
+    # -- Client networks that may reach the console (CIDRs). Required with
+    # console.ingress.enabled; rendered into sourceRangeAnnotation for an
+    # Ingress. For an HTTPRoute the chart cannot render a gate: enforce the
+    # same ranges in your Gateway's policy.
+    allowedSourceRanges: []
+    # -- Annotation key that carries allowedSourceRanges on the Ingress
+    # (default: ingress-nginx; set your controller's key).
+    sourceRangeAnnotation: nginx.ingress.kubernetes.io/whitelist-source-range
     className: ""
     annotations: {}
     tls:

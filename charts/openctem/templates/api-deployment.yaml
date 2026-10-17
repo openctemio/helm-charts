@@ -74,7 +74,7 @@ spec:
               protocol: TCP
             {{- if .Values.admin.listener.enabled }}
             # The platform console API (ADMIN_LISTEN_ADDR): the <api>-admin
-            # Service, for the UI's console proxy only.
+            # Service, for the console service only.
             - name: admin
               containerPort: {{ .Values.admin.listener.port }}
               protocol: TCP
@@ -116,6 +116,11 @@ spec:
               value: {{ join "," . | quote }}
             {{- end }}
             {{- end }}
+            {{- include "openctem.consoleValidate" . }}
+            # Which planes this API process serves (all: tenant API and console
+            # API). Splitting needs two deployments; see api.plane.
+            - name: OPENCTEM_PLANE
+              value: {{ .Values.api.plane | default "all" | quote }}
             - name: SERVER_HOST
               value: "0.0.0.0"
             - name: SERVER_PORT

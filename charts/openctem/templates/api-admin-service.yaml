@@ -1,6 +1,6 @@
 {{- if .Values.admin.listener.enabled }}
 # The API's platform console listener (ADMIN_LISTEN_ADDR): reached only by the
-# UI's console proxy (ADMIN_API_URL); never routed by a gateway or ingress.
+# console service (ADMIN_API_URL); never routed by a gateway or ingress.
 apiVersion: v1
 kind: Service
 metadata:

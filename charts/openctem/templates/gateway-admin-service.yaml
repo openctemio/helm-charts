@@ -1,8 +1,8 @@
-{{- if and (include "openctem.adminSiteOn" .) (not .Values.admin.site.host) }}
+{{- if include "openctem.adminSitePort" . }}
 {{- $s := .Values.admin.site.service }}
-# The platform console's own site (port mode): its own Service, ClusterIP by
+# The platform console's own site (port mode, its own origin): its own Service, ClusterIP by
 # default, so the console is not on the network unless chosen
-# (kubectl port-forward svc/{{ include "openctem.gatewayFullname" . }}-admin {{ .Values.admin.site.port }}).
+# (kubectl port-forward svc/{{ include "openctem.gatewayFullname" . }}-admin {{ .Values.admin.site.port }}, then https://localhost:{{ .Values.admin.site.port }}/).
 apiVersion: v1
 kind: Service
 metadata:

@@ -314,38 +314,120 @@ expect "netpol ingress: controller -> api:8080" "kubernetes.io/metadata.name: in
 reject "netpol ingress: no gateway policy" "t-openctem-gateway-allow-ingress" "$out"
 
 
-# The platform console: its own API listener, and its own site on the bundled
-# Caddy (private networks only), the UI serving it only there.
+# The platform console: its own app (Deployment + Service), its own API
+# listener, and its own site on the bundled Caddy (private networks only).
 CAD=("${GW[@]}" --set gateway.mode=caddy)
 out="$(render "${CAD[@]}")"
 expect "console: API listener on the pod IP" 'value: "$(POD_IP):8081"' "$out"
 expect "console: API allow-list" 'value: "127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7"' "$out"
 expect "console: <api>-admin Service" "name: t-openctem-api-admin" "$out"
-expect "console: UI talks to the console listener" 'value: "http://t-openctem-api-admin:8081"' "$out"
-expect "console: UI serves the console only on its site" "name: OPENCTEM_ADMIN_PLANE
-              value: separate" "$out"
+expect "console: API serves all planes" 'name: OPENCTEM_PLANE
+              value: "all"' "$out"
+cdep="$(only console-deployment.yaml "${CAD[@]}")"
+expect "console: Deployment" "kind: Deployment
+metadata:
+  name: t-openctem-console" "$cdep"
+expect "console: image" "ghcr.io/openctemio/openctem-console:" "$cdep"
+expect "console: talks to the console listener" 'name: ADMIN_API_URL
+              value: "http://t-openctem-api-admin:8081"' "$cdep"
+expect "console: brand from the API service" 'name: BACKEND_API_URL
+              value: "http://t-openctem-api:' "$cdep"
+expect "console: secure cookies" 'name: SECURE_COOKIES
+              value: "true"' "$cdep"
+expect "console: trusts the bundled gateway's client-address headers" "name: TRUST_PROXY_HEADERS" "$cdep"
+expect "console: read-only root, no token" "readOnlyRootFilesystem: true" "$cdep"
+expect "console: no service account token" "automountServiceAccountToken: false" "$cdep"
+expect "console: cache dir" "mountPath: /app/console/.next/cache" "$cdep"
+expect "console: Service" "name: t-openctem-console
+  labels:" "$(awk '/kind: Service/,0' <<<"$cdep")"
+reject "console: tenant web app has no console env" "ADMIN_API_URL" "$(only ui-deployment.yaml "${CAD[@]}")"
+reject "console: tenant web app has no plane env" "OPENCTEM_ADMIN_PLANE" "$out"
+reject "console: no /admin path" "path: /admin" "$out"
+expect "console: gateway upstream" 'name: OPENCTEM_CONSOLE_UPSTREAM
+              value: "t-openctem-console:3000"' "$out"
 expect "console: gateway console site (port mode)" 'name: OPENCTEM_ADMIN_SITE
               value: "port"' "$out"
-expect "console: gateway console port" "containerPort: 8444" "$out"
+expect "console: gateway console port" "containerPort: 8443" "$out"
 expect "console: console Service is ClusterIP" "name: t-openctem-gateway-admin" "$out"
 expect "console: admin site files mounted" "path: admin/on.site" "$out"
+expect "console: servers.common mounted" "path: servers.common" "$out"
+expect "sensors: mTLS upstream on 9443" 'name: SENSOR_MTLS_UPSTREAM
+              value: "t-openctem-api:9443"' "$out"
 gwadm="$(awk '/name: t-openctem-gateway-admin$/,/^---/' <<<"$out")"
 expect "console: console Service ClusterIP" "type: ClusterIP" "$gwadm"
-out="$(render "${CAD[@]}" --set admin.site.host=admin.ctem.example.com)"
+expect "console: console Service port" "port: 8443" "$gwadm"
+out="$(render "${CAD[@]}" --set admin.site.mode=host --set admin.site.host=admin.ctem.example.com)"
 expect "console: host mode" 'name: OPENCTEM_ADMIN_SITE
               value: "host"' "$out"
+expect "console: host mode name" 'name: OPENCTEM_ADMIN_HOST
+              value: "admin.ctem.example.com"' "$out"
 reject "console: host mode has no console port Service" "name: t-openctem-gateway-admin" "$out"
+refuse "console: host mode needs a host" "admin.site.mode=host needs admin.site.host" "${CAD[@]}" --set admin.site.mode=host
+out="$(render "${CAD[@]}" --set admin.site.mode=off)"
+reject "console: mode off has no console site" "name: OPENCTEM_ADMIN_SITE" "$out"
+reject "console: mode off has no console port Service" "name: t-openctem-gateway-admin" "$out"
+out="$(render "${CAD[@]}" --set console.enabled=false)"
+reject "console: disabled has no Deployment" "name: t-openctem-console" "$out"
+reject "console: disabled has no gateway upstream" "name: OPENCTEM_CONSOLE_UPSTREAM" "$out"
+refuse "console: admin.site.enabled is removed" "admin.site.enabled was removed" "${CAD[@]}" --set admin.site.enabled=true
+refuse "console: only api.plane=all" "api.plane=tenant" "${CAD[@]}" --set api.plane=tenant
 out="$(render "${GW[@]}" --set gateway.mode=ingress)"
-reject "console: no console site without the bundled Caddy" "OPENCTEM_ADMIN_PLANE" "$out"
+reject "console: no console site without the bundled Caddy" "name: OPENCTEM_ADMIN_SITE" "$out"
 expect "console: listener on in every gateway mode" "name: t-openctem-api-admin" "$out"
+reject "console: no TRUST_PROXY_HEADERS outside caddy mode" "TRUST_PROXY_HEADERS
+              value" "$(only console-deployment.yaml "${GW[@]}" --set gateway.mode=ingress)"
+# Console behind the operator's own ingress / HTTPRoute (host mode). The
+# console believes the client address its caller sends, so the chart demands a
+# source-range allow-list, the trusted proxies and a network policy naming the
+# ingress controller.
+CING=("${GW[@]}" --set admin.site.mode=host --set admin.site.host=admin.ctem.example.com --set console.ingress.enabled=true)
+CNP=(--set networkPolicy.enabled=true --set 'networkPolicy.ingressControllerNamespaceSelector.kubernetes\.io/metadata\.name=ingress-nginx')
+CSR=(--set 'console.ingress.allowedSourceRanges={10.0.0.0/8,192.0.2.0/24}')
+refuse "console ingress: needs a source-range allow-list" "console.ingress.allowedSourceRanges" "${CING[@]}" --set gateway.mode=ingress "${CNP[@]}"
+refuse "console ingress: needs a network policy" "needs networkPolicy.enabled=true" "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}"
+refuse "console ingress: network policy needs the ingress controller selector" "networkPolicy.ingressControllerNamespaceSelector" "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}" --set networkPolicy.enabled=true
+refuse "console ingress: needs the trusted proxies" "needs gateway.trustedProxies" "${CING[@]}" --set gateway.mode=none --set 'gateway.trustedProxies={}' "${CSR[@]}" "${CNP[@]}"
+out="$(only console-ingress.yaml "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}" "${CNP[@]}" \
+  --set 'console.ingress.annotations.nginx\.ingress\.kubernetes\.io/whitelist-source-range=0.0.0.0/0')"
+expect "console ingress: own host" 'host: "admin.ctem.example.com"' "$out"
+expect "console ingress: to the console Service" "name: t-openctem-console" "$out"
+expect "console ingress: the allow-list is the ingress's source range" 'nginx.ingress.kubernetes.io/whitelist-source-range: 10.0.0.0/8,192.0.2.0/24' "$out"
+reject "console ingress: an annotation cannot widen the allow-list" "0.0.0.0/0" "$out"
+cdep="$(only console-deployment.yaml "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}" "${CNP[@]}")"
+expect "console ingress: the console forwards the controller's client address" 'name: TRUST_PROXY_HEADERS
+              value: "true"' "$cdep"
+out="$(only networkpolicy.yaml "${CING[@]}" --set gateway.mode=ingress "${CSR[@]}" "${CNP[@]}")"
+cnp="$(awk '/name: t-openctem-console-allow-ingress/,/^---/' <<<"$out")"
+expect "netpol: console ingress from the ingress controller only" "kubernetes.io/metadata.name: ingress-nginx" "$cnp"
+reject "netpol: console ingress is not open to every namespace" "namespaceSelector: {}" "$cnp"
+out="$(only console-ingress.yaml "${CING[@]}" --set gateway.mode=httpRoute "${CSR[@]}" "${CNP[@]}" \
+  --set 'gateway.httpRoute.parentRefs[0].name=gw' --set 'console.ingress.parentRefs[0].name=gw')"
+expect "console route: HTTPRoute for its own host" "kind: HTTPRoute" "$out"
+refuse "console route: needs a source-range allow-list too" "console.ingress.allowedSourceRanges" "${CING[@]}" --set gateway.mode=httpRoute --set 'gateway.httpRoute.parentRefs[0].name=gw' "${CNP[@]}"
+# More than one API replica needs a session secret the operator set (the
+# console's CSRF key is derived from it).
+refuse "console: API replicas need an explicit session secret" "api.auth.jwtSecret or api.auth.existingSecret" "${CAD[@]}" --set api.allowMultipleReplicas=true --set api.attachments.storage=s3 --set api.attachments.s3.bucket=b --set api.attachments.s3.existingSecret=s3sec --set api.replicaCount=2
+refuse "console: API autoscaling needs an explicit session secret" "api.auth.jwtSecret or api.auth.existingSecret" "${CAD[@]}" --set api.allowMultipleReplicas=true --set api.attachments.storage=s3 --set api.attachments.s3.bucket=b --set api.attachments.s3.existingSecret=s3sec --set api.autoscaling.enabled=true
+out="$(render "${CAD[@]}" --set api.allowMultipleReplicas=true --set api.attachments.storage=s3 --set api.attachments.s3.bucket=b --set api.attachments.s3.existingSecret=s3sec --set api.replicaCount=2 --set api.auth.existingSecret=my-session)"
+expect "console: API replicas with an existing secret render" "kind: Deployment" "$out"
+refuse "console ingress: not with the bundled Caddy" "console.ingress.enabled=true is for gateway.mode=ingress" "${CING[@]}" --set gateway.mode=caddy
+refuse "console ingress: port mode is caddy-only" "needs admin.site.mode=host" "${GW[@]}" --set gateway.mode=ingress --set console.ingress.enabled=true
 out="$(render "${CAD[@]}" --set admin.listener.bindPodIP=false)"
 expect "console: IPv6 pods bind every interface explicitly" 'name: ADMIN_LISTEN_ALLOW_ALL_INTERFACES
               value: "true"' "$out"
-out="$(render "${CAD[@]}" --set admin.listener.enabled=false --set admin.site.enabled=false)"
+out="$(render "${CAD[@]}" --set admin.listener.enabled=false --set admin.site.mode=off)"
 reject "console: everything off" "ADMIN_LISTEN_ADDR" "$out"
+expect "console: without the listener it talks to the API service" 'name: ADMIN_API_URL
+              value: "http://t-openctem-api:' "$out"
 out="$(only networkpolicy.yaml "${CAD[@]}" --set networkPolicy.enabled=true)"
 apinp="$(awk '/name: t-openctem-api-allow-ingress/,/^---/' <<<"$out")"
-expect "netpol: console listener from the UI pods only" "- port: 8081" "$apinp"
+expect "netpol: console listener from the console pods only" "- port: 8081" "$apinp"
+expect "netpol: console listener selector is the console" "app.kubernetes.io/component: console" "$apinp"
+cnp="$(awk '/name: t-openctem-console-allow-ingress/,/^---/' <<<"$out")"
+expect "netpol: console from the gateway pods" "app.kubernetes.io/component: gateway" "$cnp"
+reject "netpol: console not open to every namespace" "namespaceSelector: {}" "$cnp"
+gwnp="$(awk '/name: t-openctem-gateway-allow-ingress/,/^---/' <<<"$out")"
+expect "netpol: gateway console port open" "port: 8443" "$gwnp"
 refuse "console: allow-list entries are CIDRs" "allowedCidrs" "${CAD[@]}" --set 'admin.allowedCidrs={office}'
 
 echo

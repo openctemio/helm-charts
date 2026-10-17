@@ -2,5 +2,5 @@
 # api/deploy/gateway at this commit. Do not edit them here: change the
 # monorepo, then run scripts/sync-gateway.sh <ref>. CI
 # (tests/gateway/upstream.sh) fails when a copy differs from this commit.
-commit=eaaad86314a7513594a8bcbd33346f3f87d5e54d
-files=Caddyfile planes.caddy entrypoint.sh sensors/off.wrappers sensors/alpn.wrappers sensors/passthrough.wrappers admin/off.site admin/off.tenant admin/on.site admin/on.tenant
+commit=05f1cd187d1838ec529c3c84ded73cecaf49946f
+files=Caddyfile planes.caddy entrypoint.sh servers.common sensors/off.wrappers sensors/alpn.wrappers sensors/passthrough.wrappers admin/off.site admin/off.tenant admin/on.site admin/on.tenant

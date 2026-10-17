@@ -13,7 +13,7 @@ pass() { echo "ok   - $1"; }
 fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 
 render() { helm template t "$chart" --set api.appEnv=development "$@" 2>&1; }
-multi=(--set api.allowMultipleReplicas=true)
+multi=(--set api.allowMultipleReplicas=true --set api.auth.jwtSecret=attachments-test-session-secret-0123456789)
 
 expect() { # expect <description> <pattern> <output>
   if grep -qF -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: $2)"; fi

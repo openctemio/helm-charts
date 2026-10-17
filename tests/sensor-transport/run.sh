@@ -33,8 +33,8 @@ expect "default: v3 auto" 'name: SENSOR_TRANSPORT_V3
 reject "default: never the retired switch" "SENSOR_TRANSPORT_V3_ENABLED" "$def"
 reject "default: public host derived by the API" "SENSOR_PUBLIC_HOST" "$def"
 expect "default: mTLS listener" 'name: SENSOR_MTLS_LISTEN_ADDR
-              value: ":8443"' "$def"
-expect "default: container port" "containerPort: 8443" "$def"
+              value: ":9443"' "$def"
+expect "default: container port" "containerPort: 9443" "$def"
 expect "default: Service port" "name: sensor-mtls" "$def"
 expect "the chart makes the sensor CA" "name: t-openctem-api-sensor-ca" "$def"
 expect "the CA secret is a TLS secret" "type: kubernetes.io/tls" "$def"
@@ -60,7 +60,7 @@ expect "routing files mounted (all modes)" "path: sensors/alpn.wrappers" "$stock
 alpn="$(render "${caddy[@]}" "${l4[@]}")"
 expect "layer4 image: alpn by default" 'name: OPENCTEM_SENSOR_GATEWAY
               value: alpn' "$alpn"
-expect "alpn: upstream is the API mTLS port" 'value: "t-openctem-api:8443"' "$alpn"
+expect "alpn: upstream is the API mTLS port" 'value: "t-openctem-api:9443"' "$alpn"
 reject "alpn: no sensor host name" "name: SENSOR_PUBLIC_HOSTNAME" "$alpn"
 reject "alpn: public host derived from the public URL" "name: SENSOR_PUBLIC_HOST" "$alpn"
 expect "alpn: PROXY trust defaults to the gateway's pods" 'name: SENSOR_MTLS_TRUSTED_PROXIES
@@ -106,7 +106,7 @@ refused "retired env in api.extraEnv" "SENSOR_TRANSPORT_V3_ENABLED -> api.sensor
   --set 'api.extraEnv[0].name=SENSOR_TRANSPORT_V3_ENABLED' --set-string 'api.extraEnv[0].value=true'
 
 np="$(render --set networkPolicy.enabled=true "${caddy[@]}" "${l4[@]}")"
-expect "network policy opens the mTLS port to the release" "- port: 8443" "$np"
+expect "network policy opens the mTLS port to the release" "- port: 9443" "$np"
 reject "network policy: not to the world without a dedicated Service" "cidr: 0.0.0.0/0" "$np"
 npi="$(render --set networkPolicy.enabled=true --set gateway.mode=ingress --set gateway.host=ctem.example.com \
   --set 'gateway.trustedProxies={10.42.0.0/16}' --set api.sensorTransport.publicHost=sensors.example.com:443 \

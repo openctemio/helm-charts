@@ -174,7 +174,7 @@ api:
    Job is **kept** until you delete it (it is not deleted on success and has
    no `ttlSecondsAfterFinished`), so the one-time credentials cannot vanish
    before you read them.
-3. The administrators sign in on `/login`, open the admin console (`/admin`),
+3. The administrators sign in on `/login`, open the platform console (its own site, `admin.site`),
    enroll an authenticator (TOTP) and change the temporary password.
 4. The owner sets a password with the link, signs in on `/login`, then invites
    users or configures SSO for the organization.
@@ -348,7 +348,7 @@ every sensor back on v2 at its next call.
 |---|---|---|
 | `api.sensorTransport.mode` | `auto` | `SENSOR_TRANSPORT_V3`: `auto` or `off`. |
 | `api.sensorTransport.publicHost` | `""` | `SENSOR_PUBLIC_HOST`, `host:port` sensors dial for gRPC. Empty: derived from the public URL. Set it for a dedicated sensor host name or the dedicated Service's address. |
-| `api.sensorTransport.mtls.port` | `8443` | The API's mTLS listener (container and Service port). |
+| `api.sensorTransport.mtls.port` | `9443` | The API's mTLS listener (container and Service port). |
 | `api.sensorTransport.mtls.certTTL` | `168h` | Client certificate lifetime (1h..720h). |
 | `api.sensorTransport.mtls.trustedProxies` | `[]` | `SENSOR_MTLS_TRUSTED_PROXIES`: CIDRs whose PROXY protocol v2 header is believed. Empty: `gateway.trustedProxies` when the bundled Caddy routes sensors, else none. |
 | `api.sensorTransport.mtls.ca.existingSecret` | `""` | Your sensor CA (`tls.crt`, `tls.key`). It is not the job-signing key. |
@@ -724,6 +724,62 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Upgrading to 0.28.0 (the platform console as its own service)
+
+The platform console is now its own app and process, on its own origin, and
+the tenant web app has no console at all (RFC-022 revision 21):
+
+- **Needs an `appVersion` that publishes `ghcr.io/openctemio/openctem-console`**
+  (the openctem release after PR 2443). With an older `appVersion`, set
+  `console.image.tag` to a release that has it, or `console.enabled=false`.
+- **`console`**: a new Deployment and ClusterIP Service
+  (`<release>-openctem-console`, port 3000), non-root, read-only root
+  filesystem, no service-account token. It talks to the API's console listener
+  (`admin.listener`) and to the API for the brand. With `networkPolicy.enabled`
+  only the bundled gateway (or `console.ingress`'s controller) reaches it, and
+  the API's console listener is reachable only from the console pods.
+- **`admin.site.mode`** replaces `admin.site.enabled` (setting the old key
+  fails the render): `port` (default), `host` or `off`.
+  - `host` is the recommended production setup: the console on its own DNS name
+    (`admin.site.host`, for example `admin.example.com`) on port 443, a
+    different origin for the browser.
+  - `port` serves it on `admin.site.port` (now **8443**, was 8444) of
+    `gateway.host`, behind the ClusterIP Service
+    `<release>-openctem-gateway-admin`: `kubectl port-forward
+    svc/<release>-openctem-gateway-admin 8443`, then `https://localhost:8443/`.
+    Port numbers are not a security control (browsers share cookies across the
+    ports of a host): use it for evaluation or a private network.
+  - Never publish the console through a public tunnel without a zero-trust
+    (identity-aware) proxy in front of it.
+- **The console is at the root of its site**: there is no `/admin` path any
+  more. The platform identity provider's redirect URI becomes
+  `<console origin>/login/callback`; update it at the identity provider.
+- **`console.ingress`** (gateway.mode ingress, httpRoute or none; needs
+  `admin.site.mode=host`): an Ingress or HTTPRoute for `admin.site.host` to
+  the console Service. The console passes the client address the controller
+  saw to the API, which checks `admin.allowedCidrs` on it, so the render
+  requires: `console.ingress.allowedSourceRanges` (the controller's source
+  range list; for an HTTPRoute enforce the same ranges in the Gateway's
+  policy), `gateway.trustedProxies` covering the console pods, and
+  `networkPolicy.enabled` with the ingress controller selector (only the
+  controller may reach the console, which believes the address its caller
+  sends). The controller must see the real client address (for example
+  `externalTrafficPolicy: Local`). Port mode exists only with the bundled
+  Caddy. With more than one API replica or autoscaling the console needs
+  `api.auth.jwtSecret` or `api.auth.existingSecret` (its CSRF key derives from
+  it).
+- **`api.plane`** (`OPENCTEM_PLANE`, default `all`): only `all` is supported;
+  serving the tenant and console planes from separate API deployments needs two
+  releases and is a follow-up. Other values fail the render.
+- **Sensor mTLS port**: `api.sensorTransport.mtls.port` defaults to **9443**
+  (was 8443, now the console's port) and the bundled gateway routes sensors to
+  it. Sensors still dial 443. A `publicHost` that names port 8443 for a
+  dedicated Service must be updated with it.
+- The gateway files gain `servers.common` and the console site proxies to the
+  console service (`OPENCTEM_CONSOLE_UPSTREAM`).
+- `gateway.trustedProxies` must also cover the console pods (the pod CIDR
+  already does).
+
 ## Upgrading to 0.27.0 (the platform console as its own plane)
 
 The platform administration console moves off the public surface:
@@ -742,7 +798,8 @@ The platform administration console moves off the public surface:
   (`admin.site.port`, 8444) behind the ClusterIP Service
   `<release>-openctem-gateway-admin` (reach it with
   `kubectl port-forward svc/<release>-openctem-gateway-admin 8444`, then
-  `https://localhost:8444/admin`), or on its own DNS name
+  `https://localhost:8444/admin`; see 0.28.0 for the console service, port
+  8443 and `admin.site.mode`), or on its own DNS name
   (`admin.site.host`, served on port 443 by name: the browser then isolates it
   from the main site entirely). The UI then serves the console only there and
   the main site answers 404 for `/admin` and `/api/v1/admin`. Other gateway
@@ -750,7 +807,7 @@ The platform administration console moves off the public surface:
 
 Administrators sign in again on the console's own sign-in page (email,
 password, then the authenticator code). To keep the old layout:
-`admin.listener.enabled=false` and `admin.site.enabled=false`.
+`admin.listener.enabled=false` and `admin.site.mode=off`.
 ## Upgrading to 0.25.0 (bundled sensor as a shared sensor)
 
 - New `sensor.enrollment` (default `pairing`, unchanged behavior) and
@@ -1113,13 +1170,13 @@ description from its `# --` comment (generated with
 |-----|------|---------|-------------|
 | `admin` | object | see `values.yaml` | --------------------------------------------------------------------------- |
 | `admin.allowedCidrs` | list | `["127.0.0.0/8","::1/128","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","fc00::/7"]` | Client networks that may reach the console (ADMIN_ALLOWED_CIDRS, and the bundled Caddy's console site). Default: private networks only. Add your office/VPN range, or 0.0.0.0/0 and ::/0 for an internet-facing console. |
-| `admin.listener.bindPodIP` | bool | `true` | Bind the pod IP (a private address, as the API requires). Set false for IPv6-only pods: the listener then binds every interface with ADMIN_LISTEN_ALLOW_ALL_INTERFACES=true; enable networkPolicy so only the UI pods reach it. |
-| `admin.listener.enabled` | bool | `true` | Serve the console API on its own listener in the API pod (ADMIN_LISTEN_ADDR); the main port then answers 404 for /api/v1/admin. The UI's console proxy reaches it through the <api>-admin Service. |
+| `admin.listener.bindPodIP` | bool | `true` | Bind the pod IP (a private address, as the API requires). Set false for IPv6-only pods: the listener then binds every interface with ADMIN_LISTEN_ALLOW_ALL_INTERFACES=true; enable networkPolicy so only the console pods reach it. |
+| `admin.listener.enabled` | bool | `true` | Serve the console API on its own listener in the API pod (ADMIN_LISTEN_ADDR); the main port then answers 404 for /api/v1/admin. The console reaches it through the <api>-admin Service (ADMIN_API_URL). |
 | `admin.listener.port` | int | `8081` | Port of the console listener (plain HTTP, cluster-internal only). |
-| `admin.site.enabled` | bool | `true` | Turn the console site on (gateway.mode=caddy). |
-| `admin.site.host` | string | `""` | The console's own DNS name (OPENCTEM_ADMIN_SITE=host, served on the gateway's port 443 by name). Empty: a second port of gateway.host (OPENCTEM_ADMIN_SITE=port). |
-| `admin.site.port` | int | `8444` | Port of the console site in port mode. |
-| `admin.site.service.type` | string | `"ClusterIP"` | Service for the console port (port mode). ClusterIP keeps it off the network: kubectl port-forward svc/<release>-gateway-admin 8444, then https://localhost:8444/admin. LoadBalancer/NodePort publish it (the allow-list above still applies). |
+| `admin.site.host` | string | `""` | The console's own DNS name, for mode=host (example: admin.example.com). |
+| `admin.site.mode` | string | `"port"` | How the console is reached: host: its own DNS name (admin.site.host, for example admin.example.com) on the gateway's port 443. RECOMMENDED for production: a different host is a different origin for the browser (the strongest isolation) and needs no extra port. port: a second port of gateway.host (admin.site.port) behind a ClusterIP Service (kubectl port-forward). Different ports are NOT a security control: browsers share cookies across ports of one host, so use it for evaluation or a private network. off: no console site (the console is not published). Only the bundled Caddy (gateway.mode=caddy) serves it; for ingress or httpRoute use console.ingress with mode=host. |
+| `admin.site.port` | int | `8443` | Port of the console site in port mode. |
+| `admin.site.service.type` | string | `"ClusterIP"` | Service for the console port (port mode). ClusterIP keeps it off the network: kubectl port-forward svc/<release>-gateway-admin 8443, then https://localhost:8443/. LoadBalancer/NodePort publish it (the allow-list above still applies). |
 | `api.affinity` | object | `{}` | Pod affinity/anti-affinity. For HA, spread replicas across nodes. See topologySpreadConstraints below for a lighter-weight alternative; use one or the other. Example soft anti-affinity is in values-production.yaml. |
 | `api.allowMultipleReplicas` | bool | `false` | Opt in to more than one API replica. Only set this once the deployed API version documents multi-replica support. |
 | `api.appEnv` | string | `"production"` | Application environment. "production" (the secure default) turns validateProduction() into a HARD BOOT GATE: it requires DB TLS, Redis TLS + a >=32-char Redis password, a >=64-char JWT secret, an encryption key, and secure cookies — the API refuses to start otherwise. Set to "development" or "staging" ONLY as a conscious opt-out (e.g. to run the bundled, non-TLS Redis for a demo). See values-production.yaml for the required prod values. |
@@ -1141,7 +1198,7 @@ description from its `# --` comment (generated with
 | `api.autoscaling.maxReplicas` | int | `100` |  |
 | `api.autoscaling.minReplicas` | int | `1` |  |
 | `api.autoscaling.targetCPUUtilizationPercentage` | int | `80` |  |
-| `api.bootstrapAdmin` | object | see `values.yaml` | Bootstrap the first PLATFORM administrators (RFC-022) and, optionally, the first organization. Runs /app/bootstrap-admin as a post-install hook Job after the migrations. The primary admin and a break-glass backup super admin are each created as a sign-in account with a temporary password printed ONCE to the Job log. Both sign in on /login, enroll an authenticator when opening the admin console (/admin), and must change the temporary password first. The backup is local (never bound to the platform identity provider, exempt from "require IdP"); every sign-in with it is audited (high), logged with alert=break_glass_sign_in and emailed to the other admins (system SMTP). Store its credentials offline and test it at least every 90 days. The completed Job (and its log) is KEPT until you delete it: read the credentials with `kubectl logs job/<fullname>-api-bootstrap-admin` (the exact command is in NOTES), store them, then `kubectl delete job/...`. Re-running is safe: existing admins are left unchanged and an existing organization slug is skipped; any other error fails the Job and the release. |
+| `api.bootstrapAdmin` | object | see `values.yaml` | Bootstrap the first PLATFORM administrators (RFC-022) and, optionally, the first organization. Runs /app/bootstrap-admin as a post-install hook Job after the migrations. The primary admin and a break-glass backup super admin are each created as a sign-in account with a temporary password printed ONCE to the Job log. Both sign in on /login, enroll an authenticator when opening the admin console (its own site, admin.site), and must change the temporary password first. The backup is local (never bound to the platform identity provider, exempt from "require IdP"); every sign-in with it is audited (high), logged with alert=break_glass_sign_in and emailed to the other admins (system SMTP). Store its credentials offline and test it at least every 90 days. The completed Job (and its log) is KEPT until you delete it: read the credentials with `kubectl logs job/<fullname>-api-bootstrap-admin` (the exact command is in NOTES), store them, then `kubectl delete job/...`. Re-running is safe: existing admins are left unchanged and an existing organization slug is skipped; any other error fails the Job and the release. |
 | `api.bootstrapAdmin.backoffLimit` | int | `0` | Retries. 0: a failure is reported once, never retried (each attempt would print a new log the operator has to find). |
 | `api.bootstrapAdmin.backupEmail` | string | `""` | Break-glass backup administrator (required unless noBackup=true). |
 | `api.bootstrapAdmin.extraEnv` | list | `[]` | Extra environment for the bootstrap-admin Job only, for example BOOTSTRAP_SMTP_HOST / _PORT / _USER / _PASSWORD / _FROM, the SMTP server it stores as the platform e-mail setting when none is stored (change it later in the admin console, System > E-mail). Take the password from a Secret with valueFrom.secretKeyRef. |
@@ -1189,6 +1246,7 @@ description from its `# --` comment (generated with
 | `api.migrations.sslMode` | string | `""` | Override the Postgres sslmode used in the connection URL. Blank = "disable" when postgresql.enabled, otherwise "require". |
 | `api.migrations.tolerations` | list | `[]` |  |
 | `api.nodeSelector` | object | `{}` |  |
+| `api.plane` | string | `"all"` | Which planes the API serves (OPENCTEM_PLANE): all \| tenant \| admin. Only `all` is supported: this chart runs one API Deployment. Serving the tenant plane and the console plane from separate API deployments needs two releases (a follow-up); any other value fails the render. |
 | `api.podAnnotations` | object | `{}` |  |
 | `api.podDisruptionBudget` | object | `{"enabled":false,"maxUnavailable":"","minAvailable":1}` | Optional PodDisruptionBudget. Set minAvailable OR maxUnavailable. |
 | `api.podLabels` | object | `{}` |  |
@@ -1211,7 +1269,7 @@ description from its `# --` comment (generated with
 | `api.sensorTransport.mode` | string | `"auto"` | SENSOR_TRANSPORT_V3: `auto` serves v3 and picks the bindings itself. `off` serves no v3 at all (every sensor back to v2 at its next call): the emergency switch. |
 | `api.sensorTransport.mtls.ca.existingSecret` | string | `""` | Secret (tls.crt, tls.key) with your sensor CA. Empty: the chart makes one and keeps it across upgrades and uninstall. |
 | `api.sensorTransport.mtls.certTTL` | string | `"168h"` | Client certificate lifetime (1h..720h). |
-| `api.sensorTransport.mtls.port` | int | `8443` | The API's mTLS listener port (container and Service). |
+| `api.sensorTransport.mtls.port` | int | `9443` | The API's mTLS listener port (container and Service). 9443 keeps 8443 free for the console's own port (admin.site.port); sensors still dial 443. |
 | `api.sensorTransport.mtls.trustedProxies` | list | `[]` | SENSOR_MTLS_TRUSTED_PROXIES: CIDRs whose PROXY protocol v2 header the mTLS listener believes. Empty: gateway.trustedProxies when the bundled Caddy routes sensors (gateway.caddy.sensorGateway alpn or passthrough), else none (the TCP peer is the sensor's address). |
 | `api.sensorTransport.publicHost` | string | `""` | SENSOR_PUBLIC_HOST: host:port sensors dial for gRPC. Empty: the host and port of the public URL (gateway.publicUrl, else APP_URL), reached through the gateway's ALPN routing. Set it for a dedicated sensor host name (gateway.caddy.sensorGateway=passthrough, an ingress-nginx ssl-passthrough Ingress) or the dedicatedService address. Advertised to sensors only while the self-probe passes either way. |
 | `api.service.annotations` | object | `{}` |  |
@@ -1228,6 +1286,20 @@ description from its `# --` comment (generated with
 | `api.topologySpreadConstraints` | list | `[]` | topologySpreadConstraints (values-driven, templated). Keeps the >= 2 replicas off a single node/zone. Empty by default; values-production.yaml ships a soft (ScheduleAnyway) hostname spread. Supports `tpl` for dynamic label values. |
 | `api.volumeMounts` | list | `[]` |  |
 | `api.volumes` | list | `[]` |  |
+| `console` | object | see `values.yaml` | --------------------------------------------------------------------------- |
+| `console.cacheSizeLimit` | string | `"128Mi"` | Size limit of the /app/console/.next/cache emptyDir. |
+| `console.enabled` | bool | `true` | Deploy the console. false: no console in the cluster (the console API stays reachable for the bootstrap CLI only). |
+| `console.extraEnv` | list | `[]` | Extra environment variables (list of name/value or valueFrom). |
+| `console.image.repository` | string | `"ghcr.io/openctemio/openctem-console"` | Console image (console/ in openctemio/openctem). Needs an appVersion that publishes it: the release after openctem PR 2443. |
+| `console.image.tag` | string | `""` | Defaults to the chart's appVersion. |
+| `console.ingress` | object | see `values.yaml` | Console behind your own Ingress / HTTPRoute (gateway.mode=ingress, httpRoute or none), on admin.site.host (needs admin.site.mode=host). The client-network gate is then your ingress controller's source range list (allowedSourceRanges, required), and the console passes the client address the controller saw to the API, which also checks admin.allowedCidrs on it. For that the controller must see the real client address (for example externalTrafficPolicy: Local or the PROXY protocol on the load balancer) and overwrite X-Forwarded-For, gateway.trustedProxies must cover the console pods, and networkPolicy must be enabled with the ingress controller selector (rendering fails otherwise): the console believes the address its caller sends. Not for gateway.mode=caddy (the bundled gateway serves the console site). |
+| `console.ingress.allowedSourceRanges` | list | `[]` | Client networks that may reach the console (CIDRs). Required with console.ingress.enabled; rendered into sourceRangeAnnotation for an Ingress. For an HTTPRoute the chart cannot render a gate: enforce the same ranges in your Gateway's policy. |
+| `console.ingress.parentRefs` | list | `[]` | HTTPRoute parentRefs when gateway.mode=httpRoute. |
+| `console.ingress.sourceRangeAnnotation` | string | `"nginx.ingress.kubernetes.io/whitelist-source-range"` | Annotation key that carries allowedSourceRanges on the Ingress (default: ingress-nginx; set your controller's key). |
+| `console.ingress.tls.secretName` | string | `""` | Defaults to <console fullname>-tls. |
+| `console.podSecurityContext` | object | see `values.yaml` | Pod-level security context (the console image runs as uid 1001). |
+| `console.securityContext` | object | see `values.yaml` | Container-level security context. The root filesystem is read-only: Next.js writes only /tmp and /app/console/.next/cache, both emptyDirs. |
+| `console.service.port` | int | `3000` | ClusterIP only; the gateway or console.ingress publishes it. |
 | `database.auth.createSecret` | bool | `true` | Create credentials secret from values below when existingSecret is not set. |
 | `database.auth.existingSecret` | string | `""` | Existing secret containing DB_USER and DB_PASSWORD keys. |
 | `database.auth.password` | string | `""` |  |

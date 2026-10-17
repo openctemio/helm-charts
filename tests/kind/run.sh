@@ -92,6 +92,13 @@ install=(upgrade --install "$rel" "$chart" -n "$ns"
   --set sensor.storageLayout=split
   --set sensor.state.persistence.existingClaim=sensor-state
   --set sensor.content.persistence.size=1Gi)
+# The console image is published with the release after the one that adds it:
+# until then the platform installs without the console (its pod could never
+# become ready) and the rest is still waited for.
+if ! docker manifest inspect "ghcr.io/openctemio/openctem-console:$app" >/dev/null 2>&1; then
+  echo "notice: ghcr.io/openctemio/openctem-console:$app is not published; installing without the console"
+  install+=(--set console.enabled=false)
+fi
 if [[ $published == 1 ]]; then
   helm "${install[@]}" --wait --timeout "${timeout}s" >/dev/null
   pass "platform $app installed with hooks and became ready"

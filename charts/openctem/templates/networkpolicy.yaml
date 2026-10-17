@@ -4,7 +4,9 @@
 Opt-in NetworkPolicy set. Baseline is default-DENY ingress for every pod of
 this release (the bundled datastores included); the policies below re-open
 only the real OpenCTEM flows:
-  ingress-controller -> ui:3000, (ui|helm-test) -> api:8080,
+  ingress-controller -> ui:3000, (ui|console|helm-test) -> api:8080,
+  console pods -> api console listener, gateway (caddy) or console ingress
+  -> console:3000,
   gateway.mode=caddy: anywhere -> gateway:443/80, gateway -> ui:3000/api:8080,
   gateway.mode=ingress|httpRoute: ingress-controller -> api:8080,
   api/migrations -> postgres:5432, api/migrations -> redis:6379,
@@ -86,8 +88,57 @@ spec:
         - port: 3000
           protocol: TCP
     {{- end }}
+{{- if .Values.console.enabled }}
 ---
-# Allow inbound to the API from any pod in this release (UI + the helm-test pod).
+# Allow inbound to the console only from the bundled gateway (caddy) or, with
+# console.ingress, the ingress controller. Never from other pods: the console
+# trusts the client-address headers its caller sends.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.consoleFullname" . }}-allow-ingress
+  labels:
+    {{- include "openctem.consoleLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "openctem.consoleSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if eq $gwMode "caddy" }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "openctem.gatewaySelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 3000
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.console.ingress.enabled }}
+    - from:
+        {{- if or .Values.networkPolicy.ingressControllerNamespaceSelector .Values.networkPolicy.ingressControllerPodSelector }}
+        - {{- if .Values.networkPolicy.ingressControllerNamespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerNamespaceSelector | nindent 14 }}
+          {{- end }}
+          {{- if .Values.networkPolicy.ingressControllerPodSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerPodSelector | nindent 14 }}
+          {{- end }}
+        {{- else }}
+        {{- fail "\n\nconsole.ingress.enabled=true with networkPolicy.enabled needs networkPolicy.ingressControllerNamespaceSelector (and/or ingressControllerPodSelector): the console believes the client address its caller sends, so it must not be open to every namespace.\n" }}
+        {{- end }}
+      ports:
+        - port: 3000
+          protocol: TCP
+    {{- end }}
+{{- end }}
+---
+# Allow inbound to the API from any pod in this release (UI, console + the
+# helm-test pod).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -109,11 +160,11 @@ spec:
         - port: 8080
           protocol: TCP
     {{- if .Values.admin.listener.enabled }}
-    # The console listener: the UI pods (its console proxy) only.
+    # The console listener: the console pods only.
     - from:
         - podSelector:
             matchLabels:
-              {{- include "openctem.uiSelectorLabels" . | nindent 14 }}
+              {{- include "openctem.consoleSelectorLabels" . | nindent 14 }}
       ports:
         - port: {{ .Values.admin.listener.port }}
           protocol: TCP
@@ -224,6 +275,12 @@ spec:
         {{- end }}
         {{- if has $tlsMode (list "http" "acme") }}
         - port: 80
+          protocol: TCP
+        {{- end }}
+        {{- if include "openctem.adminSitePort" . }}
+        # The console's own port (admin.site.mode=port): reachable from any
+        # source here; admin.allowedCidrs gates it at the gateway.
+        - port: {{ .Values.admin.site.port }}
           protocol: TCP
         {{- end }}
 {{- end }}

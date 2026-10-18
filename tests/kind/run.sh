@@ -100,8 +100,17 @@ if ! docker manifest inspect "ghcr.io/openctemio/openctem-console:$app" >/dev/nu
   install+=(--set console.enabled=false)
 fi
 if [[ $published == 1 ]]; then
-  helm "${install[@]}" --wait --timeout "${timeout}s" >/dev/null
-  pass "platform $app installed with hooks and became ready"
+  # No --wait: the API (v0.10 and later) refuses to start until the schema
+  # exists, and the migrations Job is a post-install hook, which helm runs
+  # only after --wait is satisfied. Without --wait helm still waits for the
+  # hook Job; the API then restarts onto the migrated schema.
+  helm "${install[@]}" --timeout "${timeout}s" >/dev/null
+  pass "platform $app installed with hooks (migrations Job completed)"
+  if kubectl -n "$ns" rollout status "deploy/$rel-openctem-api" --timeout="${timeout}s" >/dev/null; then
+    pass "API became ready on the migrated schema"
+  else
+    fail "API became ready on the migrated schema"
+  fi
 else
   echo "notice: ghcr.io/openctemio/openctem-api:$app is not published; installing the platform without hooks and not waiting for the API/UI"
   helm "${install[@]}" --no-hooks >/dev/null

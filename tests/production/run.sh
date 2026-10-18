@@ -36,6 +36,26 @@ refused "external Redis without a password" "The external Redis needs a password
 refused "values outside the schema" "gatway" -f "$prod" --set gatway.mode=caddy
 refused "SMTP_* in api.extraEnv (moved to the admin console)" "Console > System > E-mail" \
   -f "$prod" --set 'api.extraEnv[0].name=SMTP_HOST' --set 'api.extraEnv[0].value=x'
+refused "SENSOR_LATEST_VERSION in api.extraEnv (removed in API v0.10.0)" "release line is built into the API" \
+  -f "$prod" --set 'api.extraEnv[0].name=SENSOR_LATEST_VERSION' --set 'api.extraEnv[0].value=v1'
+refused "api.sensorReleaseChannel (removed in chart 0.29.0)" "api.sensorReleaseChannel was removed" \
+  -f "$prod" --set api.sensorReleaseChannel.minVersion=v0.9.0
+refused "api.fingerprint.key shorter than 32 characters" "at least 32 characters" \
+  -f "$prod" --set api.fingerprint.key=short
+
+# FINGERPRINT_KEY (API v0.10.0 and later refuse to start without it outside
+# development): by default the encryption key's own reference, so an existing
+# install keeps its stored fingerprints; an own Secret when set; nothing from
+# the chart when api.extraEnv sets it.
+api="$(render -f "$prod" -s templates/api-deployment.yaml)"
+expect "FINGERPRINT_KEY defaults to the encryption key's Secret" "$(printf '            - name: FINGERPRINT_KEY\n              valueFrom:\n                secretKeyRef:\n                  key: APP_ENCRYPTION_KEY')" "$api"
+reject "no SENSOR_LATEST_VERSION from the chart" "SENSOR_LATEST_VERSION" "$api"
+api="$(render -f "$prod" --set api.fingerprint.existingSecret=fp-secret -s templates/api-deployment.yaml)"
+expect "FINGERPRINT_KEY from api.fingerprint.existingSecret" "name: fp-secret" "$api"
+api="$(render -f "$prod" --set 'api.extraEnv[0].name=FINGERPRINT_KEY' --set 'api.extraEnv[0].value=0123456789abcdef0123456789abcdef' -s templates/api-deployment.yaml)"
+if [[ "$(grep -c 'name: FINGERPRINT_KEY' <<<"$api")" == 1 ]]; then pass "api.extraEnv FINGERPRINT_KEY wins (one entry)"; else fail "api.extraEnv FINGERPRINT_KEY wins (one entry)"; fi
+out="$(render --set api.appEnv=development --set api.fingerprint.key=0123456789abcdef0123456789abcdef)"
+expect "api.fingerprint.key goes into the chart's app Secret" 'FINGERPRINT_KEY: "0123456789abcdef0123456789abcdef"' "$out"
 
 # 2. The production example keeps every credential in a Secret.
 out="$(render -f "$prod")"

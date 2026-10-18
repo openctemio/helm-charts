@@ -37,7 +37,8 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.23.2 | v0.9.4 | same |
 | 0.23.3 | v0.9.5 | same |
 | 0.23.4 | v0.9.6 | same |
-| 0.23.5 – 0.25.0 and later | v0.9.7 | same |
+| 0.23.5 – 0.28.0 | v0.9.7 | same |
+| 0.29.0 and later | v0.10.1 | same, plus `ghcr.io/openctemio/openctem-console` (chart 0.28.0 and later) |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).
@@ -200,8 +201,6 @@ owner link expires in 24h.
 | Value | Default | |
 |---|---|---|
 | `api.signupMode` | `disabled` | `SIGNUP_MODE`, the sign-up ceiling no console change can exceed. `disabled`: no public sign-up; only the platform administrator creates organizations (admin console or the bootstrap-admin org flags). `domain`: sign-up only for addresses on an organization's verified domain, who join that organization. `open`: anyone may sign up and create an organization (hosted service; see "Hosted-service sign-up"). Any other value, and the removed `api.tenantCreationMode`, fail the render. A `SIGNUP_MODE` in `api.extraEnv` wins. |
-| `api.sensorReleaseChannel.latestVersion` | `""` | `SENSOR_LATEST_VERSION`: the newest sensor release. The Sensors page shows "update available" for older sensors and its install commands pin this tag. Empty: `sensor.image.tag`. An entry in `api.extraEnv` wins (`none` turns the comparison off). |
-| `api.sensorReleaseChannel.minVersion` | `""` | `SENSOR_MIN_VERSION`: the oldest supported sensor release. A heartbeating sensor below it shows as degraded. Empty: no minimum. |
 | `api.bootstrapAdmin.enabled` | `false` | Run the post-install bootstrap Job. |
 | `api.bootstrapAdmin.email` / `name` / `role` | — / — / `super_admin` | The platform administrator. |
 | `api.bootstrapAdmin.backupEmail` / `backupName` | — | The break-glass backup administrator (required unless `noBackup: true`). |
@@ -695,7 +694,7 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | Value | Default | Meaning |
 |---|---|---|
 | `sensor.mode` | `daemon` | The only mode: the sensor runs the scans the platform dispatches. The chart passes no mode flag: from sensor v0.21.0 the daemon taking platform commands is the sensor's default mode. `platform` (bootstrap-token self-registration) was removed in 0.9.0 and fails the render: no OpenCTEM API serves it. |
-| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.23.0` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. The newest release is v0.22.1 (`--set sensor.image.tag=v0.22.1`): from v0.22.0 a confined port scan finds open ports (on v0.23.0 it finds none), and a target the confinement kept a tool from reaching is reported as such (the platform must accept that report first: OpenCTEM v0.9.6 or later). The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). opengrep, semgrep, trivy and betterleaks run from the single-tool images (`<version>-opengrep` from v0.22.0, `-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
+| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.23.2` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. From v0.23.1 a job that carries an organization's identification (User-Agent and headers, such as a bug-bounty program's) sends it on every HTTP request, and the Tenable.sc connector is its own image (`ghcr.io/openctemio/connector-tenable`). The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). opengrep, semgrep, trivy and betterleaks run from the single-tool images (`<version>-opengrep` from v0.22.0, `-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
 | `sensor.name` | empty | `SENSOR_NAME`: the name the sensor proposes when it pairs (the approving administrator may change it). Empty: the Deployment name, `<release>-openctem-sensor`. |
 | `sensor.caFingerprint` / `sensor.platformKey` | empty | Pairing pins from the platform's pairing instructions (public values): `SENSOR_CA_FINGERPRINT`, the SHA-256 of the platform CA the sensor must see in the TLS chain (needs an `https` `sensor.apiUrl` with a host name), and `SENSOR_PLATFORM_KEY`, the thumbprint of the platform's pairing key. |
 | `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | An API key, for an organization that allows API-key sensors. Empty (the default): the sensor pairs. Prefer `existingSecret`. |
@@ -723,6 +722,34 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.29.0 (OpenCTEM v0.10.1)
+
+The default images are OpenCTEM v0.10.1 and the bundled sensor v0.23.2. The
+API of v0.10.0 and later refuses to start in two cases that earlier charts
+caused, so this chart changes both:
+
+- **`FINGERPRINT_KEY` is required outside development.** It keys the
+  fingerprints of stored secret findings. The chart now sets it from
+  `api.fingerprint`: by default from the encryption key's own Secret
+  (`APP_ENCRYPTION_KEY`), which is the value an existing install must keep so
+  its stored fingerprints stay valid. On a new install, give it its own value
+  (`api.fingerprint.existingSecret`, or `api.fingerprint.key`, at least 32
+  characters: `openssl rand -hex 32`), so rotating the encryption key never
+  changes a finding's identity. Before you rotate the encryption key on an
+  install that uses the default, set `api.fingerprint.key` to the old key.
+  A `FINGERPRINT_KEY` from `api.extraEnvFrom` is overridden by the chart's
+  entry: use `api.fingerprint.existingSecret` or `api.extraEnv` instead.
+- **`SENSOR_LATEST_VERSION` and `SENSOR_MIN_VERSION` are refused.** Each
+  sensor product's release line is built into the API and changes with an API
+  upgrade. `api.sensorReleaseChannel` is removed: a value under it fails the
+  render, and so do those names (and `SENSOR_SDK_*_VERSION`) in
+  `api.extraEnv`.
+- **A first install must not use `helm install --wait`** with the migrations
+  Job as a post-install hook: the API refuses to start until the schema
+  exists, so it cannot become ready, and Helm runs post-install hooks only
+  after the wait succeeds. Install without `--wait` (Helm still waits for the
+  migrations Job); the API restarts onto the migrated schema.
 
 ## Upgrading to 0.28.0 (the platform console as its own service)
 
@@ -1214,6 +1241,9 @@ description from its `# --` comment (generated with
 | `api.encryption.keyRef` | string | `"APP_ENCRYPTION_KEY"` |  |
 | `api.extraEnv` | list | `[]` |  |
 | `api.extraEnvFrom` | list | `[]` |  |
+| `api.fingerprint.existingSecret` | string | `""` | Source FINGERPRINT_KEY from an existing Secret instead of the chart. |
+| `api.fingerprint.key` | string | `""` | FINGERPRINT_KEY: keys the fingerprints of stored secret findings, so the same secret found twice is one finding. The API (v0.10.0 and later) refuses to start without it outside development. Empty = the encryption key above (APP_ENCRYPTION_KEY), which keeps the fingerprints an existing install stored valid. A new install should set its own value (at least 32 characters, `openssl rand -hex 32`) or existingSecret, so rotating the encryption key never changes a finding's identity. On an existing install, an own value must equal the current encryption key. Before you rotate the encryption key while this is empty, set it to the old key. A FINGERPRINT_KEY entry in api.extraEnv takes precedence. |
+| `api.fingerprint.keyRef` | string | `"FINGERPRINT_KEY"` |  |
 | `api.goMemLimit` | string | `""` | GOMEMLIMIT for the API (Go's soft memory limit, e.g. "1600MiB"), about 80% of resources.limits.memory, so the garbage collector works harder before the kernel OOM-kills the pod. Empty: not set. The size presets set it. A GOMEMLIMIT entry in api.extraEnv takes precedence. |
 | `api.httpRoute` | object | see `values.yaml` | Expose API service via gateway-api HTTPRoute |
 | `api.image.pullPolicy` | string | `"IfNotPresent"` |  |
@@ -1229,7 +1259,7 @@ description from its `# --` comment (generated with
 | `api.livenessProbe` | object | `{"httpGet":{"path":"/health","port":"http"}}` | /health answers while the process runs; /ready also checks PostgreSQL and Redis (503 while either is unreachable), so a pod that lost its datastores leaves the Service without being restarted. |
 | `api.migrations.activeDeadlineSeconds` | int | `600` | Hard timeout for the migration Job in seconds. |
 | `api.migrations.affinity` | object | `{}` |  |
-| `api.migrations.backoffLimit` | int | `2` | Job backoffLimit (retries before Job is marked failed). |
+| `api.migrations.backoffLimit` | int | `6` | Job backoffLimit (retries before Job is marked failed). The Job is a post-install hook and starts while the bundled PostgreSQL is still starting on a first install; each failed attempt waits twice as long as the one before, so 6 retries outlast a slow image pull. |
 | `api.migrations.downMigration` | object | `{"activeDeadlineSeconds":600,"backoffLimit":0,"enabled":false,"steps":1}` | Manual, gated DOWN-migration Job for controlled rollbacks. DISABLED by default. `helm rollback` does NOT down-migrate — it only reverts the Kubernetes manifests, leaving the DB at the NEWER schema. If the older app version is not forward-compatible with that schema you must revert the schema yourself. Enabling this renders a one-shot Job that runs `migrate ... down <steps>`. Run it deliberately (never as an automatic hook), confirm the target step count, and take a DB backup first. |
 | `api.migrations.downMigration.steps` | int | `1` | Number of migrations to revert (passed to `migrate ... down N`). |
 | `api.migrations.enabled` | bool | `true` | Enable the database migrations Job. |
@@ -1260,7 +1290,6 @@ description from its `# --` comment (generated with
 | `api.replicaCount` | int | `1` | Replica count. Keep 1 for now. The API runs its schedulers and background controllers in every replica and is not yet safe with more than one: with 2+ replicas scheduled scans fire twice, the audit hash chain forks and report emails are sent twice. The chart refuses more than 1 replica (replicaCount or autoscaling maxReplicas) unless allowMultipleReplicas is true. |
 | `api.resources` | object | `{"limits":{"cpu":"1","memory":"1Gi"},"requests":{"cpu":"100m","memory":"256Mi"}}` | CPU requests are REQUIRED for the CPU-target HPA to function. Memory limit is 1Gi (not 512Mi): the Go API does ingest/enrichment and threat-intel loading that spikes memory; 512Mi OOM-kills under load. Tune down only if you have measured a smaller working set. |
 | `api.securityContext` | object | see `values.yaml` | Container-level security context. The root filesystem is read-only: the API writes only /tmp (an emptyDir: feed chunks, uploads in flight) and, with api.attachments.storage=local, /app/data (the attachments volume). |
-| `api.sensorReleaseChannel` | object | `{"latestVersion":"","minVersion":""}` | The sensor release channel the Sensors page compares each sensor's version with, and the tag the page's install commands pin. latestVersion (SENSOR_LATEST_VERSION): empty = sensor.image.tag, so the bundled sensor and the install commands run the same release. minVersion (SENSOR_MIN_VERSION): empty = no minimum; a heartbeating sensor below it shows as degraded ("version unsupported"). An entry for either name in api.extraEnv takes precedence. |
 | `api.sensorTransport.dedicatedService.annotations` | object | `{}` | Service annotations (load balancer settings). |
 | `api.sensorTransport.dedicatedService.enabled` | bool | `false` | Render the `<api>-sensors` Service. |
 | `api.sensorTransport.dedicatedService.loadBalancerSourceRanges` | list | `[]` | Source ranges allowed to reach the load balancer. |
@@ -1405,7 +1434,7 @@ description from its `# --` comment (generated with
 | `sensor.extraVolumes` | list | `[]` | Extra volumes and mounts for the sensor container (for example a host directory holding the kill switch file). |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
-| `sensor.image.tag` | string | `"v0.23.0"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
+| `sensor.image.tag` | string | `"v0.23.2"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
 | `sensor.instanceEnrollment.existingSecret` | string | `""` | Pre-created Secret holding the token (octe_ and 49 letters or digits) instead of the generated one, for GitOps. |
 | `sensor.instanceEnrollment.existingSecretKey` | string | `""` | Key within the secret. Empty: "token". |
 | `sensor.keyAutoRenew` | string | `""` | Renew the sensor API key before it expires and when the platform asks (SENSOR_KEY_AUTORENEW). The renewed key is kept in the state volume (/var/lib/openctem/state/sensor-credentials.json), not the Secret: the renewal retires the key in the Secret. Empty (default): on exactly when state.persistence.enabled (a renewed key on an emptyDir is lost with the pod, which then starts with the retired key). true / false force it. |

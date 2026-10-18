@@ -161,6 +161,9 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.apiEncryptionSecretName" . }}
                   key: {{ include "openctem.apiEncryptionSecretKey" . }}
+            {{- with include "openctem.apiFingerprintKeyEnv" . }}
+            {{- . | nindent 12 }}
+            {{- end }}
             - name: AUTH_JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -222,10 +225,6 @@ spec:
             {{- include "openctem.apiSignupModeEnv" . | nindent 12 }}
             {{- with include "openctem.apiTuningEnv" . }}
             # Sizing (api.goMemLimit, database.maxOpenConns)
-            {{- . | nindent 12 }}
-            {{- end }}
-            {{- with include "openctem.apiSensorReleaseEnv" . }}
-            # Sensor release channel (api.sensorReleaseChannel)
             {{- . | nindent 12 }}
             {{- end }}
             {{- with include "openctem.gatewayApiEnv" . }}

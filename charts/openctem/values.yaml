@@ -444,8 +444,11 @@ api:
     hooks:
       enabled: true
 
-    # -- Job backoffLimit (retries before Job is marked failed).
-    backoffLimit: 2
+    # -- Job backoffLimit (retries before Job is marked failed). The Job is a
+    # post-install hook and starts while the bundled PostgreSQL is still
+    # starting on a first install; each failed attempt waits twice as long as
+    # the one before, so 6 retries outlast a slow image pull.
+    backoffLimit: 6
     # -- Hard timeout for the migration Job in seconds.
     activeDeadlineSeconds: 600
 

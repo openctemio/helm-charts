@@ -745,6 +745,11 @@ caused, so this chart changes both:
   upgrade. `api.sensorReleaseChannel` is removed: a value under it fails the
   render, and so do those names (and `SENSOR_SDK_*_VERSION`) in
   `api.extraEnv`.
+- **A first install must not use `helm install --wait`** with the migrations
+  Job as a post-install hook: the API refuses to start until the schema
+  exists, so it cannot become ready, and Helm runs post-install hooks only
+  after the wait succeeds. Install without `--wait` (Helm still waits for the
+  migrations Job); the API restarts onto the migrated schema.
 
 ## Upgrading to 0.28.0 (the platform console as its own service)
 
@@ -1254,7 +1259,7 @@ description from its `# --` comment (generated with
 | `api.livenessProbe` | object | `{"httpGet":{"path":"/health","port":"http"}}` | /health answers while the process runs; /ready also checks PostgreSQL and Redis (503 while either is unreachable), so a pod that lost its datastores leaves the Service without being restarted. |
 | `api.migrations.activeDeadlineSeconds` | int | `600` | Hard timeout for the migration Job in seconds. |
 | `api.migrations.affinity` | object | `{}` |  |
-| `api.migrations.backoffLimit` | int | `2` | Job backoffLimit (retries before Job is marked failed). |
+| `api.migrations.backoffLimit` | int | `6` | Job backoffLimit (retries before Job is marked failed). The Job is a post-install hook and starts while the bundled PostgreSQL is still starting on a first install; each failed attempt waits twice as long as the one before, so 6 retries outlast a slow image pull. |
 | `api.migrations.downMigration` | object | `{"activeDeadlineSeconds":600,"backoffLimit":0,"enabled":false,"steps":1}` | Manual, gated DOWN-migration Job for controlled rollbacks. DISABLED by default. `helm rollback` does NOT down-migrate — it only reverts the Kubernetes manifests, leaving the DB at the NEWER schema. If the older app version is not forward-compatible with that schema you must revert the schema yourself. Enabling this renders a one-shot Job that runs `migrate ... down <steps>`. Run it deliberately (never as an automatic hook), confirm the target step count, and take a DB backup first. |
 | `api.migrations.downMigration.steps` | int | `1` | Number of migrations to revert (passed to `migrate ... down N`). |
 | `api.migrations.enabled` | bool | `true` | Enable the database migrations Job. |

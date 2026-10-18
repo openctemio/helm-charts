@@ -113,6 +113,22 @@ api:
     existingSecret: ""
     keyRef: APP_ENCRYPTION_KEY
 
+  fingerprint:
+    # -- FINGERPRINT_KEY: keys the fingerprints of stored secret findings, so
+    # the same secret found twice is one finding. The API (v0.10.0 and later)
+    # refuses to start without it outside development. Empty = the encryption
+    # key above (APP_ENCRYPTION_KEY), which keeps the fingerprints an existing
+    # install stored valid. A new install should set its own value (at least 32
+    # characters, `openssl rand -hex 32`) or existingSecret, so rotating the
+    # encryption key never changes a finding's identity. On an existing
+    # install, an own value must equal the current encryption key. Before you
+    # rotate the encryption key while this is empty, set it to the old key.
+    # A FINGERPRINT_KEY entry in api.extraEnv takes precedence.
+    key: ""
+    # -- Source FINGERPRINT_KEY from an existing Secret instead of the chart.
+    existingSecret: ""
+    keyRef: FINGERPRINT_KEY
+
   redis:
     # -- REDIS_TLS_ENABLED. Production REQUIRES TLS. The bundled Bitnami Redis
     # does not terminate TLS, so production must point at an external Redis with
@@ -188,16 +204,6 @@ api:
   #    A SIGNUP_MODE entry in api.extraEnv takes precedence.
   signupMode: disabled
 
-  # -- The sensor release channel the Sensors page compares each sensor's
-  #    version with, and the tag the page's install commands pin.
-  #    latestVersion (SENSOR_LATEST_VERSION): empty = sensor.image.tag, so the
-  #    bundled sensor and the install commands run the same release.
-  #    minVersion (SENSOR_MIN_VERSION): empty = no minimum; a heartbeating
-  #    sensor below it shows as degraded ("version unsupported").
-  #    An entry for either name in api.extraEnv takes precedence.
-  sensorReleaseChannel:
-    latestVersion: ""
-    minVersion: ""
 
   # -- Bootstrap the first PLATFORM administrators (RFC-022) and, optionally,
   # the first organization. Runs /app/bootstrap-admin as a post-install hook
@@ -1280,7 +1286,7 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.23.0"
+    tag: "v0.23.2"
     pullPolicy: IfNotPresent
   # -- SENSOR_REGION reported by the sensor.
   region: default

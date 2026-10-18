@@ -498,6 +498,10 @@ AUTH_ACCESS_TOKEN_COOKIE_NAME: "nothing: the session cookie is always auth_token
 AUTH_REFRESH_TOKEN_COOKIE_NAME: "nothing: the refresh cookie is always refresh_token"
 AUTH_TENANT_COOKIE_NAME: "nothing: the organization cookie is always app_tenant"
 JIRA_WEBHOOK_SECRET: "nothing: each organization rotates its own Jira webhook secret"
+SENSOR_LATEST_VERSION: "nothing: each sensor product's release line is built into the API"
+SENSOR_MIN_VERSION: "nothing: each sensor product's release line is built into the API"
+SENSOR_SDK_LATEST_VERSION: "nothing: each sensor product's release line is built into the API"
+SENSOR_SDK_MIN_VERSION: "nothing: SDK releases with an advisory are listed in the API's versions.yaml"
 {{- end }}
 
 {{- define "openctem.apiExtraEnv" -}}
@@ -1003,26 +1007,36 @@ skipping the first organization an existing values file still asks for.
 {{- end }}
 
 {{/*
-SENSOR_LATEST_VERSION / SENSOR_MIN_VERSION for the API (api.sensorReleaseChannel):
-the latest release defaults to the bundled sensor's image tag. A name set in
-api.extraEnv wins.
+FINGERPRINT_KEY for the API (api.fingerprint): an existing Secret, the chart's
+app Secret when api.fingerprint.key is set, else the encryption key's own
+Secret reference (the value an existing install must keep). Nothing when
+api.extraEnv sets FINGERPRINT_KEY. api.sensorReleaseChannel was removed with
+SENSOR_LATEST_VERSION / SENSOR_MIN_VERSION, which API v0.10.0 and later
+refuse: each sensor product's release line is built into the API.
 */}}
-{{- define "openctem.apiSensorReleaseEnv" -}}
-{{- $ch := .Values.api.sensorReleaseChannel | default dict -}}
-{{- $sensor := .Values.sensor | default dict -}}
-{{- $image := $sensor.image | default dict -}}
-{{- $latest := toString ($ch.latestVersion | default $image.tag | default "") -}}
-{{- $min := toString ($ch.minVersion | default "") -}}
+{{- define "openctem.apiFingerprintKeyEnv" -}}
+{{- $fp := .Values.api.fingerprint | default dict -}}
+{{- if dig "sensorReleaseChannel" "latestVersion" "" (.Values.api | default dict) | toString -}}
+{{- fail "\n\napi.sensorReleaseChannel was removed in chart 0.29.0: the API (v0.10.0 and later) refuses SENSOR_LATEST_VERSION and SENSOR_MIN_VERSION; each sensor product's release line is built into the API and changes with an API upgrade. Remove api.sensorReleaseChannel from your values.\n" -}}
+{{- end -}}
+{{- if dig "sensorReleaseChannel" "minVersion" "" (.Values.api | default dict) | toString -}}
+{{- fail "\n\napi.sensorReleaseChannel was removed in chart 0.29.0: the API (v0.10.0 and later) refuses SENSOR_LATEST_VERSION and SENSOR_MIN_VERSION; each sensor product's release line is built into the API and changes with an API upgrade. Remove api.sensorReleaseChannel from your values.\n" -}}
+{{- end -}}
+{{- if and $fp.key (lt (len (toString $fp.key)) 32) -}}
+{{- fail "\n\napi.fingerprint.key must be at least 32 characters (the API refuses a shorter FINGERPRINT_KEY); generate one with `openssl rand -hex 32`.\n" -}}
+{{- end -}}
 {{- $have := include "openctem.apiExtraEnvNames" . | fromJsonArray -}}
-{{- $env := list -}}
-{{- if and $latest (not (has "SENSOR_LATEST_VERSION" $have)) -}}
-{{- $env = append $env (dict "name" "SENSOR_LATEST_VERSION" "value" $latest) -}}
+{{- if not (has "FINGERPRINT_KEY" $have) -}}
+{{- $name := include "openctem.apiEncryptionSecretName" . -}}
+{{- $key := include "openctem.apiEncryptionSecretKey" . -}}
+{{- if $fp.existingSecret -}}
+{{- $name = $fp.existingSecret -}}
+{{- $key = $fp.keyRef | default "FINGERPRINT_KEY" -}}
+{{- else if $fp.key -}}
+{{- $name = include "openctem.apiAppSecretName" . -}}
+{{- $key = "FINGERPRINT_KEY" -}}
 {{- end -}}
-{{- if and $min (not (has "SENSOR_MIN_VERSION" $have)) -}}
-{{- $env = append $env (dict "name" "SENSOR_MIN_VERSION" "value" $min) -}}
-{{- end -}}
-{{- if $env -}}
-{{- toYaml $env -}}
+{{- toYaml (list (dict "name" "FINGERPRINT_KEY" "valueFrom" (dict "secretKeyRef" (dict "name" $name "key" $key)))) -}}
 {{- end -}}
 {{- end }}
 

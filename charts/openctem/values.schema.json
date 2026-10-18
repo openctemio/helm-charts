@@ -314,6 +314,21 @@
           },
           "additionalProperties": true
         },
+        "fingerprint": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "keyRef": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
         "redis": {
           "type": "object",
           "properties": {

@@ -1,4 +1,4 @@
 # Verified false positives in the history (commit:file:rule:line): documentation
 # placeholders and test fixtures, none a real credential (history audit 2026-10-18).
 # Add a line only after confirming the match is not a real credential.
-51109a7faeb9b4aad9ce469d6a84b45dce6c7d9b:charts/openctem/templates/_helpers.tpl:generic-password:471
+67d2dbf936cfcf60ed31612cab7929a71bd79462:charts/openctem/templates/_helpers.tpl:generic-password:471

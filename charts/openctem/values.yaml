@@ -959,6 +959,83 @@ postgresql:
     password: ""
     database: openctem
 
+# =============================================================================
+# Off-cluster backups (scheduled logical dump, encrypted, to S3-compatible
+# storage or an SFTP host). OFF by default; see the README, "Backups to
+# off-cluster storage". A dump every `schedule` means an RPO of that interval:
+# for continuous recovery to a point in time use the managed database's own
+# point-in-time recovery (or your Postgres operator's), which a chart cannot
+# provide for an external database.
+# =============================================================================
+backup:
+  # -- Create the backup CronJob. Requires `rclone.existingSecret`.
+  enabled: false
+  # -- Cron schedule (UTC unless the cluster's CronJob timezone says otherwise).
+  schedule: "17 2 * * *"
+  # -- Folder inside the storage remote.
+  path: openctem
+  # -- Delete backups older than this many days after each upload. 0 (default)
+  # deletes nothing: the credential then needs no delete right and the bucket's
+  # lifecycle rule prunes (recommended). A value above 0 needs a credential that
+  # can delete, so a compromised cluster could also wipe the history.
+  retentionDays: 0
+  # -- Hard stop for one run.
+  activeDeadlineSeconds: 7200
+  # -- Size limit of the scratch volume that holds the dump before upload; at
+  # least the compressed size of the database.
+  scratchSizeLimit: 10Gi
+  rclone:
+    # -- Secret in the release namespace with the key `rclone.conf`: the storage
+    # remote (s3 or sftp) and, layered over it, a `crypt` remote that encrypts
+    # file contents and names on the way out (the password stays in the Secret,
+    # keep a copy outside the cluster: without it the backups are unreadable).
+    # An sftp host key list and key file go in the same Secret and are referenced
+    # as /config/rclone/<key>.
+    existingSecret: ""
+    # -- Name of the crypt remote in rclone.conf; backups are written through it.
+    remote: openctem-crypt
+    image:
+      repository: docker.io/rclone/rclone
+      # -- Pinned by tag and digest (rclone publishes no image signature).
+      tag: "1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5"
+      pullPolicy: IfNotPresent
+  dump:
+    image:
+      # -- Needs pg_dump of the database's major version or newer.
+      repository: docker.io/library/postgres
+      tag: "17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
+      pullPolicy: IfNotPresent
+  database:
+    # -- Optional Secret with a dedicated read-only role (member of pg_read_all_data)
+    # for the dump. Empty: the migration role, or the API's role when no split is
+    # configured. The API's DML-only role works when it can read every table and sequence.
+    existingSecret: ""
+    userKey: DB_USER
+    passwordKey: DB_PASSWORD
+  # -- Resources of both containers.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+  # -- Pod security context. fsGroup lets the non-root user read the mounted Secret.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  nodeSelector: {}
+  tolerations: []
+
 redisConfig:
   # -- Settings in this section are used only when redis.enabled=false.
   host: ""

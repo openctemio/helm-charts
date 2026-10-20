@@ -40,6 +40,7 @@ check "sensor gRPC on a dedicated Service, NetworkPolicy" --set api.appEnv=devel
   --set api.sensorTransport.publicHost=sensors.example.com:443 --set api.sensorTransport.dedicatedService.enabled=true \
   --set networkPolicy.enabled=true
 check "sensor protocol v3 off" --set api.appEnv=development --set api.sensorTransport.mode=off
+check "off-cluster backup CronJob" --set api.appEnv=development --set backup.enabled=true --set backup.rclone.existingSecret=offsite
 check "production values" -f "$chart/values-production.yaml"
 for size in small medium large; do
   check "production values + $size preset" -f "$chart/values-production.yaml" -f "$chart/values-$size.yaml"

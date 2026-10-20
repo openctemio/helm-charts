@@ -14,7 +14,12 @@
       "type": "array"
     },
     "global": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "imageRegistry": {
+          "type": "string"
+        }
+      }
     },
     "api": {
       "type": "object",
@@ -91,6 +96,10 @@
                 "IfNotPresent",
                 "Never"
               ]
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[a-f0-9]{64})?$"
             }
           },
           "additionalProperties": true
@@ -587,6 +596,10 @@
                     "IfNotPresent",
                     "Never"
                   ]
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^(sha256:[a-f0-9]{64})?$"
                 }
               },
               "additionalProperties": true
@@ -762,6 +775,10 @@
                 "IfNotPresent",
                 "Never"
               ]
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[a-f0-9]{64})?$"
             }
           },
           "additionalProperties": true
@@ -1030,6 +1047,10 @@
                 },
                 "layer4": {
                   "type": "boolean"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^(sha256:[a-f0-9]{64})?$"
                 }
               },
               "additionalProperties": true
@@ -1543,6 +1564,10 @@
                 "IfNotPresent",
                 "Never"
               ]
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[a-f0-9]{64})?$"
             }
           },
           "additionalProperties": true
@@ -1801,6 +1826,10 @@
             },
             "tag": {
               "type": "string"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[a-f0-9]{64})?$"
             }
           }
         },

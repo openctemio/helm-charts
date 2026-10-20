@@ -174,6 +174,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
   tag: v0.23.2
+  digest: ""
   pullPolicy: IfNotPresent
 region: default
 apiUrl: ""
@@ -925,8 +926,42 @@ Create API migrations Job workload name.
 Resolve fully qualified migrations image reference.
 */}}
 {{- define "openctem.apiMigrationsImage" -}}
-{{- $tag := .Values.api.migrations.image.tag | default .Chart.AppVersion -}}
-{{- printf "%s:%s" .Values.api.migrations.image.repository $tag -}}
+{{- include "openctem.image" (dict "image" .Values.api.migrations.image "root" . "defaultTag" .Chart.AppVersion) -}}
+{{- end }}
+
+{{/*
+Resolve the reference of an OpenCTEM image (the one place every template uses).
+Takes a dict: image (repository, tag, digest), root (the chart context),
+defaultTag (used when image.tag is empty) and requireTag (an error message:
+fail with it when no tag is set).
+- global.imageRegistry replaces the ghcr.io/openctemio prefix of the repository
+  (the repository basename stays), so a private registry mirrors the images
+  without per-image overrides. Repositories outside ghcr.io/openctemio
+  (a user's own override) are used as written.
+- image.digest (sha256:<64 hex>) renders repo:tag@digest: the tag is for people,
+  the container runtime pulls by the digest.
+*/}}
+{{- define "openctem.image" -}}
+{{- $img := .image -}}
+{{- $repo := $img.repository -}}
+{{- $reg := (.root.Values.global | default dict).imageRegistry | default "" -}}
+{{- if and $reg (hasPrefix "ghcr.io/openctemio/" $repo) -}}
+{{- $repo = printf "%s/%s" (trimSuffix "/" $reg) (trimPrefix "ghcr.io/openctemio/" $repo) -}}
+{{- end -}}
+{{- $tag := $img.tag | default .defaultTag | default "" -}}
+{{- if and (not $tag) .requireTag -}}
+{{- fail .requireTag -}}
+{{- end -}}
+{{- $out := $repo -}}
+{{- if $tag -}}{{- $out = printf "%s:%s" $repo $tag -}}{{- end -}}
+{{- $digest := $img.digest | default "" -}}
+{{- if $digest -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) -}}
+{{- fail (printf "image digest %q for %s must look like sha256:<64 hex characters>" $digest $img.repository) -}}
+{{- end -}}
+{{- $out = printf "%s@%s" $out $digest -}}
+{{- end -}}
+{{- $out -}}
 {{- end }}
 
 {{/*

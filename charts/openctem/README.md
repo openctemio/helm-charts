@@ -515,6 +515,57 @@ and `database.console.password` (or `database.console.existingSecret` with
 it, and the bootstrap Job connects as it. Re-run the script with `admin_user`
 after each upgrade that adds a console table (it is idempotent).
 
+## Backups to off-cluster storage
+
+Off by default. `backup.enabled=true` creates a CronJob that dumps the database (`pg_dump`, custom
+format, checked with `pg_restore --list`), encrypts it on the way out and uploads it to S3-compatible
+storage (AWS S3, Cloudflare R2, MinIO) or an SFTP host. The dump and the upload run in two containers of
+one pod: the dump container holds only the database credentials, the upload container only the storage
+Secret. The RPO is the schedule (daily by default). For recovery to a point in time use the managed
+database's own point-in-time recovery or your Postgres operator's: a chart cannot archive WAL of an
+external database. (The Compose overlay and the Ansible kit do archive WAL for self-managed Postgres.)
+
+Create the Secret with one key, `rclone.conf`: the storage remote and a `crypt` remote layered over it.
+The crypt remote encrypts file contents and names before they leave the cluster; keep its two passwords
+outside the cluster too, because without them the backups cannot be read.
+
+```ini
+[offsite]
+type = s3
+provider = Cloudflare            # AWS, Minio, ... ; for R2 the endpoint below
+access_key_id = <key id>
+secret_access_key = <secret>
+endpoint = https://<account id>.r2.cloudflarestorage.com
+
+[openctem-crypt]
+type = crypt
+remote = offsite:my-openctem-backups
+password = <output of: rclone obscure "$(openssl rand -base64 32)">
+password2 = <output of: rclone obscure "$(openssl rand -base64 32)">
+```
+
+For SFTP use `type = sftp`, `host`, `user`, `shell_type = unix`, `md5sum_command = none`,
+`sha1sum_command = none`, `known_hosts_file = /config/rclone/known_hosts` and
+`key_file = /config/rclone/sftp_key`, and put the `known_hosts` (all of the host's key types, taken
+from a channel you trust) and `sftp_key` files in the same Secret.
+
+```bash
+kubectl -n openctem create secret generic openctem-backup \
+  --from-file=rclone.conf=./rclone.conf
+helm upgrade --install openctem openctemio/openctem -n openctem \
+  --set backup.enabled=true --set backup.rclone.existingSecret=openctem-backup
+```
+
+Give the storage credential write and read rights only (no delete) and expire old backups with a
+bucket lifecycle rule; `backup.retentionDays` (default 0, no deletion) makes the job delete old
+backups itself and then needs a credential that can delete, so a compromised cluster could also wipe
+the history. With object lock on the bucket, a delete cannot remove a locked backup. Use a dedicated
+read-only database role (`backup.database.existingSecret`, a member of `pg_read_all_data`) instead
+of the application's role. `kubectl -n openctem create job --from=cronjob/<release>-backup test-backup`
+runs one now. Restore a dump with `rclone cat openctem-crypt:openctem/<UTC time>/openctem.dump | pg_restore -d <new database> --no-owner`,
+and rehearse that restore at least monthly. Uploaded files, the encryption key Secret and the
+rest of the cluster state are not in this dump; back them up separately.
+
 ## Attachment storage
 
 Uploaded attachments and finding evidence (`api.attachments`) live either on a
@@ -722,6 +773,11 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.30.0 (optional backup CronJob)
+
+New `backup.*` values add an optional off-cluster backup CronJob ([Backups to off-cluster
+storage](#backups-to-off-cluster-storage)). It is off by default: nothing changes on upgrade.
 
 ## Upgrading to 0.29.0 (OpenCTEM v0.10.1)
 
@@ -1315,6 +1371,30 @@ description from its `# --` comment (generated with
 | `api.topologySpreadConstraints` | list | `[]` | topologySpreadConstraints (values-driven, templated). Keeps the >= 2 replicas off a single node/zone. Empty by default; values-production.yaml ships a soft (ScheduleAnyway) hostname spread. Supports `tpl` for dynamic label values. |
 | `api.volumeMounts` | list | `[]` |  |
 | `api.volumes` | list | `[]` |  |
+| `backup.activeDeadlineSeconds` | int | `7200` | Hard stop for one run. |
+| `backup.database.existingSecret` | string | `""` | Optional Secret with a dedicated read-only role (member of pg_read_all_data) for the dump. Empty: the migration role, or the API's role when no split is configured. The API's DML-only role works when it can read every table and sequence. |
+| `backup.database.passwordKey` | string | `"DB_PASSWORD"` |  |
+| `backup.database.userKey` | string | `"DB_USER"` |  |
+| `backup.dump.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `backup.dump.image.repository` | string | `"docker.io/library/postgres"` | Needs pg_dump of the database's major version or newer. |
+| `backup.dump.image.tag` | string | `"17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"` |  |
+| `backup.enabled` | bool | `false` | Create the backup CronJob. Requires `rclone.existingSecret`. |
+| `backup.nodeSelector` | object | `{}` |  |
+| `backup.path` | string | `"openctem"` | Folder inside the storage remote. |
+| `backup.podSecurityContext` | object | see `values.yaml` | Pod security context. fsGroup lets the non-root user read the mounted Secret. |
+| `backup.rclone.existingSecret` | string | `""` | Secret in the release namespace with the key `rclone.conf`: the storage remote (s3 or sftp) and, layered over it, a `crypt` remote that encrypts file contents and names on the way out (the password stays in the Secret, keep a copy outside the cluster: without it the backups are unreadable). An sftp host key list and key file go in the same Secret and are referenced as /config/rclone/<key>. |
+| `backup.rclone.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `backup.rclone.image.repository` | string | `"docker.io/rclone/rclone"` |  |
+| `backup.rclone.image.tag` | string | `"1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5"` | Pinned by tag and digest (rclone publishes no image signature). |
+| `backup.rclone.remote` | string | `"openctem-crypt"` | Name of the crypt remote in rclone.conf; backups are written through it. |
+| `backup.resources` | object | `{"limits":{"memory":"1Gi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resources of both containers. |
+| `backup.retentionDays` | int | `0` | Delete backups older than this many days after each upload. 0 (default) deletes nothing: the credential then needs no delete right and the bucket's lifecycle rule prunes (recommended). A value above 0 needs a credential that can delete, so a compromised cluster could also wipe the history. |
+| `backup.schedule` | string | `"17 2 * * *"` | Cron schedule (UTC unless the cluster's CronJob timezone says otherwise). |
+| `backup.scratchSizeLimit` | string | `"10Gi"` | Size limit of the scratch volume that holds the dump before upload; at least the compressed size of the database. |
+| `backup.securityContext.allowPrivilegeEscalation` | bool | `false` |  |
+| `backup.securityContext.capabilities.drop[0]` | string | `"ALL"` |  |
+| `backup.securityContext.readOnlyRootFilesystem` | bool | `true` |  |
+| `backup.tolerations` | list | `[]` |  |
 | `console` | object | see `values.yaml` | --------------------------------------------------------------------------- |
 | `console.cacheSizeLimit` | string | `"128Mi"` | Size limit of the /app/console/.next/cache emptyDir. |
 | `console.enabled` | bool | `true` | Deploy the console. false: no console in the cluster (the console API stays reachable for the bootstrap CLI only). |

@@ -1,0 +1,160 @@
+{{- if .Values.backup.enabled }}
+{{- if not .Values.backup.rclone.existingSecret }}
+{{- fail "backup.enabled needs backup.rclone.existingSecret: a Secret holding rclone.conf with the storage remote and the crypt remote (see the README, section Backups to off-cluster storage)" }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "openctem.fullname" . }}-backup
+  labels:
+    {{- include "openctem.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "openctem.labels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.backup.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backup.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backup.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # Step 1: dump the database into a scratch volume and check the dump can be read.
+          # No storage credentials are mounted in this container.
+          initContainers:
+            - name: dump
+              image: {{ printf "%s:%s" .Values.backup.dump.image.repository .Values.backup.dump.image.tag | quote }}
+              imagePullPolicy: {{ .Values.backup.dump.image.pullPolicy }}
+              {{- with .Values.backup.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              env:
+                - name: PGHOST
+                  value: {{ include "openctem.databaseHost" . | quote }}
+                - name: PGPORT
+                  value: {{ include "openctem.databasePort" . | quote }}
+                - name: PGDATABASE
+                  value: {{ include "openctem.databaseName" . | quote }}
+                - name: PGSSLMODE
+                  value: {{ include "openctem.databaseSslMode" . | quote }}
+                {{- if .Values.backup.database.existingSecret }}
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.backup.database.existingSecret | quote }}
+                      key: {{ .Values.backup.database.userKey | quote }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.backup.database.existingSecret | quote }}
+                      key: {{ .Values.backup.database.passwordKey | quote }}
+                {{- else }}
+                {{- include "openctem.migrationsDbCredentialsEnv" . | trim | nindent 16 }}
+                {{- include "openctem.pgCredentialsEnv" . | nindent 16 }}
+                {{- end }}
+                {{- with include "openctem.dbCaEnv" . }}
+                {{- . | trim | nindent 16 }}
+                {{- end }}
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  umask 077
+                  pg_dump --format=custom --compress=6 --no-password --file=/scratch/openctem.dump
+                  pg_restore --list /scratch/openctem.dump > /dev/null
+                  ls -l /scratch/openctem.dump
+              {{- with .Values.backup.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: scratch
+                  mountPath: /scratch
+                {{- with include "openctem.dbCaVolumeMount" . }}
+                {{- . | trim | nindent 16 }}
+                {{- end }}
+          # Step 2: encrypt (the crypt remote) and upload. No database credentials here.
+          containers:
+            - name: upload
+              image: {{ printf "%s:%s" .Values.backup.rclone.image.repository .Values.backup.rclone.image.tag | quote }}
+              imagePullPolicy: {{ .Values.backup.rclone.image.pullPolicy }}
+              {{- with .Values.backup.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: RCLONE_CONFIG
+                  value: /config/rclone/rclone.conf
+                - name: RCLONE_LOG_LEVEL
+                  value: INFO
+                - name: REMOTE
+                  value: {{ printf "%s:%s" .Values.backup.rclone.remote .Values.backup.path | quote }}
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | int | quote }}
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  rclone copyto /scratch/openctem.dump "$REMOTE/$stamp/openctem.dump"
+                  rclone lsl "$REMOTE/$stamp/"
+                  if [ "$RETENTION_DAYS" -gt 0 ]; then
+                    rclone delete --min-age "${RETENTION_DAYS}d" "$REMOTE"
+                    rclone rmdirs --leave-root "$REMOTE"
+                  fi
+              {{- with .Values.backup.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: scratch
+                  mountPath: /scratch
+                  readOnly: true
+                - name: rclone
+                  mountPath: /config/rclone
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scratch
+              emptyDir:
+                sizeLimit: {{ .Values.backup.scratchSizeLimit | quote }}
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Mi
+            - name: rclone
+              secret:
+                secretName: {{ .Values.backup.rclone.existingSecret | quote }}
+                defaultMode: 0440
+            {{- with include "openctem.dbCaVolume" . }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
+{{- end }}

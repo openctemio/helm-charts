@@ -146,6 +146,10 @@ jobs:
           # keeps the DML-only database.auth role.
           tests/least-privilege/run.sh
 
+      - name: Off-cluster backup CronJob (render checks)
+        run: |
+          tests/backup/run.sh
+
       - name: Single-port gateway (render checks)
         run: |
           # gateway.mode ingress | httpRoute | caddy: routes, refusals, the

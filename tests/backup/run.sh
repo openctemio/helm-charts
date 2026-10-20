@@ -12,6 +12,7 @@ fails=0
 pass() { echo "ok   - $1"; }
 fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 expect() { if grep -qF -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: $2)"; fi; }
+expect_re() { if grep -qE -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: $2)"; fi; }
 reject() { if grep -qF -- "$2" <<<"$3"; then fail "$1 (unexpected: $2)"; else pass "$1"; fi; }
 
 base=(--set api.appEnv=development)
@@ -66,7 +67,8 @@ expect "postgres image pinned" "library/postgres:17-alpine@sha256:" "$out"
 
 # 7. The schema rejects a path that could escape the folder and an unknown key.
 out="$(render "${on[@]}" --set backup.path=../etc || true)"
-expect "path with .. is refused by the schema" "backup.path" "$out"
+# Helm 3 names the field backup.path, Helm 4 the JSON pointer /backup/path.
+expect_re "path with .. is refused by the schema" "backup\.path|/backup/path" "$out"
 out="$(render "${on[@]}" --set backup.bogus=1 || true)"
 expect "unknown backup key is refused" "bogus" "$out"
 

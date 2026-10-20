@@ -897,6 +897,7 @@ their own keys:
 | `helm test` Pod (busybox) | `tests.image.repository` / `.tag` |
 | Backup CronJob (rclone, postgres) | `backup.rclone.image.repository` / `.tag`, `backup.dump.image.repository` / `.tag` |
 | Sensor seccomp installer (busybox) | `sensor.sandbox.installerImage` (full reference) |
+| Signer key installer (busybox) | `api.signer.keyInstaller.image.repository` / `.tag` |
 | Bundled PostgreSQL / Redis (evaluation only) | `postgresql.image.repository`, `redis.image.repository`. The Bitnami subcharts also read `global.imageRegistry`: with it set they pull `<registry>/bitnamilegacy/postgresql` and `<registry>/bitnamilegacy/redis`. Production uses an external database and `postgresql.enabled=false`, `redis.enabled=false`. |
 
 Example (see `tests/private-registry/values.yaml`, which CI renders):

@@ -199,7 +199,7 @@ initContainers:
 {{- define "openctem.signerContainer" -}}
 {{- $s := .Values.api.signer -}}
 - name: signer
-  image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+  image: {{ include "openctem.image" (dict "image" .Values.api.image "root" . "defaultTag" .Chart.AppVersion) | quote }}
   imagePullPolicy: {{ .Values.api.image.pullPolicy }}
   command: ["/app/openctem-signer"]
   args: ["serve"]

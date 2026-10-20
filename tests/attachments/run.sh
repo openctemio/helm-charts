@@ -12,7 +12,9 @@ fails=0
 pass() { echo "ok   - $1"; }
 fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 
-render() { helm template t "$chart" --set api.appEnv=development "$@" 2>&1; }
+# The signer sidecar (tests/signer) is off here: it forces one replica and the
+# Recreate strategy, which would mask what these checks are about.
+render() { helm template t "$chart" --set api.appEnv=development --set api.signer.enabled=false "$@" 2>&1; }
 multi=(--set api.allowMultipleReplicas=true --set api.auth.jwtSecret=attachments-test-session-secret-0123456789)
 
 expect() { # expect <description> <pattern> <output>

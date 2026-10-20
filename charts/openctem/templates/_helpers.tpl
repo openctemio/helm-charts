@@ -481,6 +481,7 @@ SCOPE_ACTIVE_PROOF: "nothing: a platform administrator sets it in Console > Syst
 APP_DEBUG: "nothing: it switched nothing on (LOG_LEVEL=debug outside production)"
 GRPC_PORT: "nothing: sensors reach protocol v3 on the mTLS listener (api.sensorTransport)"
 LOG_SKIP_HEALTH: "nothing: probe requests are never logged"
+AI_TRIAGE_ENABLED: "nothing: AI triage is turned on per organization in Settings > AI (the API refuses to start while it is set)"
 AI_MAX_CONCURRENT_JOBS: "nothing: it limited nothing"
 AUTH_ALLOW_REGISTRATION: "nothing: who may sign up is set in Console > System > Sign-up"
 SMTP_ENABLED: "nothing: the platform SMTP server is set in Console > System > E-mail (BOOTSTRAP_SMTP_* in api.bootstrapAdmin.extraEnv for a headless install)"

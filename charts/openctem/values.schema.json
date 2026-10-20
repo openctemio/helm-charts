@@ -703,6 +703,134 @@
             "tenant",
             "admin"
           ]
+        },
+        "signer": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "runAsUser": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runAsGroup": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "ledger": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "",
+                    "audit",
+                    "enforce"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "key": {
+              "type": "object",
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                },
+                "secretKey": {
+                  "type": "string"
+                },
+                "generate": {
+                  "type": "boolean"
+                },
+                "persistence": {
+                  "type": "object",
+                  "properties": {
+                    "existingClaim": {
+                      "type": "string"
+                    },
+                    "storageClass": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "persistence": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "object",
+                  "properties": {
+                    "existingClaim": {
+                      "type": "string"
+                    },
+                    "storageClass": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "keyset": {
+              "type": "object",
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "extraEnv": {
+              "type": "array"
+            },
+            "resources": {
+              "type": "object"
+            },
+            "keyInstaller": {
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "repository": {
+                      "type": "string"
+                    },
+                    "tag": {
+                      "type": "string"
+                    },
+                    "pullPolicy": {
+                      "type": "string",
+                      "enum": [
+                        "Always",
+                        "IfNotPresent",
+                        "Never"
+                      ]
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

@@ -42,6 +42,7 @@ check "sensor gRPC on a dedicated Service, NetworkPolicy" --set api.appEnv=devel
 check "sensor protocol v3 off" --set api.appEnv=development --set api.sensorTransport.mode=off
 check "off-cluster backup CronJob" --set api.appEnv=development --set backup.enabled=true --set backup.rclone.existingSecret=offsite
 check "production values" -f "$chart/values-production.yaml"
+check "production values, generated signer key" -f "$chart/values-production.yaml" --set api.signer.key.existingSecret= --set api.signer.key.generate=true
 for size in small medium large; do
   check "production values + $size preset" -f "$chart/values-production.yaml" -f "$chart/values-$size.yaml"
 done

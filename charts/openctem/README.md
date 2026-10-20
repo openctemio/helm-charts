@@ -38,7 +38,8 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.23.3 | v0.9.5 | same |
 | 0.23.4 | v0.9.6 | same |
 | 0.23.5 – 0.28.0 | v0.9.7 | same |
-| 0.29.0 and later | v0.10.1 | same, plus `ghcr.io/openctemio/openctem-console` (chart 0.28.0 and later) |
+| 0.29.0 – 0.31.0 | v0.10.1 | same, plus `ghcr.io/openctemio/openctem-console` (chart 0.28.0 and later) |
+| 0.32.0 and later | v0.12.0 | same |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).
@@ -131,6 +132,78 @@ Production checklist (the chart enforces / warns on most of these):
   service account token in any pod.
 - **Stable secrets** — see "Secrets & GitOps" below (required in production).
 - **NetworkPolicy** — enable `networkPolicy.enabled` on a CNI that enforces it.
+
+## Job signer (signed sensor jobs)
+
+From OpenCTEM v0.12.0 every job the API hands to a sensor is signed by
+`openctem-signer`, with a key the API never holds, and a production API
+refuses to start without it. The chart runs it as a **sidecar container of the
+API pod** (`api.signer`, on by default): the signer listens on a Unix socket
+only, so a memory-backed `emptyDir` shared by the two containers carries the
+socket (`SIGNER_SOCKET=/run/openctem-signer/signer.sock` on both).
+
+What keeps the key away from the API:
+
+- The key and the signer's state (sequence counter, signing log, scope ledger)
+  are mounted into the `signer` container only. The API container mounts the
+  socket directory and nothing else of the signer's.
+- The signer runs as its own user (`api.signer.runAsUser`, 1001; rendering
+  fails when it equals the API's), non-root, read-only root filesystem, every
+  capability dropped, no privilege escalation, the runtime default seccomp
+  profile, no service account token (rendering fails when
+  `api.serviceAccount.automount=true`), and no port.
+- It shares the pod's network namespace, as every sidecar does. It binds no
+  port, but a NetworkPolicy cannot tell its traffic from the API's.
+- The signer holds one ledger and one signing log, so it is a single-writer:
+  rendering fails with more than one API replica, and the Deployment uses the
+  `Recreate` strategy (the volumes are ReadWriteOnce).
+
+**Key.** Create it once, outside the chart, and give the chart the Secret
+(`api.signer.key.existingSecret`; the key is never in values):
+
+```bash
+docker run --rm -v "$PWD:/out" --entrypoint /app/openctem-signer \
+  ghcr.io/openctemio/openctem-api:v0.12.0 keygen -out /out/signer.pem   # prints the key id
+kubectl -n openctem create secret generic openctem-signer-key --from-file=signer.pem
+```
+
+Then **back up `signer.pem` offline** and delete the local copy. An init
+container (a pinned `busybox`, same hardening) copies it from the Secret to a
+memory-backed volume with mode 0400, because the signer refuses a key that
+group or others can read and a Secret volume cannot give that when the pod has
+an `fsGroup`. Only that init container and the signer container mount the
+Secret volume. Alternatively `api.signer.key.generate=true` creates the key on
+first start into its own PersistentVolumeClaim (kept on `helm uninstall`; the
+signer never replaces an existing key) and logs its id; back that volume up
+offline as well. In dev/eval (`api.appEnv` other than production) the key is
+generated without any setting; production must choose one of the two.
+Losing the key means every sensor must pin a new one.
+
+**Production refuses to render without the signer.** `api.signer.enabled=false`
+with `api.appEnv=production` fails the render (mirroring the API's refusal),
+and so does `SIGNER_DANGEROUS_ALLOW_UNSIGNED_JOBS` in `api.extraEnv`.
+
+**Scope ledger.** The signer signs a job only inside the scope people
+approved. A fresh signer enforces that at once, so an install that already has
+scopes would stop scanning. `api.signer.ledger.mode` therefore defaults to
+`audit`: every job is signed and each one outside the ledger is recorded.
+Bootstrap the ledger, then set `enforce`:
+
+```bash
+kubectl -n openctem exec deploy/<release>-openctem-api -c api -- \
+  ./server -signer-ledger-export /tmp/ledger.json     # prints its SHA-256
+kubectl -n openctem cp <pod>:/tmp/ledger.json ./ledger.json -c api
+# a second person reviews ledger.json, then stop the signer (it holds the
+# ledger lock) and import it with the signer image, for example in a throwaway
+# pod that mounts the signer-state claim, with
+#   openctem-signer ledger import -file /dev/stdin < ledger.json
+# and finally: helm upgrade ... --set api.signer.ledger.mode=enforce
+```
+
+The full ceremony, the key set signed by an offline root
+(`api.signer.keyset.existingSecret`), the ledger modes and the signer's
+variables (`api.signer.extraEnv`) are in the OpenCTEM documentation,
+`api/docs/architecture/job-signing.md`.
 
 ## First install: platform admin and first organization
 
@@ -774,6 +847,30 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Upgrading to 0.32.0 (OpenCTEM v0.12.0)
+
+The default images are OpenCTEM v0.12.0 (the bundled sensor stays at its
+pinned version). Do not install this chart version before the v0.12.0 images
+exist. There was no 0.11.0 chart. Changes you must act on:
+
+- **The job signer is required in production** ([Job signer](#job-signer-signed-sensor-jobs)).
+  Before `helm upgrade`, create the key Secret (`api.signer.key.existingSecret`)
+  or opt in to `api.signer.key.generate=true`, and **back the key up offline**.
+  The upgrade starts the signer in `audit` mode (`api.signer.ledger.mode`);
+  bootstrap the scope ledger and switch to `enforce` afterwards. The API pod
+  gets the `Recreate` strategy and must stay at one replica.
+- **Remove `AI_TRIAGE_ENABLED`** from `api.extraEnv` and `api.extraEnvFrom`
+  sources: the API refuses to start while it is set (AI triage is turned on
+  per organization in Settings > AI). The render fails on it in `api.extraEnv`.
+- The bootstrap Job passes `-print-secrets`: `bootstrap-admin` refuses to
+  print one-time credentials into anything but a terminal otherwise, and the
+  Job log is where the chart documents reading them.
+- OpenCTEM v0.12.0 drops database columns in its migrations, which the
+  previous API version cannot run against: take a `pg_dump` first and plan a
+  short downtime (the migrations Job runs before the new API starts). If
+  the install uses the least-privilege database roles, run the role script
+  again (see OpenCTEM's release notes).
+
 ## Private registry / air-gapped
 
 Run OpenCTEM from your own registry (Harbor, Nexus, a GitLab registry) with every
@@ -800,6 +897,7 @@ their own keys:
 | `helm test` Pod (busybox) | `tests.image.repository` / `.tag` |
 | Backup CronJob (rclone, postgres) | `backup.rclone.image.repository` / `.tag`, `backup.dump.image.repository` / `.tag` |
 | Sensor seccomp installer (busybox) | `sensor.sandbox.installerImage` (full reference) |
+| Signer key installer (busybox) | `api.signer.keyInstaller.image.repository` / `.tag` |
 | Bundled PostgreSQL / Redis (evaluation only) | `postgresql.image.repository`, `redis.image.repository`. The Bitnami subcharts also read `global.imageRegistry`: with it set they pull `<registry>/bitnamilegacy/postgresql` and `<registry>/bitnamilegacy/redis`. Production uses an external database and `postgresql.enabled=false`, `redis.enabled=false`. |
 
 Example (see `tests/private-registry/values.yaml`, which CI renders):
@@ -1425,6 +1523,26 @@ description from its `# --` comment (generated with
 | `api.serviceAccount.automount` | bool | `false` | Mount the service account token. The API never calls the Kubernetes API, so it is off: a token in the pod is a credential nobody uses. |
 | `api.serviceAccount.create` | bool | `true` |  |
 | `api.serviceAccount.name` | string | `""` |  |
+| `api.signer.enabled` | bool | `true` | Run the signer sidecar and set SIGNER_SOCKET on the API. false is refused while api.appEnv=production. The sidecar keeps one ledger and one signing log, so the API pod runs as a single replica (rendering fails otherwise) and its Deployment uses the Recreate strategy. |
+| `api.signer.extraEnv` | list | `[]` | Extra signer environment, for example SIGNER_TENANT_RATE or SIGNER_LEDGER_MIN_APPROVALS. |
+| `api.signer.key.existingSecret` | string | `""` | Name of an existing Secret that holds the signing key (PEM PKCS#8 Ed25519, from `openctem-signer keygen`). Preferred in production: the key then exists outside the cluster's volumes. Never put the key in values. |
+| `api.signer.key.generate` | bool | `false` | Create the key on first start into api.signer.key.persistence (the signer never replaces an existing key) and log its id. In dev/eval (api.appEnv other than production) this is what happens without existingSecret; production must choose one of the two. |
+| `api.signer.key.persistence.existingClaim` | string | `""` | Use an existing claim for the generated key. |
+| `api.signer.key.persistence.size` | string | `"16Mi"` |  |
+| `api.signer.key.persistence.storageClass` | string | `""` |  |
+| `api.signer.key.secretKey` | string | `"signer.pem"` | Key inside that Secret. |
+| `api.signer.keyInstaller` | object | `{"image":{"pullPolicy":"IfNotPresent","repository":"busybox","tag":"1.37.0"}}` | Copies the key from its Secret into a memory-backed volume with mode 0400, which the signer demands and a Secret volume cannot give (the pod's fsGroup widens its mode). Used only with key.existingSecret. Runs as the signer's user with every capability dropped; the Secret is mounted into it alone. |
+| `api.signer.keyset.existingSecret` | string | `""` | Secret that holds a key set signed by an offline root key (SIGNER_KEYSET_FILE, public, optional). Sensors then pin the root, and signer keys rotate without pairing sensors again. |
+| `api.signer.keyset.key` | string | `"keyset.json"` |  |
+| `api.signer.ledger.mode` | string | `"audit"` | SIGNER_LEDGER: audit signs every job and records each one outside the scope ledger (an upgraded install starts with an empty ledger); enforce refuses a job outside the ledger. Run the ledger bootstrap (see the README, "Job signer"), then set enforce. Empty: the mode recorded in the ledger (enforce on a signer that never signed, audit on one that was upgraded to the ledger). |
+| `api.signer.persistence.state.existingClaim` | string | `""` | Volume for the signer's sequence counter, signing log and scope ledger. Keep and back it up: losing it resets the ledger. |
+| `api.signer.persistence.state.size` | string | `"1Gi"` |  |
+| `api.signer.persistence.state.storageClass` | string | `""` |  |
+| `api.signer.resources.limits.memory` | string | `"256Mi"` |  |
+| `api.signer.resources.requests.cpu` | string | `"25m"` |  |
+| `api.signer.resources.requests.memory` | string | `"64Mi"` |  |
+| `api.signer.runAsGroup` | string | `""` | Group of the signer; empty: the API pod's group. |
+| `api.signer.runAsUser` | int | `1001` | The signer's user. Must differ from the API's user; its group is the API's (api.podSecurityContext.runAsGroup, else 1000) so the API can open the socket (mode 0660). The image sets up the directories for 1001. |
 | `api.signupMode` | string | `"disabled"` | The API's sign-up ceiling (SIGNUP_MODE); no API or admin console change can exceed it. disabled — no public sign-up: accounts come from the platform administrator, invitations or an organization's SSO, and only the platform administrator creates organizations (admin console, or api.bootstrapAdmin.org). The default, and the right setting for self-hosted and on-prem installs. domain — sign-up only for addresses on an organization's verified domain; those people join that organization (internal portals). open — anyone may sign up and create an organization (hosted service). The API refuses to start without the platform e-mail and, in production, the Turnstile keys (CAPTCHA_TURNSTILE_SITE_KEY in api.extraEnv, CAPTCHA_TURNSTILE_SECRET from a Secret in api.extraEnvFrom). A SIGNUP_MODE entry in api.extraEnv takes precedence. |
 | `api.startupProbe` | object | `{"failureThreshold":30,"httpGet":{"path":"/health","port":"http"},"periodSeconds":5}` | startupProbe is ENABLED by default: first boot can be slow (app init + threat-intel load) and without it a slow start trips livenessProbe and the kubelet kills the pod in a crash loop. failureThreshold*periodSeconds = 30*5 = up to 150s of grace before liveness takes over. Set to {} to disable. |
 | `api.tolerations` | list | `[]` |  |

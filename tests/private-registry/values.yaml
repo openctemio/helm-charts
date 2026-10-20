@@ -7,7 +7,7 @@ imagePullSecrets:
 api:
   appEnv: development
   image:
-    tag: v0.10.1
+    tag: v0.12.0
     digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
   migrations:
     image:

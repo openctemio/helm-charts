@@ -1,0 +1,49 @@
+{{- if include "openctem.signerEnabled" . }}
+{{- $s := .Values.api.signer }}
+{{- if not $s.persistence.state.existingClaim }}
+# The job signer's state (sequence counter, signing log, scope ledger). It is
+# the signer's memory of what it signed and what scope was approved: keep it
+# (back it up with the database). Kept on `helm uninstall`.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openctem.signerStateClaim" . }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with $s.persistence.state.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $s.persistence.state.size | quote }}
+{{- end }}
+{{- if and (include "openctem.signerGenerateKey" .) (not $s.key.persistence.existingClaim) }}
+---
+# The job signer's private key, generated on first start
+# (api.signer.key.generate). Mounted into the signer container only. Kept on
+# `helm uninstall`: losing it means every sensor must pin a new key. Back it up
+# offline (see NOTES).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openctem.signerKeysClaim" . }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with $s.key.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $s.key.persistence.size | quote }}
+{{- end }}
+{{- end }}

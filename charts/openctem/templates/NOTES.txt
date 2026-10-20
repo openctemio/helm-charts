@@ -26,6 +26,27 @@
 - API service: `{{ include "openctem.apiFullname" . }}` (port {{ .Values.api.service.port }}, type {{ .Values.api.service.type }})
 - UI service: `{{ include "openctem.uiFullname" . }}` (port {{ .Values.ui.service.port }}, type {{ .Values.ui.service.type }})
 
+{{- if include "openctem.signerEnabled" . }}
+
+Job signer (signed sensor jobs): sidecar container `signer` of the API pod, on the socket
+/run/openctem-signer/signer.sock (a memory emptyDir shared with the API; it listens on no port).
+- Key: {{ if include "openctem.signerGenerateKey" . }}created on first start into PersistentVolumeClaim {{ include "openctem.signerKeysClaim" . }} (it is never replaced). Read its id:
+    kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "openctem.apiFullname" . }} -c signer | grep keyid
+{{- else }}the Secret {{ .Values.api.signer.key.existingSecret }} (key {{ .Values.api.signer.key.secretKey }}), copied by an init container to a 0400 file in memory; the API container never mounts it.
+{{- end }}
+- BACK UP THE KEY OFFLINE NOW, and keep it out of the cluster's regular backups. Losing it means every sensor
+  must pin a new key; a copy that leaks lets anyone sign jobs for your sensors.
+{{- if include "openctem.signerGenerateKey" . }}
+  Read it once, from a trusted workstation, then store it offline:
+    kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "openctem.apiFullname" . }} -c signer -- cat /var/lib/openctem-signer/keys/signer.pem
+  (the signer image has no shell: if exec fails, mount the claim in a throwaway pod). Prefer
+  api.signer.key.existingSecret for production, so the key exists outside the cluster from the start.
+{{- end }}
+- State (sequence counter, signing log, scope ledger): PersistentVolumeClaim {{ include "openctem.signerStateClaim" . }}. Back it up with the database.
+- Scope ledger mode: {{ .Values.api.signer.ledger.mode | default "the recorded default" }}. {{ if eq (toString .Values.api.signer.ledger.mode) "audit" }}audit signs every job and only records those outside the ledger. Bootstrap the ledger (README, "Job signer"), then set api.signer.ledger.mode=enforce.{{ end }}
+- The sidecar shares the API pod's network namespace; NetworkPolicy cannot tell its traffic from the API's. It binds no port, and the pod has no service account token.
+{{- end }}
+
 2. Ingress URLs (if enabled)
 {{- if .Values.api.ingress.enabled }}
 {{- range $host := .Values.api.ingress.hosts }}

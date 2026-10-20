@@ -95,7 +95,8 @@ openctem.validateRemovedValues.
 {{- if and (or $org.slug $org.ownerName) (not $org.name) }}
 {{- fail "\n\napi.bootstrapAdmin.org.slug / org.ownerName need api.bootstrapAdmin.org.name and api.bootstrapAdmin.org.ownerEmail.\n" }}
 {{- end }}
-{{- $args := list (printf "-email=%s" (required "api.bootstrapAdmin.email is required when api.bootstrapAdmin.enabled=true" $ba.email)) }}
+{{- /* -print-secrets: the Job log is not a terminal, and the one-time credentials are meant to be read from it (see above). */}}
+{{- $args := list "-print-secrets" (printf "-email=%s" (required "api.bootstrapAdmin.email is required when api.bootstrapAdmin.enabled=true" $ba.email)) }}
 {{- with $ba.name }}{{ $args = append $args (printf "-name=%s" .) }}{{ end }}
 {{- $args = append $args (printf "-role=%s" ($ba.role | default "super_admin")) }}
 {{- if $ba.noBackup }}

@@ -131,7 +131,7 @@ spec:
           {{- end }}
           # The sensor is versioned separately from the platform, so the tag
           # does not default to the chart appVersion (see values.yaml).
-          image: "{{ $sensor.image.repository }}:{{ required "sensor.image.tag is required (the sensor does not follow the chart appVersion; e.g. v0.9.1)" $sensor.image.tag }}"
+          image: {{ include "openctem.image" (dict "image" $sensor.image "root" . "requireTag" "sensor.image.tag is required (the sensor does not follow the chart appVersion; e.g. v0.9.1)") | quote }}
           imagePullPolicy: {{ $sensor.image.pullPolicy }}
           # The image entrypoint is /usr/local/bin/openctemio-sensor.
           args:

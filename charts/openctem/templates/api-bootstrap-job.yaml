@@ -147,7 +147,7 @@ spec:
       {{- end }}
       containers:
         - name: bootstrap-admin
-          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "openctem.image" (dict "image" .Values.api.image "root" . "defaultTag" .Chart.AppVersion) | quote }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           {{- with .Values.api.securityContext }}
           securityContext:

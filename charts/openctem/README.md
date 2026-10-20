@@ -38,8 +38,8 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.23.3 | v0.9.5 | same |
 | 0.23.4 | v0.9.6 | same |
 | 0.23.5 – 0.28.0 | v0.9.7 | same |
-| 0.29.0 | v0.10.1 | same, plus `ghcr.io/openctemio/openctem-console` (chart 0.28.0 and later) |
-| 0.30.0 and later | v0.12.0 | same |
+| 0.29.0 – 0.31.0 | v0.10.1 | same, plus `ghcr.io/openctemio/openctem-console` (chart 0.28.0 and later) |
+| 0.32.0 and later | v0.12.0 | same |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).
@@ -588,6 +588,57 @@ and `database.console.password` (or `database.console.existingSecret` with
 it, and the bootstrap Job connects as it. Re-run the script with `admin_user`
 after each upgrade that adds a console table (it is idempotent).
 
+## Backups to off-cluster storage
+
+Off by default. `backup.enabled=true` creates a CronJob that dumps the database (`pg_dump`, custom
+format, checked with `pg_restore --list`), encrypts it on the way out and uploads it to S3-compatible
+storage (AWS S3, Cloudflare R2, MinIO) or an SFTP host. The dump and the upload run in two containers of
+one pod: the dump container holds only the database credentials, the upload container only the storage
+Secret. The RPO is the schedule (daily by default). For recovery to a point in time use the managed
+database's own point-in-time recovery or your Postgres operator's: a chart cannot archive WAL of an
+external database. (The Compose overlay and the Ansible kit do archive WAL for self-managed Postgres.)
+
+Create the Secret with one key, `rclone.conf`: the storage remote and a `crypt` remote layered over it.
+The crypt remote encrypts file contents and names before they leave the cluster; keep its two passwords
+outside the cluster too, because without them the backups cannot be read.
+
+```ini
+[offsite]
+type = s3
+provider = Cloudflare            # AWS, Minio, ... ; for R2 the endpoint below
+access_key_id = <key id>
+secret_access_key = <secret>
+endpoint = https://<account id>.r2.cloudflarestorage.com
+
+[openctem-crypt]
+type = crypt
+remote = offsite:my-openctem-backups
+password = <output of: rclone obscure "$(openssl rand -base64 32)">
+password2 = <output of: rclone obscure "$(openssl rand -base64 32)">
+```
+
+For SFTP use `type = sftp`, `host`, `user`, `shell_type = unix`, `md5sum_command = none`,
+`sha1sum_command = none`, `known_hosts_file = /config/rclone/known_hosts` and
+`key_file = /config/rclone/sftp_key`, and put the `known_hosts` (all of the host's key types, taken
+from a channel you trust) and `sftp_key` files in the same Secret.
+
+```bash
+kubectl -n openctem create secret generic openctem-backup \
+  --from-file=rclone.conf=./rclone.conf
+helm upgrade --install openctem openctemio/openctem -n openctem \
+  --set backup.enabled=true --set backup.rclone.existingSecret=openctem-backup
+```
+
+Give the storage credential write and read rights only (no delete) and expire old backups with a
+bucket lifecycle rule; `backup.retentionDays` (default 0, no deletion) makes the job delete old
+backups itself and then needs a credential that can delete, so a compromised cluster could also wipe
+the history. With object lock on the bucket, a delete cannot remove a locked backup. Use a dedicated
+read-only database role (`backup.database.existingSecret`, a member of `pg_read_all_data`) instead
+of the application's role. `kubectl -n openctem create job --from=cronjob/<release>-backup test-backup`
+runs one now. Restore a dump with `rclone cat openctem-crypt:openctem/<UTC time>/openctem.dump | pg_restore -d <new database> --no-owner`,
+and rehearse that restore at least monthly. Uploaded files, the encryption key Secret and the
+rest of the cluster state are not in this dump; back them up separately.
+
 ## Attachment storage
 
 Uploaded attachments and finding evidence (`api.attachments`) live either on a
@@ -796,7 +847,7 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
-## Upgrading to 0.30.0 (OpenCTEM v0.12.0)
+## Upgrading to 0.32.0 (OpenCTEM v0.12.0)
 
 The default images are OpenCTEM v0.12.0 (the bundled sensor stays at its
 pinned version). Do not install this chart version before the v0.12.0 images
@@ -819,6 +870,69 @@ exist. There was no 0.11.0 chart. Changes you must act on:
   short downtime (the migrations Job runs before the new API starts). If
   the install uses the least-privilege database roles, run the role script
   again (see OpenCTEM's release notes).
+
+## Private registry / air-gapped
+
+Run OpenCTEM from your own registry (Harbor, Nexus, a GitLab registry) with every
+image pinned by digest. Nothing changes while the keys below are empty.
+
+1. Copy each image **and its cosign signature** into your registry. The signatures
+   are OCI referrers of the image digest, so copy them with the image
+   (`cosign copy` or `oras cp -r`), keeping the digest. Verify against your copy
+   with the same certificate identity and issuer as the original
+   (`cosign verify <your-registry>/openctem/openctem-api@sha256:...`).
+2. Set the keys:
+
+| Key | Effect |
+|---|---|
+| `global.imageRegistry` | Replaces the `ghcr.io/openctemio` prefix of every OpenCTEM image (`openctem-api`, `migrations`, `openctem-web`, `openctem-console`, `openctem-gateway`, `sensor`). The repository basename stays. Images whose `repository` you overrode to another host are used as written. |
+| `api.image.digest`, `api.migrations.image.digest`, `ui.image.digest`, `console.image.digest`, `gateway.caddy.image.digest`, `sensor.image.digest` | `sha256:<64 hex>`. Rendered as `repository:tag@digest`: the tag stays for people, the runtime pulls by the digest. A malformed value fails the render. The bootstrap, enrollment and migration (up and down) Jobs use the same references as the Deployments. |
+| `imagePullSecrets` | Registry credentials, applied to every pod and Job of the chart. |
+
+Third-party images are not touched by `global.imageRegistry`; mirror them and set
+their own keys:
+
+| Image | Key |
+|---|---|
+| `helm test` Pod (busybox) | `tests.image.repository` / `.tag` |
+| Backup CronJob (rclone, postgres) | `backup.rclone.image.repository` / `.tag`, `backup.dump.image.repository` / `.tag` |
+| Sensor seccomp installer (busybox) | `sensor.sandbox.installerImage` (full reference) |
+| Bundled PostgreSQL / Redis (evaluation only) | `postgresql.image.repository`, `redis.image.repository`. The Bitnami subcharts also read `global.imageRegistry`: with it set they pull `<registry>/bitnamilegacy/postgresql` and `<registry>/bitnamilegacy/redis`. Production uses an external database and `postgresql.enabled=false`, `redis.enabled=false`. |
+
+Example (see `tests/private-registry/values.yaml`, which CI renders):
+
+```yaml
+global:
+  imageRegistry: registry.example.com/openctem
+imagePullSecrets:
+  - name: regcred
+api:
+  image:
+    digest: sha256:<api digest>
+  migrations:
+    image:
+      digest: sha256:<migrations digest>
+ui:
+  image:
+    digest: sha256:<web digest>
+console:
+  image:
+    digest: sha256:<console digest>
+```
+
+The digest is the integrity anchor: a mirror that serves different bytes under
+the digest fails the pull. Keep the mirror's cosign signatures so the images can
+still be verified end to end.
+
+## Upgrading to 0.31.0 (private registry support)
+
+New `image.digest` keys and `global.imageRegistry` ([Private registry / air-gapped](#private-registry--air-gapped)).
+Defaults are empty: rendered references do not change on upgrade.
+
+## Upgrading to 0.30.0 (optional backup CronJob)
+
+New `backup.*` values add an optional off-cluster backup CronJob ([Backups to off-cluster
+storage](#backups-to-off-cluster-storage)). It is off by default: nothing changes on upgrade.
 
 ## Upgrading to 0.29.0 (OpenCTEM v0.10.1)
 
@@ -1343,6 +1457,7 @@ description from its `# --` comment (generated with
 | `api.fingerprint.keyRef` | string | `"FINGERPRINT_KEY"` |  |
 | `api.goMemLimit` | string | `""` | GOMEMLIMIT for the API (Go's soft memory limit, e.g. "1600MiB"), about 80% of resources.limits.memory, so the garbage collector works harder before the kernel OOM-kills the pod. Empty: not set. The size presets set it. A GOMEMLIMIT entry in api.extraEnv takes precedence. |
 | `api.httpRoute` | object | see `values.yaml` | Expose API service via gateway-api HTTPRoute |
+| `api.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `api.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `api.image.repository` | string | `"ghcr.io/openctemio/openctem-api"` | API image. Published by the openctemio/openctem monorepo from v0.9.0; releases up to v0.8.0 exist only as ghcr.io/openctemio/api, which keeps receiving identical copies for a transition window. |
 | `api.image.tag` | string | `""` |  |
@@ -1363,6 +1478,7 @@ description from its `# --` comment (generated with
 | `api.migrations.extraArgs` | list | `[]` | Extra args appended BEFORE the "up" subcommand. |
 | `api.migrations.extraEnv` | list | `[]` | Extra environment variables for the migration container. |
 | `api.migrations.hooks` | object | `{"enabled":true}` | Run as a Helm hook (post-install,pre-upgrade). When false, the Job is applied as a plain resource (useful for GitOps flows). |
+| `api.migrations.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `api.migrations.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `api.migrations.image.repository` | string | `"ghcr.io/openctemio/migrations"` |  |
 | `api.migrations.image.tag` | string | `""` | Image tag for the migrations image. Defaults to .Chart.AppVersion. |
@@ -1432,10 +1548,35 @@ description from its `# --` comment (generated with
 | `api.topologySpreadConstraints` | list | `[]` | topologySpreadConstraints (values-driven, templated). Keeps the >= 2 replicas off a single node/zone. Empty by default; values-production.yaml ships a soft (ScheduleAnyway) hostname spread. Supports `tpl` for dynamic label values. |
 | `api.volumeMounts` | list | `[]` |  |
 | `api.volumes` | list | `[]` |  |
+| `backup.activeDeadlineSeconds` | int | `7200` | Hard stop for one run. |
+| `backup.database.existingSecret` | string | `""` | Optional Secret with a dedicated read-only role (member of pg_read_all_data) for the dump. Empty: the migration role, or the API's role when no split is configured. The API's DML-only role works when it can read every table and sequence. |
+| `backup.database.passwordKey` | string | `"DB_PASSWORD"` |  |
+| `backup.database.userKey` | string | `"DB_USER"` |  |
+| `backup.dump.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `backup.dump.image.repository` | string | `"docker.io/library/postgres"` | Needs pg_dump of the database's major version or newer. |
+| `backup.dump.image.tag` | string | `"17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"` |  |
+| `backup.enabled` | bool | `false` | Create the backup CronJob. Requires `rclone.existingSecret`. |
+| `backup.nodeSelector` | object | `{}` |  |
+| `backup.path` | string | `"openctem"` | Folder inside the storage remote. |
+| `backup.podSecurityContext` | object | see `values.yaml` | Pod security context. fsGroup lets the non-root user read the mounted Secret. |
+| `backup.rclone.existingSecret` | string | `""` | Secret in the release namespace with the key `rclone.conf`: the storage remote (s3 or sftp) and, layered over it, a `crypt` remote that encrypts file contents and names on the way out (the password stays in the Secret, keep a copy outside the cluster: without it the backups are unreadable). An sftp host key list and key file go in the same Secret and are referenced as /config/rclone/<key>. |
+| `backup.rclone.image.pullPolicy` | string | `"IfNotPresent"` |  |
+| `backup.rclone.image.repository` | string | `"docker.io/rclone/rclone"` |  |
+| `backup.rclone.image.tag` | string | `"1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5"` | Pinned by tag and digest (rclone publishes no image signature). |
+| `backup.rclone.remote` | string | `"openctem-crypt"` | Name of the crypt remote in rclone.conf; backups are written through it. |
+| `backup.resources` | object | `{"limits":{"memory":"1Gi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resources of both containers. |
+| `backup.retentionDays` | int | `0` | Delete backups older than this many days after each upload. 0 (default) deletes nothing: the credential then needs no delete right and the bucket's lifecycle rule prunes (recommended). A value above 0 needs a credential that can delete, so a compromised cluster could also wipe the history. |
+| `backup.schedule` | string | `"17 2 * * *"` | Cron schedule (UTC unless the cluster's CronJob timezone says otherwise). |
+| `backup.scratchSizeLimit` | string | `"10Gi"` | Size limit of the scratch volume that holds the dump before upload; at least the compressed size of the database. |
+| `backup.securityContext.allowPrivilegeEscalation` | bool | `false` |  |
+| `backup.securityContext.capabilities.drop[0]` | string | `"ALL"` |  |
+| `backup.securityContext.readOnlyRootFilesystem` | bool | `true` |  |
+| `backup.tolerations` | list | `[]` |  |
 | `console` | object | see `values.yaml` | --------------------------------------------------------------------------- |
 | `console.cacheSizeLimit` | string | `"128Mi"` | Size limit of the /app/console/.next/cache emptyDir. |
 | `console.enabled` | bool | `true` | Deploy the console. false: no console in the cluster (the console API stays reachable for the bootstrap CLI only). |
 | `console.extraEnv` | list | `[]` | Extra environment variables (list of name/value or valueFrom). |
+| `console.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `console.image.repository` | string | `"ghcr.io/openctemio/openctem-console"` | Console image (console/ in openctemio/openctem). Needs an appVersion that publishes it: the release after openctem PR 2443. |
 | `console.image.tag` | string | `""` | Defaults to the chart's appVersion. |
 | `console.ingress` | object | see `values.yaml` | Console behind your own Ingress / HTTPRoute (gateway.mode=ingress, httpRoute or none), on admin.site.host (needs admin.site.mode=host). The client-network gate is then your ingress controller's source range list (allowedSourceRanges, required), and the console passes the client address the controller saw to the API, which also checks admin.allowedCidrs on it. For that the controller must see the real client address (for example externalTrafficPolicy: Local or the PROXY protocol on the load balancer) and overwrite X-Forwarded-For, gateway.trustedProxies must cover the console pods, and networkPolicy must be enabled with the ingress controller selector (rendering fails otherwise): the console believes the address its caller sends. Not for gateway.mode=caddy (the bundled gateway serves the console site). |
@@ -1465,6 +1606,7 @@ description from its `# --` comment (generated with
 | `fullnameOverride` | string | `""` |  |
 | `gateway.caddy` | object | see `values.yaml` | ------------------------------------------------------------------------- |
 | `gateway.caddy.frontProxies` | list | `[]` | CIDRs of proxies IN FRONT of Caddy whose X-Forwarded-For Caddy believes (tls.mode=http behind an L7 proxy). Empty: none. |
+| `gateway.caddy.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `gateway.caddy.image.layer4` | bool | `true` | The image carries the layer4 module. Needed by sensorGateway alpn and passthrough, and makes alpn the default (sensor gRPC and the web share port 443). |
 | `gateway.caddy.image.repository` | string | `"ghcr.io/openctemio/openctem-gateway"` | The OpenCTEM gateway image (Caddy plus the caddy-l4 module, built from openctemio/openctem api/deploy/gateway/Dockerfile and published with every release). The stock caddy image works too, with layer4=false (sensors then use the HTTPS binding). |
 | `gateway.caddy.image.tag` | string | `""` | Empty: the chart appVersion. |
@@ -1489,6 +1631,7 @@ description from its `# --` comment (generated with
 | `gateway.mode` | string | `"none"` | none (default; nothing changes) \| ingress \| httpRoute \| caddy |
 | `gateway.publicUrl` | string | `""` | Public origin, used for APP_URL, CORS_ALLOWED_ORIGINS and SMTP_BASE_URL. Default: https://<host>. Set it when clients use a non-443 port (e.g. https://ctem.example.com:8443) or in caddy http mode. |
 | `gateway.trustedProxies` | list | `[]` | REQUIRED when mode != none: CIDRs/IPs the API trusts to report the client address (SERVER_TRUSTED_PROXIES). These are the hops that connect to the API: the gateway pods (or the ingress controller / Gateway pods) and the UI pods. Pod IPs change, so give the cluster's POD CIDR, e.g. kubeadm+flannel 10.244.0.0/16, k3s 10.42.0.0/16, GKE/EKS: the VPC/pod range. kubectl cluster-info dump \| grep -m1 -- --cluster-cidr Anything outside this list is recorded as its own TCP peer, so nothing can choose the IP written to the audit log or matched by IP allowlists. |
+| `global.imageRegistry` | string | `""` | Private registry or mirror for the OpenCTEM images. When set, it replaces the ghcr.io/openctemio prefix of every OpenCTEM image (api, migrations, ui, console, gateway, sensor); the repository basenames stay (openctem-api, migrations, openctem-web, openctem-console, openctem-gateway, sensor). Example: registry.example.com/openctem. It does NOT touch third-party images (postgresql and redis subcharts, busybox, rclone, postgres): override their repository keys yourself, see "Private registry / air-gapped" in the README. The mirror must hold the images AND their cosign signatures (OCI referrers). |
 | `global.security.allowInsecureImages` | bool | `true` | The bundled Bitnami subcharts (evaluation only) refuse images outside docker.io/bitnami unless this is true; postgresql.image and redis.image pin bitnamilegacy releases. |
 | `imagePullSecrets` | list | `[]` |  |
 | `monitoring.enabled` | bool | `false` | Turn on the API's /metrics (bearer token METRICS_TOKEN). Off: /metrics answers 404. The gateway never routes /metrics, whatever this says. |
@@ -1549,6 +1692,7 @@ description from its `# --` comment (generated with
 | `sensor.extraEnv` | list | `[]` |  |
 | `sensor.extraVolumeMounts` | list | `[]` |  |
 | `sensor.extraVolumes` | list | `[]` | Extra volumes and mounts for the sensor container (for example a host directory holding the kill switch file). |
+| `sensor.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
 | `sensor.image.tag` | string | `"v0.23.2"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
@@ -1614,6 +1758,7 @@ description from its `# --` comment (generated with
 | `ui.extraEnv` | list | `[]` |  |
 | `ui.extraEnvFrom` | list | `[]` |  |
 | `ui.httpRoute` | object | see `values.yaml` | Expose UI service via gateway-api HTTPRoute |
+| `ui.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `ui.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `ui.image.repository` | string | `"ghcr.io/openctemio/openctem-web"` | Web console image (web/ in openctemio/openctem). Releases up to v0.8.0 exist only as ghcr.io/openctemio/ui. |
 | `ui.image.tag` | string | `""` |  |

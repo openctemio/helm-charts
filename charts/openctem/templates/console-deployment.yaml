@@ -43,7 +43,7 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          image: "{{ $c.image.repository }}:{{ $c.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "openctem.image" (dict "image" $c.image "root" . "defaultTag" .Chart.AppVersion) | quote }}
           imagePullPolicy: {{ $c.image.pullPolicy }}
           ports:
             - name: http

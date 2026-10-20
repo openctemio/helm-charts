@@ -99,6 +99,12 @@ jobs:
           # several replicas, and the multi-replica-on-RWO/emptyDir refusals.
           tests/attachments/run.sh
 
+      - name: Private registry (render checks)
+        run: |
+          # image.digest (repo:tag@digest on every OpenCTEM image, jobs
+          # included), global.imageRegistry, imagePullSecrets, bad digest refused.
+          tests/private-registry/run.sh
+
       - name: Organization bootstrap (render checks)
         run: |
           # api.signupMode, the bootstrap-admin Job (no shell, no
@@ -151,6 +157,10 @@ jobs:
           # database.migrator: migration Jobs use the schema owner, the API
           # keeps the DML-only database.auth role.
           tests/least-privilege/run.sh
+
+      - name: Off-cluster backup CronJob (render checks)
+        run: |
+          tests/backup/run.sh
 
       - name: Single-port gateway (render checks)
         run: |

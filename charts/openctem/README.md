@@ -774,6 +774,64 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Private registry / air-gapped
+
+Run OpenCTEM from your own registry (Harbor, Nexus, a GitLab registry) with every
+image pinned by digest. Nothing changes while the keys below are empty.
+
+1. Copy each image **and its cosign signature** into your registry. The signatures
+   are OCI referrers of the image digest, so copy them with the image
+   (`cosign copy` or `oras cp -r`), keeping the digest. Verify against your copy
+   with the same certificate identity and issuer as the original
+   (`cosign verify <your-registry>/openctem/openctem-api@sha256:...`).
+2. Set the keys:
+
+| Key | Effect |
+|---|---|
+| `global.imageRegistry` | Replaces the `ghcr.io/openctemio` prefix of every OpenCTEM image (`openctem-api`, `migrations`, `openctem-web`, `openctem-console`, `openctem-gateway`, `sensor`). The repository basename stays. Images whose `repository` you overrode to another host are used as written. |
+| `api.image.digest`, `api.migrations.image.digest`, `ui.image.digest`, `console.image.digest`, `gateway.caddy.image.digest`, `sensor.image.digest` | `sha256:<64 hex>`. Rendered as `repository:tag@digest`: the tag stays for people, the runtime pulls by the digest. A malformed value fails the render. The bootstrap, enrollment and migration (up and down) Jobs use the same references as the Deployments. |
+| `imagePullSecrets` | Registry credentials, applied to every pod and Job of the chart. |
+
+Third-party images are not touched by `global.imageRegistry`; mirror them and set
+their own keys:
+
+| Image | Key |
+|---|---|
+| `helm test` Pod (busybox) | `tests.image.repository` / `.tag` |
+| Backup CronJob (rclone, postgres) | `backup.rclone.image.repository` / `.tag`, `backup.dump.image.repository` / `.tag` |
+| Sensor seccomp installer (busybox) | `sensor.sandbox.installerImage` (full reference) |
+| Bundled PostgreSQL / Redis (evaluation only) | `postgresql.image.repository`, `redis.image.repository`. The Bitnami subcharts also read `global.imageRegistry`: with it set they pull `<registry>/bitnamilegacy/postgresql` and `<registry>/bitnamilegacy/redis`. Production uses an external database and `postgresql.enabled=false`, `redis.enabled=false`. |
+
+Example (see `tests/private-registry/values.yaml`, which CI renders):
+
+```yaml
+global:
+  imageRegistry: registry.example.com/openctem
+imagePullSecrets:
+  - name: regcred
+api:
+  image:
+    digest: sha256:<api digest>
+  migrations:
+    image:
+      digest: sha256:<migrations digest>
+ui:
+  image:
+    digest: sha256:<web digest>
+console:
+  image:
+    digest: sha256:<console digest>
+```
+
+The digest is the integrity anchor: a mirror that serves different bytes under
+the digest fails the pull. Keep the mirror's cosign signatures so the images can
+still be verified end to end.
+
+## Upgrading to 0.31.0 (private registry support)
+
+New `image.digest` keys and `global.imageRegistry` ([Private registry / air-gapped](#private-registry--air-gapped)).
+Defaults are empty: rendered references do not change on upgrade.
+
 ## Upgrading to 0.30.0 (optional backup CronJob)
 
 New `backup.*` values add an optional off-cluster backup CronJob ([Backups to off-cluster
@@ -1302,6 +1360,7 @@ description from its `# --` comment (generated with
 | `api.fingerprint.keyRef` | string | `"FINGERPRINT_KEY"` |  |
 | `api.goMemLimit` | string | `""` | GOMEMLIMIT for the API (Go's soft memory limit, e.g. "1600MiB"), about 80% of resources.limits.memory, so the garbage collector works harder before the kernel OOM-kills the pod. Empty: not set. The size presets set it. A GOMEMLIMIT entry in api.extraEnv takes precedence. |
 | `api.httpRoute` | object | see `values.yaml` | Expose API service via gateway-api HTTPRoute |
+| `api.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `api.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `api.image.repository` | string | `"ghcr.io/openctemio/openctem-api"` | API image. Published by the openctemio/openctem monorepo from v0.9.0; releases up to v0.8.0 exist only as ghcr.io/openctemio/api, which keeps receiving identical copies for a transition window. |
 | `api.image.tag` | string | `""` |  |
@@ -1322,6 +1381,7 @@ description from its `# --` comment (generated with
 | `api.migrations.extraArgs` | list | `[]` | Extra args appended BEFORE the "up" subcommand. |
 | `api.migrations.extraEnv` | list | `[]` | Extra environment variables for the migration container. |
 | `api.migrations.hooks` | object | `{"enabled":true}` | Run as a Helm hook (post-install,pre-upgrade). When false, the Job is applied as a plain resource (useful for GitOps flows). |
+| `api.migrations.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `api.migrations.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `api.migrations.image.repository` | string | `"ghcr.io/openctemio/migrations"` |  |
 | `api.migrations.image.tag` | string | `""` | Image tag for the migrations image. Defaults to .Chart.AppVersion. |
@@ -1399,6 +1459,7 @@ description from its `# --` comment (generated with
 | `console.cacheSizeLimit` | string | `"128Mi"` | Size limit of the /app/console/.next/cache emptyDir. |
 | `console.enabled` | bool | `true` | Deploy the console. false: no console in the cluster (the console API stays reachable for the bootstrap CLI only). |
 | `console.extraEnv` | list | `[]` | Extra environment variables (list of name/value or valueFrom). |
+| `console.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `console.image.repository` | string | `"ghcr.io/openctemio/openctem-console"` | Console image (console/ in openctemio/openctem). Needs an appVersion that publishes it: the release after openctem PR 2443. |
 | `console.image.tag` | string | `""` | Defaults to the chart's appVersion. |
 | `console.ingress` | object | see `values.yaml` | Console behind your own Ingress / HTTPRoute (gateway.mode=ingress, httpRoute or none), on admin.site.host (needs admin.site.mode=host). The client-network gate is then your ingress controller's source range list (allowedSourceRanges, required), and the console passes the client address the controller saw to the API, which also checks admin.allowedCidrs on it. For that the controller must see the real client address (for example externalTrafficPolicy: Local or the PROXY protocol on the load balancer) and overwrite X-Forwarded-For, gateway.trustedProxies must cover the console pods, and networkPolicy must be enabled with the ingress controller selector (rendering fails otherwise): the console believes the address its caller sends. Not for gateway.mode=caddy (the bundled gateway serves the console site). |
@@ -1428,6 +1489,7 @@ description from its `# --` comment (generated with
 | `fullnameOverride` | string | `""` |  |
 | `gateway.caddy` | object | see `values.yaml` | ------------------------------------------------------------------------- |
 | `gateway.caddy.frontProxies` | list | `[]` | CIDRs of proxies IN FRONT of Caddy whose X-Forwarded-For Caddy believes (tls.mode=http behind an L7 proxy). Empty: none. |
+| `gateway.caddy.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `gateway.caddy.image.layer4` | bool | `true` | The image carries the layer4 module. Needed by sensorGateway alpn and passthrough, and makes alpn the default (sensor gRPC and the web share port 443). |
 | `gateway.caddy.image.repository` | string | `"ghcr.io/openctemio/openctem-gateway"` | The OpenCTEM gateway image (Caddy plus the caddy-l4 module, built from openctemio/openctem api/deploy/gateway/Dockerfile and published with every release). The stock caddy image works too, with layer4=false (sensors then use the HTTPS binding). |
 | `gateway.caddy.image.tag` | string | `""` | Empty: the chart appVersion. |
@@ -1452,6 +1514,7 @@ description from its `# --` comment (generated with
 | `gateway.mode` | string | `"none"` | none (default; nothing changes) \| ingress \| httpRoute \| caddy |
 | `gateway.publicUrl` | string | `""` | Public origin, used for APP_URL, CORS_ALLOWED_ORIGINS and SMTP_BASE_URL. Default: https://<host>. Set it when clients use a non-443 port (e.g. https://ctem.example.com:8443) or in caddy http mode. |
 | `gateway.trustedProxies` | list | `[]` | REQUIRED when mode != none: CIDRs/IPs the API trusts to report the client address (SERVER_TRUSTED_PROXIES). These are the hops that connect to the API: the gateway pods (or the ingress controller / Gateway pods) and the UI pods. Pod IPs change, so give the cluster's POD CIDR, e.g. kubeadm+flannel 10.244.0.0/16, k3s 10.42.0.0/16, GKE/EKS: the VPC/pod range. kubectl cluster-info dump \| grep -m1 -- --cluster-cidr Anything outside this list is recorded as its own TCP peer, so nothing can choose the IP written to the audit log or matched by IP allowlists. |
+| `global.imageRegistry` | string | `""` | Private registry or mirror for the OpenCTEM images. When set, it replaces the ghcr.io/openctemio prefix of every OpenCTEM image (api, migrations, ui, console, gateway, sensor); the repository basenames stay (openctem-api, migrations, openctem-web, openctem-console, openctem-gateway, sensor). Example: registry.example.com/openctem. It does NOT touch third-party images (postgresql and redis subcharts, busybox, rclone, postgres): override their repository keys yourself, see "Private registry / air-gapped" in the README. The mirror must hold the images AND their cosign signatures (OCI referrers). |
 | `global.security.allowInsecureImages` | bool | `true` | The bundled Bitnami subcharts (evaluation only) refuse images outside docker.io/bitnami unless this is true; postgresql.image and redis.image pin bitnamilegacy releases. |
 | `imagePullSecrets` | list | `[]` |  |
 | `monitoring.enabled` | bool | `false` | Turn on the API's /metrics (bearer token METRICS_TOKEN). Off: /metrics answers 404. The gateway never routes /metrics, whatever this says. |
@@ -1512,6 +1575,7 @@ description from its `# --` comment (generated with
 | `sensor.extraEnv` | list | `[]` |  |
 | `sensor.extraVolumeMounts` | list | `[]` |  |
 | `sensor.extraVolumes` | list | `[]` | Extra volumes and mounts for the sensor container (for example a host directory holding the kill switch file). |
+| `sensor.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
 | `sensor.image.tag` | string | `"v0.23.2"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
@@ -1577,6 +1641,7 @@ description from its `# --` comment (generated with
 | `ui.extraEnv` | list | `[]` |  |
 | `ui.extraEnvFrom` | list | `[]` |  |
 | `ui.httpRoute` | object | see `values.yaml` | Expose UI service via gateway-api HTTPRoute |
+| `ui.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `ui.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `ui.image.repository` | string | `"ghcr.io/openctemio/openctem-web"` | Web console image (web/ in openctemio/openctem). Releases up to v0.8.0 exist only as ghcr.io/openctemio/ui. |
 | `ui.image.tag` | string | `""` |  |

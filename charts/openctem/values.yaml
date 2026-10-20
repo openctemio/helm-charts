@@ -8,6 +8,15 @@ fullnameOverride: ""
 imagePullSecrets: []
 
 global:
+  # -- Private registry or mirror for the OpenCTEM images. When set, it replaces
+  # the ghcr.io/openctemio prefix of every OpenCTEM image (api, migrations,
+  # ui, console, gateway, sensor); the repository basenames stay (openctem-api,
+  # migrations, openctem-web, openctem-console, openctem-gateway, sensor).
+  # Example: registry.example.com/openctem. It does NOT touch third-party images
+  # (postgresql and redis subcharts, busybox, rclone, postgres): override their
+  # repository keys yourself, see "Private registry / air-gapped" in the README.
+  # The mirror must hold the images AND their cosign signatures (OCI referrers).
+  imageRegistry: ""
   security:
     # -- The bundled Bitnami subcharts (evaluation only) refuse images outside
     # docker.io/bitnami unless this is true; postgresql.image and redis.image
@@ -150,6 +159,9 @@ api:
     repository: ghcr.io/openctemio/openctem-api
     pullPolicy: IfNotPresent
     tag: ""
+    # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
+    # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
+    digest: ""
 
   serviceAccount:
     create: true
@@ -437,6 +449,9 @@ api:
       repository: ghcr.io/openctemio/migrations
       # -- Image tag for the migrations image. Defaults to .Chart.AppVersion.
       tag: ""
+      # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
+      # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
+      digest: ""
       pullPolicy: IfNotPresent
 
     # -- Run as a Helm hook (post-install,pre-upgrade). When false, the Job
@@ -509,6 +524,9 @@ ui:
     repository: ghcr.io/openctemio/openctem-web
     pullPolicy: IfNotPresent
     tag: ""
+    # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
+    # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
+    digest: ""
 
   config:
     nodeEnv: "production"
@@ -767,6 +785,9 @@ gateway:
       repository: ghcr.io/openctemio/openctem-gateway
       # -- Empty: the chart appVersion.
       tag: ""
+      # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
+      # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
+      digest: ""
       pullPolicy: IfNotPresent
       # -- The image carries the layer4 module. Needed by sensorGateway alpn
       # and passthrough, and makes alpn the default (sensor gRPC and the web
@@ -1191,6 +1212,9 @@ console:
     pullPolicy: IfNotPresent
     # -- Defaults to the chart's appVersion.
     tag: ""
+    # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
+    # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
+    digest: ""
   service:
     # -- ClusterIP only; the gateway or console.ingress publishes it.
     port: 3000
@@ -1367,6 +1391,9 @@ sensor:
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
     tag: "v0.23.2"
+    # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
+    # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
+    digest: ""
     pullPolicy: IfNotPresent
   # -- SENSOR_REGION reported by the sensor.
   region: default

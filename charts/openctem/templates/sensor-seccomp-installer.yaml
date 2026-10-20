@@ -2,7 +2,7 @@
 {{- $sandbox := $sensor.sandbox | default dict -}}
 {{- if and $sensor.enabled (eq $sandbox.seccompProfile "openctem") $sandbox.installProfile }}
 {{- $file := include "openctem.sensorSeccompFile" . -}}
-{{- $image := $sandbox.installerImage | default (printf "%s:%s" $sensor.image.repository $sensor.image.tag) -}}
+{{- $image := $sandbox.installerImage | default (include "openctem.image" (dict "image" $sensor.image "root" .)) -}}
 # The sensor's seccomp profile (OpenCTEM RFC-060): the container runtime's
 # default profile plus clone/unshare of new namespaces, which per-task
 # network confinement needs. Installed on each node the sensor can run on.

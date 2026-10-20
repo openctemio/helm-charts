@@ -1,0 +1,52 @@
+# Private registry / air-gapped example, exercised by tests/private-registry/run.sh.
+# The digests below are fake: fill in the real ones from the release notes.
+global:
+  imageRegistry: registry.example.com/openctem
+imagePullSecrets:
+  - name: regcred
+api:
+  appEnv: development
+  image:
+    tag: v0.10.1
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  migrations:
+    image:
+      digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    downMigration:
+      enabled: true
+  bootstrapAdmin:
+    enabled: true
+    email: admin@acme.io
+    backupEmail: bg@acme.io
+ui:
+  image:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+console:
+  image:
+    digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+gateway:
+  mode: caddy
+  host: openctem.example.com
+  trustedProxies: ["10.42.0.0/16"]
+  caddy:
+    image:
+      digest: sha256:5555555555555555555555555555555555555555555555555555555555555555
+sensor:
+  enabled: true
+  enrollment: instance
+  image:
+    digest: sha256:6666666666666666666666666666666666666666666666666666666666666666
+  sandbox:
+    installerImage: ""
+tests:
+  image:
+    repository: registry.example.com/mirror/busybox
+backup:
+  enabled: true
+  rclone:
+    existingSecret: rclone-conf
+    image:
+      repository: registry.example.com/mirror/rclone
+  dump:
+    image:
+      repository: registry.example.com/mirror/postgres

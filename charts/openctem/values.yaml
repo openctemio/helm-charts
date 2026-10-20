@@ -352,6 +352,84 @@ api:
     minAvailable: 1
     maxUnavailable: ""
 
+  # Job signer (OpenCTEM docs/architecture/job-signing.md): every job the API
+  # hands to a sensor is signed by openctem-signer with a key the API never
+  # holds. The signer listens on a Unix socket only, so it is a sidecar
+  # container of the API pod: it shares the pod's network namespace (and
+  # listens on no port), and a memory-backed emptyDir carries the socket. Its
+  # key and state volumes are mounted into the signer container alone. A
+  # production API refuses to start without it, and so does this chart.
+  signer:
+    # -- Run the signer sidecar and set SIGNER_SOCKET on the API. false is
+    # refused while api.appEnv=production. The sidecar keeps one ledger and
+    # one signing log, so the API pod runs as a single replica (rendering
+    # fails otherwise) and its Deployment uses the Recreate strategy.
+    enabled: true
+    # -- The signer's user. Must differ from the API's user; its group is the
+    # API's (api.podSecurityContext.runAsGroup, else 1000) so the API can open
+    # the socket (mode 0660). The image sets up the directories for 1001.
+    runAsUser: 1001
+    # -- Group of the signer; empty: the API pod's group.
+    runAsGroup: ""
+    ledger:
+      # -- SIGNER_LEDGER: audit signs every job and records each one outside
+      # the scope ledger (an upgraded install starts with an empty ledger);
+      # enforce refuses a job outside the ledger. Run the ledger bootstrap (see
+      # the README, "Job signer"), then set enforce. Empty: the mode recorded in
+      # the ledger (enforce on a signer that never signed, audit on one that
+      # was upgraded to the ledger).
+      mode: audit
+    key:
+      # -- Name of an existing Secret that holds the signing key (PEM PKCS#8
+      # Ed25519, from `openctem-signer keygen`). Preferred in production: the
+      # key then exists outside the cluster's volumes. Never put the key in
+      # values.
+      existingSecret: ""
+      # -- Key inside that Secret.
+      secretKey: signer.pem
+      # -- Create the key on first start into api.signer.key.persistence (the
+      # signer never replaces an existing key) and log its id. In dev/eval
+      # (api.appEnv other than production) this is what happens without
+      # existingSecret; production must choose one of the two.
+      generate: false
+      persistence:
+        # -- Use an existing claim for the generated key.
+        existingClaim: ""
+        storageClass: ""
+        size: 16Mi
+    persistence:
+      state:
+        # -- Volume for the signer's sequence counter, signing log and scope
+        # ledger. Keep and back it up: losing it resets the ledger.
+        existingClaim: ""
+        storageClass: ""
+        size: 1Gi
+    keyset:
+      # -- Secret that holds a key set signed by an offline root key
+      # (SIGNER_KEYSET_FILE, public, optional). Sensors then pin the root, and
+      # signer keys rotate without pairing sensors again.
+      existingSecret: ""
+      key: keyset.json
+    # -- Extra signer environment, for example SIGNER_TENANT_RATE or
+    # SIGNER_LEDGER_MIN_APPROVALS.
+    extraEnv: []
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    # -- Copies the key from its Secret into a memory-backed volume with mode
+    # 0400, which the signer demands and a Secret volume cannot give (the pod's
+    # fsGroup widens its mode). Used only with key.existingSecret. Runs as the
+    # signer's user with every capability dropped; the Secret is mounted into
+    # it alone.
+    keyInstaller:
+      image:
+        repository: busybox
+        tag: "1.37.0"
+        pullPolicy: IfNotPresent
+
   # -- Uploaded attachments and finding evidence. Without this, files were
   # written to the pod's own filesystem: lost on every restart/upgrade, and
   # split across pods with more than one replica.

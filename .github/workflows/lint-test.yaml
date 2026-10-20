@@ -128,6 +128,12 @@ jobs:
           # trust, credentials outside URLs, presets keeping api.extraEnv.
           tests/production/run.sh
 
+      - name: Job signer sidecar (render checks)
+        run: |
+          # Production refuses to render without the signer; the signer is
+          # hardened and the key and state reach its container only.
+          tests/signer/run.sh
+
       - name: Install helm-docs
         env:
           HELM_DOCS_VERSION: 1.14.2

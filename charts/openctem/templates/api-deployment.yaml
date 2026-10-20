@@ -4,6 +4,7 @@ kind: Deployment
 {{- $redisSecretChecksumSource := include "openctem.redisSecretChecksumSource" . | trim }}
 {{- include "openctem.apiAttachmentsValidate" . }}
 {{- include "openctem.apiReplicasValidate" . }}
+{{- include "openctem.signerValidate" . }}
 {{- include "openctem.datastoresValidate" . }}
 {{- $redisCa := include "openctem.redisCaEnabled" . }}
 metadata:
@@ -14,9 +15,10 @@ spec:
   {{- if .Values.api.deploymentStrategy }}
   strategy:
     {{- toYaml .Values.api.deploymentStrategy | nindent 4 }}
-  {{- else if include "openctem.apiAttachmentsRwoVolume" . }}
-  # The attachments volume is ReadWriteOnce: a rolling update could start the
-  # new pod on another node, where it cannot attach the volume.
+  {{- else if or (include "openctem.apiAttachmentsRwoVolume" .) (include "openctem.signerRwoVolume" .) }}
+  # The attachments or signer volume is ReadWriteOnce: a rolling update could
+  # start the new pod on another node, where it cannot attach the volume (and
+  # two signers must never hold the ledger lock).
   strategy:
     type: Recreate
   {{- end }}
@@ -60,6 +62,9 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if include "openctem.signerEnabled" . }}
+      {{- include "openctem.signerInitContainers" . | nindent 6 }}
+      {{- end }}
       containers:
         - name: api
           {{- with .Values.api.securityContext }}
@@ -89,6 +94,11 @@ spec:
           env:
             # Sensor protocol v3 (OpenCTEM RFC-059): HTTPS binding always, gRPC
             # binding advertised only while the API's self-probe passes.
+            {{- if include "openctem.signerEnabled" . }}
+            # Signed jobs: the signer sidecar's socket (api.signer).
+            - name: SIGNER_SOCKET
+              value: /run/openctem-signer/signer.sock
+            {{- end }}
             - name: SENSOR_TRANSPORT_V3
               value: {{ ternary "auto" "off" (eq $v3 "true") | quote }}
             {{- if $v3 }}
@@ -288,9 +298,17 @@ spec:
               mountPath: /etc/openctem/sensor-ca
               readOnly: true
             {{- end }}
+            {{- if include "openctem.signerEnabled" . }}
+            # The signer's socket only; never its key or state.
+            - name: signer-socket
+              mountPath: /run/openctem-signer
+            {{- end }}
             {{- with .Values.api.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+        {{- if include "openctem.signerEnabled" . }}
+        {{- include "openctem.signerContainer" . | nindent 8 }}
+        {{- end }}
       {{- $vols := include "openctem.apiAttachmentsVolume" . }}
       volumes:
         - name: tmp
@@ -315,6 +333,9 @@ spec:
           secret:
             secretName: {{ include "openctem.sensorCASecret" . }}
             defaultMode: 0400
+        {{- end }}
+        {{- if include "openctem.signerEnabled" . }}
+        {{- include "openctem.signerVolumes" . | nindent 8 }}
         {{- end }}
         {{- with .Values.api.volumes }}
         {{- toYaml . | nindent 8 }}

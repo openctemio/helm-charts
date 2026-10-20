@@ -41,6 +41,7 @@ check "sensor gRPC on a dedicated Service, NetworkPolicy" --set api.appEnv=devel
   --set networkPolicy.enabled=true
 check "sensor protocol v3 off" --set api.appEnv=development --set api.sensorTransport.mode=off
 check "production values" -f "$chart/values-production.yaml"
+check "production values, generated signer key" -f "$chart/values-production.yaml" --set api.signer.key.existingSecret= --set api.signer.key.generate=true
 for size in small medium large; do
   check "production values + $size preset" -f "$chart/values-production.yaml" -f "$chart/values-$size.yaml"
 done

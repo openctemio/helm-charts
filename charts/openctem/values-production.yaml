@@ -58,6 +58,23 @@ api:
     existingSecret: openctem-api-secrets
     keyRef: APP_ENCRYPTION_KEY
 
+  # Job signer (REQUIRED in production: the API refuses to start without it).
+  # The signing key is a Secret you create once, outside the chart:
+  #   docker run --rm -v "$PWD:/out" --entrypoint /app/openctem-signer \
+  #     ghcr.io/openctemio/openctem-api:<tag> keygen -out /out/signer.pem
+  #   kubectl create secret generic openctem-signer-key --from-file=signer.pem
+  # then BACK UP signer.pem offline and delete the local copy. Alternatively
+  # set key.generate=true (key created on first start into a volume).
+  signer:
+    enabled: true
+    key:
+      existingSecret: openctem-signer-key
+      secretKey: signer.pem
+    # audit until the scope ledger is bootstrapped (README, "Job signer"),
+    # then enforce.
+    ledger:
+      mode: audit
+
   redis:
     tlsEnabled: true            # REQUIRED true in production
     tlsSkipVerify: false        # REQUIRED false in production

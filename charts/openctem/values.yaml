@@ -975,6 +975,10 @@ gateway:
     affinity: {}
     extraEnv: []
 
+# Supported PostgreSQL: 16, 17 and 18; 17 is recommended (the version the OpenCTEM test
+# suite runs on for every change, and the one the bundled evaluation database uses).
+# 16 and 18 are tested nightly. A managed service or your own server may run any of the
+# three; keep one major across the API, the migrations Job and the database.
 database:
   # -- Settings in this section are used only when postgresql.enabled=false.
   host: ""

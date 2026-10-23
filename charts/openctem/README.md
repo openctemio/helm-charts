@@ -52,7 +52,8 @@ api.migrations.image.repository=ghcr.io/openctemio/migrations`). Do not point
 chart 0.5.0+ at v0.8.0 images: those charts rename the agent to the sensor,
 which needs the v0.9.0 API.
 
-PostgreSQL 17 or 18 with OpenCTEM v0.9.1 (chart 0.22.1) and later. v0.9.0's
+Supported PostgreSQL: **16, 17 and 18; 17 is recommended** (OpenCTEM v0.12.0 and later; 16 and 18 are tested nightly,
+17 on every change). With OpenCTEM v0.9.1 (chart 0.22.1) and later, 17 and 18 work. v0.9.0's
 migrations stop at migration 001483 on PostgreSQL 18 (it records NOT NULL
 constraints that migration did not expect); a database left dirty by that is
 recovered with `migrate force 1481` and `up` on v0.9.1. The bundled evaluation

@@ -15,11 +15,19 @@
 {{- /* No API key: the sensor pairs and keeps its identity in the state volume. */ -}}
 {{- $pairing := not (or $sensor.apiKey $sensor.existingSecret) -}}
 {{- $instance := eq ($sensor.enrollment | default "pairing") "instance" -}}
-{{- if not (has ($sensor.enrollment | default "pairing") (list "pairing" "instance")) }}
-{{- fail "\n\nsensor.enrollment must be pairing or instance.\n" }}
+{{- $orgToken := eq ($sensor.enrollment | default "pairing") "token" -}}
+{{- $et := $sensor.enrollmentToken | default dict -}}
+{{- if not (has ($sensor.enrollment | default "pairing") (list "pairing" "instance" "token")) }}
+{{- fail "\n\nsensor.enrollment must be pairing, instance or token.\n" }}
 {{- end }}
 {{- if and $instance (not $pairing) }}
 {{- fail "\n\nsensor.enrollment=instance enrolls the sensor with its own key as a shared sensor: leave sensor.apiKey and sensor.existingSecret empty.\n" }}
+{{- end }}
+{{- if and $orgToken (not $pairing) }}
+{{- fail "\n\nsensor.enrollment=token enrolls the sensor with its own key: leave sensor.apiKey and sensor.existingSecret empty.\n" }}
+{{- end }}
+{{- if and $orgToken (not $et.existingSecret) }}
+{{- fail "\n\nsensor.enrollment=token needs sensor.enrollmentToken.existingSecret: a Secret holding the token from Sensors > Enrollment tokens.\n" }}
 {{- end }}
 {{- if and $pairing $split (not $statePersist.enabled) }}
 {{- fail "\n\nThe sensor pairs (no sensor.apiKey or sensor.existingSecret), so its identity must survive the pod: set sensor.state.persistence.enabled=true (the default), or give it an API key.\n" }}
@@ -155,7 +163,7 @@ spec:
             {{- if $pairing }}
             # No SENSOR_API_KEY: the sensor pairs. It makes its own key in the state
             # volume and logs a code for an administrator to approve under
-            # Sensors > Pair a sensor; then it signs every request.
+            # Sensors > Add sensor; then it signs every request.
             - name: SENSOR_NAME
               value: {{ $sensor.name | default (include "openctem.sensorFullname" .) | quote }}
             {{- if $instance }}
@@ -167,6 +175,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "openctem.sensorEnrollmentSecretName" (dict "context" . "sensor" $sensor) }}
                   key: {{ include "openctem.sensorEnrollmentSecretKey" (dict "sensor" $sensor) }}
+            {{- end }}
+            {{- if $orgToken }}
+            # sensor.enrollment=token: an organization enrollment token, read
+            # from the mounted Secret (never the environment) on first start
+            # and ignored once the sensor has an identity.
+            - name: SENSOR_ENROLLMENT_TOKEN_FILE
+              value: /var/run/secrets/openctem/enrollment/token
             {{- end }}
             {{- else }}
             {{- with $sensor.name }}
@@ -267,6 +282,11 @@ spec:
               subPath: sensor-policy.yaml
               readOnly: true
             {{- end }}
+            {{- if $orgToken }}
+            - name: enrollment-token
+              mountPath: /var/run/secrets/openctem/enrollment
+              readOnly: true
+            {{- end }}
             {{- with $sensor.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -275,6 +295,18 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        {{- if $orgToken }}
+        # The organization enrollment token: readable by the sensor's group
+        # only, never writable (the sensor refuses a group- or
+        # world-writable token file).
+        - name: enrollment-token
+          secret:
+            secretName: {{ $et.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ $et.existingSecretKey | default "token" }}
+                path: token
+        {{- end }}
         {{- if not $split }}
         - name: data
           {{- if $dataPersist.enabled }}

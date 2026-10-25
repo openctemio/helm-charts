@@ -1728,8 +1728,21 @@
           "type": "string",
           "enum": [
             "pairing",
-            "instance"
+            "instance",
+            "token"
           ]
+        },
+        "enrollmentToken": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         },
         "instanceEnrollment": {
           "type": "object",

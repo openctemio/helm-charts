@@ -72,6 +72,22 @@ must_fail "unknown enrollment" "enrollment" --set sensor.enrollment=bogus
 must_fail "instance without a persistent identity" "identity must survive the pod" \
   --set sensor.enrollment=instance --set sensor.data.persistence.enabled=false
 
+
+# Organization enrollment token: mounted from the named Secret as a file,
+# never rendered and never in the environment; a Secret is required and an
+# API key is refused.
+out="$(render --set sensor.enrollment=token --set sensor.enrollmentToken.existingSecret=org-enroll)"
+expect "token: file variable" "SENSOR_ENROLLMENT_TOKEN_FILE" "$out"
+expect "token: secret volume" "secretName: org-enroll" "$out"
+expect "token: default key" "key: token" "$out"
+expect "token: not writable" "defaultMode: 0440" "$out"
+reject "token: nothing secret rendered" "octe_" "$out"
+reject "token: no instance token" "SENSOR_INSTANCE_ENROLLMENT_TOKEN" "$out"
+reject "token: no registering Job" "sensor-enrollment" "$out"
+must_fail "token: a Secret is required" "needs sensor.enrollmentToken.existingSecret" --set sensor.enrollment=token
+must_fail "token: no API key" "enrolls the sensor with its own key" --set sensor.enrollment=token \
+  --set sensor.enrollmentToken.existingSecret=org-enroll --set sensor.existingSecret=k
+
 if [ "$fails" -gt 0 ]; then
   echo "$fails check(s) failed"
   exit 1

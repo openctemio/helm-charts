@@ -5,6 +5,43 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: v0.12.0
+    created: "2026-10-25T23:06:15.090359603Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.5.6
+    - condition: redis.enabled
+      name: redis
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 25.3.2
+    description: 'OpenCTEM (Continuous Threat Exposure Management) platform: the API,
+      the web console, database migrations and an optional co-located scanning sensor,
+      plus optional PostgreSQL and Redis for evaluation.'
+    digest: 54e255b0ede8204856c5a96c45ca20f9523ea0853b515b232c70305fb4def9b8
+    home: https://openctem.io
+    icon: https://docs.openctem.io/brand/app-icon.svg
+    keywords:
+    - security
+    - ctem
+    - exposure-management
+    - vulnerability-management
+    maintainers:
+    - email: info@openctem.io
+      name: OpenCTEM
+      url: https://openctem.io
+    name: openctem
+    sources:
+    - https://github.com/openctemio/helm-charts
+    - https://github.com/openctemio/openctem
+    type: application
+    urls:
+    - https://github.com/openctemio/helm-charts/releases/download/openctem-0.33.0/openctem-0.33.0.tgz
+    version: 0.33.0
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
+    appVersion: v0.12.0
     created: "2026-10-23T02:48:02.687663663Z"
     dependencies:
     - condition: postgresql.enabled
@@ -1368,4 +1405,4 @@ entries:
     urls:
     - https://github.com/openctemio/helm-charts/releases/download/openctem-0.1.1/openctem-0.1.1.tgz
     version: 0.1.1
-generated: "2026-10-23T02:48:02.68792424Z"
+generated: "2026-10-25T23:06:15.090505387Z"

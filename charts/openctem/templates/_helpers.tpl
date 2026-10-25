@@ -188,6 +188,9 @@ enrollment: pairing
 instanceEnrollment:
   existingSecret: ""
   existingSecretKey: ""
+enrollmentToken:
+  existingSecret: ""
+  existingSecretKey: ""
 tools: ""
 keyAutoRenew: ""
 verbose: false
@@ -394,7 +397,7 @@ openctem/sensor-{{ .Files.Get "files/seccomp/openctem-sensor.json" | sha256sum |
 {{- end -}}
 {{- $ownSecret := (.Values.sensor | default dict).existingSecret -}}
 {{- if and $sensor.enabled (not $sensor.apiKey) (not $ownSecret) -}}
-{{- fail "\n\nThe `agent:` block (chart <= 0.4.x) ran the sensor with -platform and a bootstrap token. That mode was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered.\nMove the settings you keep into `sensor:` and delete `agent:`: without an API key the sensor then pairs (an administrator approves it under Sensors > Pair a sensor). To keep an API key, set sensor.apiKey or sensor.existingSecret (key `api-key`, or sensor.existingSecretKey); sensor.existingSecret may name the Secret agent.existingSecret used, once it holds the API key.\n" -}}
+{{- fail "\n\nThe `agent:` block (chart <= 0.4.x) ran the sensor with -platform and a bootstrap token. That mode was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered.\nMove the settings you keep into `sensor:` and delete `agent:`: without an API key the sensor then pairs (an administrator approves it under Sensors > Add sensor). To keep an API key, set sensor.apiKey or sensor.existingSecret (key `api-key`, or sensor.existingSecretKey); sensor.existingSecret may name the Secret agent.existingSecret used, once it holds the API key.\n" -}}
 {{- end -}}
 {{- end -}}
 {{- if eq (toString $sensor.mode) "platform" -}}

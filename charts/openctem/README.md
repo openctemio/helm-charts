@@ -757,7 +757,7 @@ validation). Scanning an internal network still needs a remote sensor.
 
 By default the sensor **pairs** with the platform: it has no API key, makes
 its own Ed25519 key in its data volume, and logs a code and a fingerprint.
-An administrator enters the code under **Sensors > Pair a sensor**, checks
+An administrator enters the code under **Sensors > Add sensor**, checks
 that the console shows the same fingerprint, and approves it; from then on
 the sensor signs every request with its key. Nothing secret goes through Helm
 values or a Secret.
@@ -767,7 +767,7 @@ values or a Secret.
 helm upgrade openctem charts/openctem -n openctem -f values.yaml \
   --set sensor.enabled=true
 # 2. Read the pairing code and fingerprint, then approve it in the console
-#    (Sensors > Pair a sensor). A request that expires is replaced by a new one.
+#    (Sensors > Add sensor). A request that expires is replaced by a new one.
 kubectl -n openctem logs deploy/openctem-openctem-sensor
 ```
 
@@ -808,6 +808,28 @@ scan now. Under GitOps, put the token in your own Secret
 run `helm upgrade` (a new token is generated and registered), then
 `kubectl rollout restart deployment/<release>-openctem-sensor`.
 
+### With an organization enrollment token (`sensor.enrollment=token`)
+
+`sensor.enrollment=token` enrolls the bundled sensor in an organization with
+an enrollment token an administrator created under **Sensors > Enrollment
+tokens** (shown once; it has an expiry, a use limit and can be revoked). The
+sensor joins that organization with the token's zones, grant profile and
+labels, at trust level New, without a per-sensor approval unless the token
+asks for one. The chart never renders the token: put it in a Secret and name
+it; the chart mounts it read-only as a file (`SENSOR_ENROLLMENT_TOKEN_FILE`,
+mode 0440), never in the environment. It needs a sensor image that reads
+`SENSOR_ENROLLMENT_TOKEN_FILE`.
+
+```bash
+# Paste the token, then Ctrl-D (it stays out of the shell history):
+kubectl -n openctem create secret generic openctem-enrollment --from-file=token=/dev/stdin
+helm upgrade openctem charts/openctem -n openctem -f values.yaml \
+  --set sensor.enabled=true --set sensor.enrollment=token \
+  --set sensor.enrollmentToken.existingSecret=openctem-enrollment
+```
+
+A sensor that is already paired keeps its identity and ignores the token.
+
 An organization that still allows API-key sensors can use a key instead:
 
 ```bash
@@ -823,8 +845,9 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.name` | empty | `SENSOR_NAME`: the name the sensor proposes when it pairs (the approving administrator may change it). Empty: the Deployment name, `<release>-openctem-sensor`. |
 | `sensor.caFingerprint` / `sensor.platformKey` | empty | Pairing pins from the platform's pairing instructions (public values): `SENSOR_CA_FINGERPRINT`, the SHA-256 of the platform CA the sensor must see in the TLS chain (needs an `https` `sensor.apiUrl` with a host name), and `SENSOR_PLATFORM_KEY`, the thumbprint of the platform's pairing key. |
 | `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | An API key, for an organization that allows API-key sensors. Empty (the default): the sensor pairs. Prefer `existingSecret`. |
-| `sensor.enrollment` | `pairing` | How a sensor without an API key gets its identity: `pairing` (an organization sensor, approved under Sensors > Pair a sensor) or `instance` (a shared sensor of the instance, enrolled with a single-use token the chart generates and a Job registers; see above). `instance` with an API key fails the render. |
+| `sensor.enrollment` | `pairing` | How a sensor without an API key gets its identity: `pairing` (an organization sensor, approved under Sensors > Add sensor), `instance` (a shared sensor of the instance, enrolled with a single-use token the chart generates and a Job registers; see above) or `token` (an organization sensor enrolled with an organization enrollment token from `sensor.enrollmentToken.existingSecret`). `instance` or `token` with an API key fails the render. |
 | `sensor.instanceEnrollment.existingSecret` / `.existingSecretKey` | — / `token` | A Secret you manage holding the enrollment token instead of the generated one. |
+| `sensor.enrollmentToken.existingSecret` / `.existingSecretKey` | — / `token` | The Secret holding the organization enrollment token (required with `sensor.enrollment=token`), mounted as a read-only file. |
 | `sensor.tools` | empty | Optional list of the scanners the sensor offers (`-tools`), e.g. `nuclei,httpx`. Empty (recommended): every scanner installed in the image, which the sensor detects at start and reports on its heartbeat. Deprecated from sensor v0.21.0: it only narrows the detected tools and logs a warning; narrow tools with the local policy's `tools.allow` (`sensor.localPolicy`) instead. |
 | `sensor.allowPrivateTargets` | empty | `"1"` sets `SENSOR_ALLOW_PRIVATE_TARGETS=1` (RFC1918 / ULA targets allowed). Empty keeps them blocked. Any other value fails the render: the sensor only recognises `1`. Reaching the in-cluster API needs nothing (the sensor's API client allows the platform's private address). |
 | `sensor.scanRoots` | empty | `SENSOR_SCAN_ROOTS` for dispatched code scans; empty = `/scan`. |
@@ -1048,6 +1071,15 @@ The platform administration console moves off the public surface:
 Administrators sign in again on the console's own sign-in page (email,
 password, then the authenticator code). To keep the old layout:
 `admin.listener.enabled=false` and `admin.site.mode=off`.
+## Upgrading to 0.33.0 (organization enrollment token)
+
+- New `sensor.enrollment=token` and `sensor.enrollmentToken.*`: the bundled
+  sensor enrolls in an organization with an enrollment token created under
+  Sensors > Enrollment tokens, mounted from your Secret as a file. Needs an
+  OpenCTEM release with organization enrollment tokens and a sensor image
+  that reads `SENSOR_ENROLLMENT_TOKEN_FILE`. Nothing changes for `pairing` or
+  `instance`.
+
 ## Upgrading to 0.25.0 (bundled sensor as a shared sensor)
 
 - New `sensor.enrollment` (default `pairing`, unchanged behavior) and
@@ -1676,7 +1708,7 @@ description from its `# --` comment (generated with
 | `redisConfig.port` | int | `6379` |  |
 | `sensor.affinity` | object | `{}` |  |
 | `sensor.allowPrivateTargets` | string | `""` | SENSOR_ALLOW_PRIVATE_TARGETS. Empty (default): RFC1918 / IPv6 ULA targets are refused — co-located sensors are for external-reachable work; internal scanning belongs on a remote sensor. "1": allow private targets. Loopback, link-local/IMDS and CGNAT stay blocked either way. The sensor only recognises "1", so any other value fails the render. (Reaching the in-cluster API needs no setting: since sdk-go v0.7.2 the sensor's API client allows the platform's private address.) |
-| `sensor.apiKey` | string | `""` | The sensor's API key (SENSOR_API_KEY), for organizations that allow API-key sensors. Empty, with no existingSecret (the default): the sensor pairs. It makes its own key in the state volume and logs a code; an administrator enters the code under Sensors > Pair a sensor, compares the fingerprint and approves it. For production put a key in existingSecret, not here. |
+| `sensor.apiKey` | string | `""` | The sensor's API key (SENSOR_API_KEY), for organizations that allow API-key sensors. Empty, with no existingSecret (the default): the sensor pairs. It makes its own key in the state volume and logs a code; an administrator enters the code under Sensors > Add sensor, compares the fingerprint and approves it. For production put a key in existingSecret, not here. |
 | `sensor.apiUrl` | string | `""` | Override the API base URL (SENSOR_API_URL). Defaults to the in-cluster API service. It must reach the API directly: the sensor refuses redirects. |
 | `sensor.caFingerprint` | string | `""` | SENSOR_CA_FINGERPRINT, from the platform's pairing instructions (a public value): the SHA-256 of the platform CA the sensor must see in the TLS chain. Needs an https apiUrl with a host name. Empty: not pinned. |
 | `sensor.content.emptyDirSizeLimit` | string | `""` | emptyDir size limit when persistence is off (empty: none). |
@@ -1688,7 +1720,9 @@ description from its `# --` comment (generated with
 | `sensor.data.persistence.size` | string | `"8Gi"` | The state is tiny; the outbox is capped by sensor.outbox.maxBytes and the content cache takes most of it (the trivy DB ~1.5 GB per version). |
 | `sensor.data.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |
 | `sensor.enabled` | bool | `false` | Enable the bundled co-located sensor. Disabled by default (opt-in). |
-| `sensor.enrollment` | string | `"pairing"` | How a sensor without an API key gets its identity. "pairing" (the default): an organization sensor, approved by an organization administrator under Sensors > Pair a sensor. "instance": a shared sensor of the instance (api RFC-100). The chart generates a single-use enrollment token into a Secret, a post-install/post-upgrade Job registers it with `bootstrap-admin sensor-token` (valid one hour), and the sensor enrolls with it (SENSOR_INSTANCE_ENROLLMENT_TOKEN) on first start, without anyone approving it. A shared sensor takes no organization's jobs until a super administrator turns shared sensors on (Console > System > Platform scanning). A sensor that is already paired keeps its identity (no forced migration); see the README. |
+| `sensor.enrollment` | string | `"pairing"` | How a sensor without an API key gets its identity. "pairing" (the default): an organization sensor, approved by an organization administrator under Sensors > Add sensor. "instance": a shared sensor of the instance (api RFC-100). The chart generates a single-use enrollment token into a Secret, a post-install/post-upgrade Job registers it with `bootstrap-admin sensor-token` (valid one hour), and the sensor enrolls with it (SENSOR_INSTANCE_ENROLLMENT_TOKEN) on first start, without anyone approving it. A shared sensor takes no organization's jobs until a super administrator turns shared sensors on (Console > System > Platform scanning). A sensor that is already paired keeps its identity (no forced migration); see the README. "token": an organization sensor enrolled with an organization enrollment token an administrator created under Sensors > Enrollment tokens (shown once; put it in a Secret and name it in sensor.enrollmentToken.existingSecret). The sensor joins that organization with the token's zones, grant profile and labels, at trust level New, without a per-sensor approval unless the token asks for one. Needs a sensor image that reads SENSOR_ENROLLMENT_TOKEN_FILE. |
+| `sensor.enrollmentToken.existingSecret` | string | `""` | Pre-created Secret holding the organization enrollment token (sensor.enrollment=token, required then). The chart never renders the token; it is mounted read-only as a file (SENSOR_ENROLLMENT_TOKEN_FILE), never put in the environment. |
+| `sensor.enrollmentToken.existingSecretKey` | string | `""` | Key within the secret. Empty: "token". |
 | `sensor.existingSecret` | string | `""` | Name of a pre-created Secret holding the API key. Takes precedence over apiKey; nothing secret is then rendered by Helm. |
 | `sensor.existingSecretKey` | string | `""` | Key within the secret. Empty: "api-key". |
 | `sensor.extraEnv` | list | `[]` |  |

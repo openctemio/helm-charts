@@ -1497,7 +1497,7 @@ sensor:
   # -- The sensor's API key (SENSOR_API_KEY), for organizations that allow API-key
   #    sensors. Empty, with no existingSecret (the default): the sensor
   #    pairs. It makes its own key in the state volume and logs a code; an
-  #    administrator enters the code under Sensors > Pair a sensor, compares
+  #    administrator enters the code under Sensors > Add sensor, compares
   #    the fingerprint and approves it. For production put a key in
   #    existingSecret, not here.
   apiKey: ""
@@ -1508,7 +1508,7 @@ sensor:
   existingSecretKey: ""
   # -- How a sensor without an API key gets its identity. "pairing" (the
   #    default): an organization sensor, approved by an organization
-  #    administrator under Sensors > Pair a sensor. "instance": a shared
+  #    administrator under Sensors > Add sensor. "instance": a shared
   #    sensor of the instance (api RFC-100). The chart generates a
   #    single-use enrollment token into a Secret, a post-install/post-upgrade
   #    Job registers it with `bootstrap-admin sensor-token` (valid one hour),
@@ -1517,10 +1517,25 @@ sensor:
   #    organization's jobs until a super administrator turns shared sensors
   #    on (Console > System > Platform scanning). A sensor that is already
   #    paired keeps its identity (no forced migration); see the README.
+  #    "token": an organization sensor enrolled with an organization
+  #    enrollment token an administrator created under Sensors > Enrollment
+  #    tokens (shown once; put it in a Secret and name it in
+  #    sensor.enrollmentToken.existingSecret). The sensor joins that
+  #    organization with the token's zones, grant profile and labels, at
+  #    trust level New, without a per-sensor approval unless the token asks
+  #    for one. Needs a sensor image that reads SENSOR_ENROLLMENT_TOKEN_FILE.
   enrollment: pairing
   instanceEnrollment:
     # -- Pre-created Secret holding the token (octe_ and 49 letters or
     #    digits) instead of the generated one, for GitOps.
+    existingSecret: ""
+    # -- Key within the secret. Empty: "token".
+    existingSecretKey: ""
+  enrollmentToken:
+    # -- Pre-created Secret holding the organization enrollment token
+    #    (sensor.enrollment=token, required then). The chart never renders
+    #    the token; it is mounted read-only as a file
+    #    (SENSOR_ENROLLMENT_TOKEN_FILE), never put in the environment.
     existingSecret: ""
     # -- Key within the secret. Empty: "token".
     existingSecretKey: ""

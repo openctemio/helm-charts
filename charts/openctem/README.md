@@ -1919,9 +1919,9 @@ description from its `# --` comment (generated with
 | `sensor.tolerations` | list | `[]` |  |
 | `sensor.tools` | string | `""` | Optional comma-separated allowlist of the scanners the sensor offers (-tools). Empty (default): every scanner installed in the image, which the sensor detects at start and reports on its heartbeat. |
 | `sensor.verbose` | bool | `false` |  |
+| `sensor.workspaces.sizeLimit` | string | `"2Gi"` | storageLayout split: size limit of the emptyDir the sensor runs jobs in (/var/lib/openctem/workspaces). Lost with the pod. The sensor's local store (the key that encrypts the outbox) lives on the state volume at state/store, so keep the state and outbox volumes together: an outbox that outlives its state volume cannot be read. |
 | `sensor.writableDirs` | list | `["/tmp"]` | Writable emptyDirs mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only /tmp: each scan runs with its own home directory there, and the tools' configuration and cache go there too (XDG_CONFIG_HOME, XDG_CACHE_HOME). Do not mount over /home/openctem: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good when it cannot download one). |
 | `sensor.writableDirsSizeLimit` | string | `""` | emptyDir size limit of each writable directory (empty: none). |
-| `sensor.workspaces.sizeLimit` | string | `"2Gi"` | storageLayout split: size limit of the emptyDir the sensor runs jobs in (`/var/lib/openctem/workspaces`), lost with the pod. The local store lives on the state volume at `state/store`. |
 | `tests.enabled` | bool | `true` |  |
 | `tests.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `tests.image.repository` | string | `"busybox"` | Small image with wget (busybox). Pinned for reproducibility. |

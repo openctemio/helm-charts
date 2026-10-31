@@ -778,6 +778,11 @@ has to be paired again), `outbox/` (results the platform has not accepted
 yet) and `content/` (the scanner cache). Back it up like a credential; the
 `content/` cache can be left out.
 
+**Upgrading to 0.35.0 (behaviour change).** An existing install with the sensor
+enabled that renders an `http://` sensor API URL (the default) fails to render
+after this upgrade until you choose one of the two options below. Nothing
+running is changed until you do.
+
 The sensor refuses plain `http` to a host that is not loopback
 (`SENSOR_ALLOW_INSECURE_HTTP`), and the default `sensor.apiUrl` is the
 in-cluster API Service over `http`. Since chart 0.35.0 the render therefore

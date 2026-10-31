@@ -43,6 +43,25 @@ chart v0.8.0 v9.9.9
 out="$(STRICT=1 run || true)"
 grep -q "::error::sensor.image.tag v9.9.9 is not a released tag" <<<"$out" && pass "unreleased sensor tag" || fail "sensor: $out"
 
+chart v0.8.0 v0.6.3
+git -C "$tmp/sensor" tag v0.7.0
+out="$(STRICT=1 run || true)"
+grep -q "::error::sensor.image.tag v0.6.3 is not the newest sensor release v0.7.0" <<<"$out" && pass "an older sensor tag than the newest release" || fail "newest: $out"
+chart v0.8.0 v0.7.0
+out="$(STRICT=1 run)" && pass "the newest sensor tag: exit 0" || fail "newest tag: $out"
+
+# The chart's seccomp profile must be that release's file.
+mkdir -p "$tmp/sensor/docker/seccomp" "$tmp/chart/files/seccomp"
+echo '{"defaultAction":"SCMP_ACT_ERRNO","v":2}' >"$tmp/sensor/docker/seccomp/sensor.json"
+git -C "$tmp/sensor" add -A && git -C "$tmp/sensor" -c user.name=t -c user.email=t@example.invalid commit -q -m profile && git -C "$tmp/sensor" tag v0.7.1
+chart v0.8.0 v0.7.1
+mkdir -p "$tmp/chart/files/seccomp"
+echo '{"defaultAction":"SCMP_ACT_ERRNO","v":1}' >"$tmp/chart/files/seccomp/openctem-sensor.json"
+out="$(STRICT=1 run || true)"
+grep -q "::error::files/seccomp/openctem-sensor.json differs" <<<"$out" && pass "a stale seccomp profile" || fail "profile: $out"
+cp "$tmp/sensor/docker/seccomp/sensor.json" "$tmp/chart/files/seccomp/openctem-sensor.json"
+out="$(STRICT=1 run)" && pass "the release's seccomp profile: exit 0" || fail "profile ok: $out"
+
 # The real chart: its tags are read (network: skipped when offline).
 if git ls-remote --exit-code https://github.com/openctemio/openctem.git HEAD >/dev/null 2>&1; then
   out="$(bash "$here/check-published.sh")" && pass "real chart: runs" || fail "real chart: $out"

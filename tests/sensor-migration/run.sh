@@ -13,7 +13,7 @@ fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 # Every check renders a scratch copy of the chart (set up below), never the
 # checkout. helm template does not print NOTES.txt, so the copy also renders
 # it into a ConfigMap the checks can grep.
-render() { helm template t "$tmp/chart" "$@" 2>&1; }
+render() { helm template t "$tmp/chart" --set sensor.allowInsecureHTTP=true "$@" 2>&1; }
 
 expect() { # expect <description> <pattern> <output>
   if grep -qF -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: $2)"; fi
@@ -66,7 +66,7 @@ EOT
 
 # 1. The defaults copy in _helpers.tpl matches values.yaml (rendered with no
 #    user values, so .Values.sensor is exactly the values.yaml block).
-if out="$(render --set api.appEnv=development --set zzCheckSensorDefaults=true)"; then
+if out="$(helm template t "$tmp/chart" --set api.appEnv=development --set zzCheckSensorDefaults=true 2>&1)"; then
   pass "openctem.sensorDefaults matches values.yaml"
 else
   fail "openctem.sensorDefaults matches values.yaml: $out"
@@ -78,7 +78,7 @@ reject "default render has no sensor" "component: sensor" "$out"
 reject "default render has no agent" "component: agent" "$out"
 
 # 3. sensor.enabled=true (daemon mode, API key).
-D=(--set api.appEnv=development --set sensor.enabled=true --set sensor.apiKey=rda_test)
+D=(--set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true --set sensor.apiKey=rda_test)
 out="$(render "${D[@]}")"
 expect "sensor: Deployment" "name: t-openctem-sensor" "$out"
 expect "sensor: component label" "app.kubernetes.io/component: sensor" "$out"
@@ -143,7 +143,7 @@ else
 fi
 out="$(render "${D[@]}" --set sensor.replicaCount=2 --set sensor.data.persistence.enabled=false)"
 expect "sensor: 2 replicas without the data PVC render" "replicas: 2" "$out"
-if out="$(render --set api.appEnv=development --set sensor.enabled=true --set sensor.data.persistence.enabled=false)"; then
+if out="$(render --set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true --set sensor.data.persistence.enabled=false)"; then
   fail "sensor: pairing without the data PVC must fail"
 else
   expect "sensor: pairing without the data PVC fails" "set sensor.data.persistence.enabled=true" "$out"
@@ -206,14 +206,14 @@ out="$(render "${D[@]}" --set sensor.replicaCount=2 --set sensor.state.persisten
 expect "sensor: 2 replicas without PVCs render" "replicas: 2" "$out"
 
 # Platform mode (bootstrap token) was removed: no API serves it.
-if out="$(render --set api.appEnv=development --set sensor.enabled=true --set sensor.mode=platform --set sensor.apiKey=rda_test)"; then
+if out="$(render --set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true --set sensor.mode=platform --set sensor.apiKey=rda_test)"; then
   fail "sensor: mode=platform must fail"
 else
   expect "sensor: mode=platform fails with the reason" "sensor.mode=platform was removed in chart 0.9.0" "$out"
 fi
 
 # No API key: the sensor pairs (its own key in the state volume).
-P=(--set api.appEnv=development --set sensor.enabled=true)
+P=(--set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true)
 out="$(render "${P[@]}")"
 expect "pairing: Deployment" "name: t-openctem-sensor" "$out"
 reject "pairing: no SENSOR_API_KEY" "name: SENSOR_API_KEY" "$out"

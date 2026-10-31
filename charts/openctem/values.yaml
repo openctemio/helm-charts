@@ -1472,7 +1472,7 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.29.1"
+    tag: "v0.32.0"
     # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
     # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
     digest: ""
@@ -1525,6 +1525,40 @@ sensor:
   #    trust level New, without a per-sensor approval unless the token asks
   #    for one. Needs a sensor image that reads SENSOR_ENROLLMENT_TOKEN_FILE.
   enrollment: pairing
+  # -- SENSOR_PAIRING_CODE (with sensor.enrollment=pairing): a code an
+  #    administrator created under Sensors > Add sensor > Create a pairing
+  #    code. It is single use and expires after 10 minutes, so it is not a
+  #    secret, but prefer `--set sensor.pairingCode=CODE` to committing it.
+  #    The sensor never reuses a spent code (an expired or used one makes it
+  #    fall back to printing its own code in its log), and once it is paired
+  #    the code is ignored: remove it with
+  #    `helm upgrade --reuse-values --set sensor.pairingCode=`. Empty: the
+  #    sensor prints its own code in `kubectl logs`. A code created by
+  #    Re-pair... in the console re-pairs an existing sensor (README
+  #    "Re-pair a sensor").
+  pairingCode: ""
+  # -- Pre-created Secret holding the pairing code, as an alternative to
+  #    pairingCode (it takes precedence); the code is read as the
+  #    SENSOR_PAIRING_CODE environment variable from the Secret.
+  pairingCodeExistingSecret: ""
+  # -- Key within the secret. Empty: "pairing-code".
+  pairingCodeExistingSecretKey: ""
+  # -- SENSOR_ALLOW_INSECURE_HTTP=1. The sensor refuses plain http to a host
+  #    that is not loopback, and the default apiUrl is the in-cluster API
+  #    service over http, so the render fails until you either set an https
+  #    apiUrl (preferred) or set this to true, which accepts that the sensor's
+  #    requests (signed, but the API key of an API-key sensor and the jobs
+  #    are not encrypted) cross the cluster network in clear text. Development
+  #    and evaluation only.
+  allowInsecureHTTP: false
+  persistence:
+    # -- Keep the volume that holds the sensor's identity (the data volume,
+    #    or the state volume with storageLayout split) when the release is
+    #    uninstalled (helm.sh/resource-policy: keep), so the sensor is not
+    #    paired again after a reinstall. The volume is then left behind: delete
+    #    it by hand to remove the identity. Has no effect on a claim set with
+    #    existingClaim (the chart does not own it).
+    keepOnUninstall: true
   instanceEnrollment:
     # -- Pre-created Secret holding the token (octe_ and 49 letters or
     #    digits) instead of the generated one, for GitOps.
@@ -1786,6 +1820,13 @@ sensor:
     - /tmp
   # -- emptyDir size limit of each writable directory (empty: none).
   writableDirsSizeLimit: ""
+  workspaces:
+    # -- storageLayout split: size limit of the emptyDir the sensor runs jobs
+    #    in (/var/lib/openctem/workspaces). Lost with the pod. The sensor's
+    #    local store (the key that encrypts the outbox) lives on the state
+    #    volume at state/store, so keep the state and outbox volumes together:
+    #    an outbox that outlives its state volume cannot be read.
+    sizeLimit: 2Gi
   resources: {}
   # -- Seconds Kubernetes waits after SIGTERM. The sensor drains for up to 30s
   #    and hands unfinished work back so the platform re-queues it at once;

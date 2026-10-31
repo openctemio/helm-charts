@@ -765,7 +765,7 @@ values or a Secret.
 ```bash
 # 1. Enable it.
 helm upgrade openctem charts/openctem -n openctem -f values.yaml \
-  --set sensor.enabled=true
+  --set sensor.enabled=true --set sensor.apiUrl=https://api.example.com
 # 2. Read the pairing code and fingerprint, then approve it in the console
 #    (Sensors > Add sensor). A request that expires is replaced by a new one.
 kubectl -n openctem logs deploy/openctem-openctem-sensor
@@ -777,6 +777,120 @@ fails without it while the sensor pairs): one PersistentVolumeClaim at
 has to be paired again), `outbox/` (results the platform has not accepted
 yet) and `content/` (the scanner cache). Back it up like a credential; the
 `content/` cache can be left out.
+
+**Upgrading to 0.35.0 (behaviour change; the bundled sensor is v0.32.0).** An existing install with the sensor
+enabled that renders an `http://` sensor API URL (the default) fails to render
+after this upgrade until you choose one of the two options below. Nothing
+running is changed until you do.
+
+The same release changes `storageLayout: split` installs: the sensor's local
+store (the key that encrypts its outbox) now lives on the state volume at
+`state/store` (`SENSOR_STORE_DIR`, a 0700 directory with 0600 files), and job
+workspaces run in an emptyDir at `/var/lib/openctem/workspaces`
+(`sensor.workspaces.sizeLimit`, default `2Gi`, lost with the pod). The root
+filesystem stays read-only. The first start creates the store; a sensor that
+never had a writable store cannot have a queued outbox, so there is nothing
+to migrate. Keep the state and outbox volumes together: an outbox that
+outlives its state volume cannot be read.
+
+The sensor refuses plain `http` to a host that is not loopback
+(`SENSOR_ALLOW_INSECURE_HTTP`), and the default `sensor.apiUrl` is the
+in-cluster API Service over `http`. Since chart 0.35.0 the render therefore
+fails until you set `sensor.apiUrl` to an `https` URL the sensor reaches
+directly (preferred), or set `sensor.allowInsecureHTTP=true` (development and
+evaluation only: the sensor's traffic crosses the cluster network in clear
+text, and the chart renders `SENSOR_ALLOW_INSECURE_HTTP=1`).
+
+### Pair with a code from the console
+
+Instead of reading the sensor's own code from its log, create one first:
+**Sensors > Add sensor > Create a pairing code** and pass it to the chart.
+The code is single use and expires after 10 minutes, so it is not a secret,
+but prefer `--set` to committing it to a values file:
+
+```bash
+helm upgrade --install openctem charts/openctem -n openctem -f values.yaml \
+  --set sensor.enabled=true --set sensor.apiUrl=https://api.example.com \
+  --set sensor.pairingCode=ABCD-EFGH
+```
+
+The chart renders it as `SENSOR_PAIRING_CODE` (only with
+`sensor.enrollment=pairing` and no API key). Or keep it in a Secret you
+create, with `sensor.pairingCodeExistingSecret` (key `pairing-code`, or
+`sensor.pairingCodeExistingSecretKey`); the code is then read from the Secret
+as an environment variable.
+
+A spent or expired code is never reused: the sensor falls back to printing its
+own code in `kubectl logs`. Once the sensor is paired the code is ignored;
+remove it so a later values file does not carry a dead code:
+
+```bash
+helm upgrade openctem charts/openctem -n openctem --reuse-values --set sensor.pairingCode=
+```
+
+### Keeping the identity on uninstall
+
+`sensor.persistence.keepOnUninstall` (default `true`) annotates the volume
+that holds the sensor's identity (the data volume, or the state volume with
+`sensor.storageLayout=split`) with `helm.sh/resource-policy: keep`, so
+`helm uninstall` does not delete the private key and a reinstall does not need
+a new pairing. The trade-off: the volume stays behind after an uninstall, and
+you delete it by hand when the sensor is gone for good:
+
+```bash
+kubectl -n openctem delete pvc openctem-openctem-sensor-data   # or ...-sensor-state (split layout)
+```
+
+Set it to `false` to have the volume deleted with the release (then the sensor
+must be re-paired). The scanner content cache (split layout) is never kept.
+A claim set with `existingClaim` is yours: the chart does not touch it.
+
+### Re-pair a sensor
+
+Re-pair when the sensor lost its identity (the volume was deleted, the
+cluster was rebuilt) or when its key may be compromised. A re-pair keeps the
+sensor's name, zones and grant; its trust returns to New until an
+administrator approves the new key.
+
+1. In the console open the sensor and choose **Re-pair...**, pick the reason
+   and copy the code (single use, 10 minutes).
+2. Give the sensor a new identity only if the old one is lost or compromised.
+   The root filesystem is read-only, so the identity directory cannot be
+   wiped from inside the pod: stop the sensor and delete its volume. If the
+   identity is intact and you only need to restore the link, skip this step.
+
+   ```bash
+   helm upgrade openctem charts/openctem -n openctem --reuse-values --set sensor.replicaCount=0
+   kubectl -n openctem delete pvc openctem-openctem-sensor-data   # or ...-sensor-state
+   ```
+
+3. Start the sensor with the code (the chart recreates the volume):
+
+   ```bash
+   helm upgrade openctem charts/openctem -n openctem --reuse-values \
+     --set sensor.replicaCount=1 --set sensor.pairingCode=CODE
+   ```
+
+4. Wait for the pod, then compare the fingerprint printed by
+   `kubectl -n openctem logs deploy/openctem-openctem-sensor` with the one the
+   console shows, and approve.
+5. Remove the code: `helm upgrade openctem charts/openctem -n openctem
+   --reuse-values --set sensor.pairingCode=`.
+
+The old key keeps working until you approve the new one, unless you chose
+**Revoke the current key now** in the console (do that when the key may be
+compromised: the old identity is then refused at once).
+
+### When pairing goes wrong
+
+| What you see | Cause | What to do |
+|---|---|---|
+| The log says the code expired or was used | The code is single use and lasts 10 minutes | Create a new code in the console and upgrade with it. The sensor falls back to printing its own code in the meantime. |
+| The log mentions a rejected signature or timestamp, or the code looks valid | Clock skew between the node and the platform | Fix time synchronization on the node (NTP), then restart the pod. |
+| The platform says the key is already registered | A sensor with this key exists | Re-pair it from the console (**Re-pair...**) as above; a new code does not replace an existing key. |
+| Rate limited (HTTP 429) | Too many attempts | Wait for the interval in the message and do not restart the pod in a loop. |
+| `x509: certificate signed by unknown authority` | The sensor does not trust the platform's CA | Set `sensor.caFingerprint` (and `sensor.platformKey`) from the console's pairing instructions, or mount the CA file the sensor trusts, and use an `https` `sensor.apiUrl`. |
+| The sensor refuses its URL: plain http to a host that is not loopback | `sensor.apiUrl` is `http` | Use an `https` URL (or `sensor.allowInsecureHTTP=true` for development). |
 
 ### As a shared sensor of the instance (`sensor.enrollment=instance`)
 
@@ -841,9 +955,12 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | Value | Default | Meaning |
 |---|---|---|
 | `sensor.mode` | `daemon` | The only mode: the sensor runs the scans the platform dispatches. The chart passes no mode flag: from sensor v0.21.0 the daemon taking platform commands is the sensor's default mode. `platform` (bootstrap-token self-registration) was removed in 0.9.0 and fails the render: no OpenCTEM API serves it. |
-| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.29.1` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. From v0.23.1 a job that carries an organization's identification (User-Agent and headers, such as a bug-bounty program's) sends it on every HTTP request, and the Tenable.sc connector is its own image (`ghcr.io/openctemio/connector-tenable`). The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). opengrep, semgrep, trivy and betterleaks run from the single-tool images (`<version>-opengrep` from v0.22.0, `-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
+| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.32.0` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. From v0.23.1 a job that carries an organization's identification (User-Agent and headers, such as a bug-bounty program's) sends it on every HTTP request, and the Tenable.sc connector is its own image (`ghcr.io/openctemio/connector-tenable`). The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). opengrep, semgrep, trivy and betterleaks run from the single-tool images (`<version>-opengrep` from v0.22.0, `-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
 | `sensor.name` | empty | `SENSOR_NAME`: the name the sensor proposes when it pairs (the approving administrator may change it). Empty: the Deployment name, `<release>-openctem-sensor`. |
 | `sensor.caFingerprint` / `sensor.platformKey` | empty | Pairing pins from the platform's pairing instructions (public values): `SENSOR_CA_FINGERPRINT`, the SHA-256 of the platform CA the sensor must see in the TLS chain (needs an `https` `sensor.apiUrl` with a host name), and `SENSOR_PLATFORM_KEY`, the thumbprint of the platform's pairing key. |
+| `sensor.pairingCode` / `sensor.pairingCodeExistingSecret` / `.pairingCodeExistingSecretKey` | empty / empty / `pairing-code` | `SENSOR_PAIRING_CODE`: a single-use, 10-minute code from Sensors > Add sensor > Create a pairing code (or Re-pair... on a sensor). Not a secret, but prefer `--set`. The Secret alternative is read as an environment variable. See "Pair with a code from the console". |
+| `sensor.allowInsecureHTTP` | `false` | Allows the default plain-`http` in-cluster `sensor.apiUrl` (`SENSOR_ALLOW_INSECURE_HTTP=1`). Off: the render fails for an `http` URL to a non-loopback host. Development only. |
+| `sensor.persistence.keepOnUninstall` | `true` | `helm.sh/resource-policy: keep` on the identity volume (data, or state with the split layout): `helm uninstall` leaves it behind. |
 | `sensor.apiKey` / `sensor.existingSecret` / `sensor.existingSecretKey` | — / — / `api-key` | An API key, for an organization that allows API-key sensors. Empty (the default): the sensor pairs. Prefer `existingSecret`. |
 | `sensor.enrollment` | `pairing` | How a sensor without an API key gets its identity: `pairing` (an organization sensor, approved under Sensors > Add sensor), `instance` (a shared sensor of the instance, enrolled with a single-use token the chart generates and a Job registers; see above) or `token` (an organization sensor enrolled with an organization enrollment token from `sensor.enrollmentToken.existingSecret`). `instance` or `token` with an API key fails the render. |
 | `sensor.instanceEnrollment.existingSecret` / `.existingSecretKey` | — / `token` | A Secret you manage holding the enrollment token instead of the generated one. |
@@ -870,6 +987,19 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.35.0 (sensor pairing code, kept identity volume)
+
+- **The render fails for an enabled sensor with an `http` API URL.** The sensor
+  refuses plain `http` to a host that is not loopback, and the default URL is
+  the in-cluster API Service over `http`. Set `sensor.apiUrl` to an `https`
+  URL, or `sensor.allowInsecureHTTP=true` for development.
+- The sensor's identity volume now carries `helm.sh/resource-policy: keep`
+  (`sensor.persistence.keepOnUninstall`, default `true`): after
+  `helm uninstall` it must be deleted by hand. The annotation is written on
+  the next upgrade.
+- New: `sensor.pairingCode`, `sensor.pairingCodeExistingSecret`, and the
+  "Re-pair a sensor" runbook.
 
 ## Upgrading to 0.34.0 (bundled sensor v0.29.1)
 
@@ -1716,6 +1846,7 @@ description from its `# --` comment (generated with
 | `redisConfig.host` | string | `""` | Settings in this section are used only when redis.enabled=false. |
 | `redisConfig.port` | int | `6379` |  |
 | `sensor.affinity` | object | `{}` |  |
+| `sensor.allowInsecureHTTP` | bool | `false` | SENSOR_ALLOW_INSECURE_HTTP=1. The sensor refuses plain http to a host that is not loopback, and the default apiUrl is the in-cluster API service over http, so the render fails until you either set an https apiUrl (preferred) or set this to true, which accepts that the sensor's requests (signed, but the API key of an API-key sensor and the jobs are not encrypted) cross the cluster network in clear text. Development and evaluation only. |
 | `sensor.allowPrivateTargets` | string | `""` | SENSOR_ALLOW_PRIVATE_TARGETS. Empty (default): RFC1918 / IPv6 ULA targets are refused — co-located sensors are for external-reachable work; internal scanning belongs on a remote sensor. "1": allow private targets. Loopback, link-local/IMDS and CGNAT stay blocked either way. The sensor only recognises "1", so any other value fails the render. (Reaching the in-cluster API needs no setting: since sdk-go v0.7.2 the sensor's API client allows the platform's private address.) |
 | `sensor.apiKey` | string | `""` | The sensor's API key (SENSOR_API_KEY), for organizations that allow API-key sensors. Empty, with no existingSecret (the default): the sensor pairs. It makes its own key in the state volume and logs a code; an administrator enters the code under Sensors > Add sensor, compares the fingerprint and approves it. For production put a key in existingSecret, not here. |
 | `sensor.apiUrl` | string | `""` | Override the API base URL (SENSOR_API_URL). Defaults to the in-cluster API service. It must reach the API directly: the sensor refuses redirects. |
@@ -1740,7 +1871,7 @@ description from its `# --` comment (generated with
 | `sensor.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
-| `sensor.image.tag` | string | `"v0.29.1"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
+| `sensor.image.tag` | string | `"v0.32.0"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
 | `sensor.instanceEnrollment.existingSecret` | string | `""` | Pre-created Secret holding the token (octe_ and 49 letters or digits) instead of the generated one, for GitOps. |
 | `sensor.instanceEnrollment.existingSecretKey` | string | `""` | Key within the secret. Empty: "token". |
 | `sensor.keyAutoRenew` | string | `""` | Renew the sensor API key before it expires and when the platform asks (SENSOR_KEY_AUTORENEW). The renewed key is kept in the state volume (/var/lib/openctem/state/sensor-credentials.json), not the Secret: the renewal retires the key in the Secret. Empty (default): on exactly when state.persistence.enabled (a renewed key on an emptyDir is lost with the pod, which then starts with the retired key). true / false force it. |
@@ -1761,6 +1892,10 @@ description from its `# --` comment (generated with
 | `sensor.outbox.persistence.existingClaim` | string | `""` | Use this pre-created claim instead of creating one. |
 | `sensor.outbox.persistence.fsGroup` | int | `999` | fsGroup given to the pod (unless podSecurityContext sets one) so the image's user (uid/gid 999) can write the volumes (outbox, state, content); applied when any of them is a PersistentVolumeClaim, with fsGroupChangePolicy OnRootMismatch (see podSecurityContext). |
 | `sensor.outbox.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |
+| `sensor.pairingCode` | string | `""` | SENSOR_PAIRING_CODE (with sensor.enrollment=pairing): a code an administrator created under Sensors > Add sensor > Create a pairing code. It is single use and expires after 10 minutes, so it is not a secret, but prefer `--set sensor.pairingCode=CODE` to committing it. The sensor never reuses a spent code (an expired or used one makes it fall back to printing its own code in its log), and once it is paired the code is ignored: remove it with `helm upgrade --reuse-values --set sensor.pairingCode=`. Empty: the sensor prints its own code in `kubectl logs`. A code created by Re-pair... in the console re-pairs an existing sensor (README "Re-pair a sensor"). |
+| `sensor.pairingCodeExistingSecret` | string | `""` | Pre-created Secret holding the pairing code, as an alternative to pairingCode (it takes precedence); the code is read as the SENSOR_PAIRING_CODE environment variable from the Secret. |
+| `sensor.pairingCodeExistingSecretKey` | string | `""` | Key within the secret. Empty: "pairing-code". |
+| `sensor.persistence.keepOnUninstall` | bool | `true` | Keep the volume that holds the sensor's identity (the data volume, or the state volume with storageLayout split) when the release is uninstalled (helm.sh/resource-policy: keep), so the sensor is not paired again after a reinstall. The volume is then left behind: delete it by hand to remove the identity. Has no effect on a claim set with existingClaim (the chart does not own it). |
 | `sensor.platformKey` | string | `""` | SENSOR_PLATFORM_KEY, from the platform's pairing instructions (a public value): the thumbprint of the platform's pairing key; pairing refuses another key. Empty: not pinned. |
 | `sensor.podAnnotations` | object | `{}` |  |
 | `sensor.podLabels` | object | `{}` |  |
@@ -1784,6 +1919,7 @@ description from its `# --` comment (generated with
 | `sensor.tolerations` | list | `[]` |  |
 | `sensor.tools` | string | `""` | Optional comma-separated allowlist of the scanners the sensor offers (-tools). Empty (default): every scanner installed in the image, which the sensor detects at start and reports on its heartbeat. |
 | `sensor.verbose` | bool | `false` |  |
+| `sensor.workspaces.sizeLimit` | string | `"2Gi"` | storageLayout split: size limit of the emptyDir the sensor runs jobs in (/var/lib/openctem/workspaces). Lost with the pod. The sensor's local store (the key that encrypts the outbox) lives on the state volume at state/store, so keep the state and outbox volumes together: an outbox that outlives its state volume cannot be read. |
 | `sensor.writableDirs` | list | `["/tmp"]` | Writable emptyDirs mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only /tmp: each scan runs with its own home directory there, and the tools' configuration and cache go there too (XDG_CONFIG_HOME, XDG_CACHE_HOME). Do not mount over /home/openctem: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good when it cannot download one). |
 | `sensor.writableDirsSizeLimit` | string | `""` | emptyDir size limit of each writable directory (empty: none). |
 | `tests.enabled` | bool | `true` |  |

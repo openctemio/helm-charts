@@ -88,7 +88,7 @@ if docker manifest inspect "ghcr.io/openctemio/openctem-api:$app" >/dev/null 2>&
 fi
 install=(upgrade --install "$rel" "$chart" -n "$ns"
   --set api.appEnv=development
-  --set sensor.enabled=true
+  --set sensor.enabled=true --set sensor.allowInsecureHTTP=true
   --set sensor.storageLayout=split
   --set sensor.state.persistence.existingClaim=sensor-state
   --set sensor.content.persistence.size=1Gi)
@@ -172,7 +172,7 @@ spec:
   containers:
     - name: check
       image: $check_image
-      command: ["/bin/sh", "-c", "stat -c '%a %n' /state/identity /state/identity/*; find /content -type l -exec readlink {} ';' | sed 's/^/link /'"]
+      command: ["/bin/sh", "-c", "stat -c '%a %n' /state/identity /state/identity/* /state/store; stat -c 'store-dir %W %n' /state/store; find /state/store -type f ! -perm 0600 | sed 's/^/store-loose-file /'; find /content -type l -exec readlink {} ';' | sed 's/^/link /'"]
       volumeMounts:
         - name: state
           mountPath: /state
@@ -215,6 +215,19 @@ if grep -Eq "^2?700 /state/identity$" <<<"$modes" && grep -q "^600 /state/identi
 else
   fail "identity created 0700/0600"
 fi
+# The local store (the key that encrypts the outbox) is on the state volume,
+# private, and the root filesystem stays read-only.
+if grep -Eq "^2?700 /state/store$" <<<"$modes" && ! grep -q "^store-loose-file " <<<"$modes"; then
+  pass "local store on the state volume, 0700 dir and 0600 files"
+else
+  fail "local store on the state volume, 0700 dir and 0600 files"
+fi
+store_before="$(grep '^store-dir ' <<<"$modes" || true)"
+if [[ "$(kubectl -n "$ns" get "$sensor" -o jsonpath='{.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem}')" == true ]]; then
+  pass "sensor root filesystem stays read-only"
+else
+  fail "sensor root filesystem stays read-only"
+fi
 # The content store adopted the baked release: its first version links to
 # the image's /home/openctem/nuclei-templates (visible, not mounted over).
 if grep -q "^link /home/openctem/nuclei-templates" <<<"$modes"; then
@@ -228,6 +241,13 @@ if grep -q "^600 /state/identity/signing.key$" <<<"$modes"; then
   pass "identity still 0600 after the pod was replaced"
 else
   fail "identity still 0600 after the pod was replaced: $modes"
+fi
+# The store (and with it the key of any queued outbox) survives the pod:
+# the same directory, with the same creation time.
+if [[ -n "$store_before" && "$(grep '^store-dir ' <<<"$modes" || true)" == "$store_before" ]]; then
+  pass "local store survived the pod replacement"
+else
+  fail "local store survived the pod replacement: before: $store_before; after: $(grep '^store-dir ' <<<"$modes" || true)"
 fi
 if wait_log "pairing with|has mode"; then
   if sensor_log | grep -q "has mode"; then

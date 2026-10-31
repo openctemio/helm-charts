@@ -17,7 +17,7 @@ expect() { if grep -qF -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: 
 reject() { if grep -qF -- "$2" <<<"$3"; then fail "$1 (unexpected: $2)"; else pass "$1"; fi; }
 
 # 1. Defaults: unchanged references, no digest.
-out="$(render --set sensor.enabled=true --set console.enabled=true --set gateway.mode=caddy --set gateway.host=x.example.com --set "gateway.trustedProxies={10.42.0.0/16}")"
+out="$(render --set sensor.enabled=true --set sensor.allowInsecureHTTP=true --set console.enabled=true --set gateway.mode=caddy --set gateway.host=x.example.com --set "gateway.trustedProxies={10.42.0.0/16}")"
 expect "default: api by tag" "image: \"ghcr.io/openctemio/openctem-api:" "$out"
 expect "default: sensor by tag" "image: \"ghcr.io/openctemio/sensor:v" "$out"
 reject "default: no digest" "@sha256:1111" "$out"
@@ -38,7 +38,7 @@ expect "migrations (up and down jobs)" "registry.example.com/openctem/migrations
 expect "ui" "registry.example.com/openctem/openctem-web:v0.12.0@$(d 3)" "$out"
 expect "console" "registry.example.com/openctem/openctem-console:v0.12.0@$(d 4)" "$out"
 expect "gateway" "registry.example.com/openctem/openctem-gateway:v0.12.0@$(d 5)" "$out"
-expect "sensor" "registry.example.com/openctem/sensor:v0.29.1@$(d 6)" "$out"
+expect "sensor" "registry.example.com/openctem/sensor:v0.32.0@$(d 6)" "$out"
 reject "no ghcr.io OpenCTEM image left" "ghcr.io/openctemio" "$out"
 expect "bundled postgres follows global.imageRegistry" "registry.example.com/openctem/bitnamilegacy/postgresql:" "$(render -f "$here/values.yaml")"
 expect "third-party override kept" "registry.example.com/mirror/rclone:" "$out"
@@ -49,7 +49,7 @@ n_ips="$(grep -c "imagePullSecrets:" <<<"$out" || true)"
 
 # 3. Seccomp installer falling back to the sensor image uses the same helper.
 out="$(render -f "$here/values.yaml" --show-only templates/sensor-seccomp-installer.yaml)"
-expect "seccomp installer: sensor image from the mirror, by digest" "registry.example.com/openctem/sensor:v0.29.1@$(d 6)" "$out"
+expect "seccomp installer: sensor image from the mirror, by digest" "registry.example.com/openctem/sensor:v0.32.0@$(d 6)" "$out"
 
 # 4. Mirror only (no digest), trailing slash tolerated; user repository untouched.
 out="$(render --set global.imageRegistry=reg.local:5000/oc/ --show-only templates/ui-deployment.yaml)"

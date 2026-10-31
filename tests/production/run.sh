@@ -79,7 +79,7 @@ expect "ui: probes /api/health" "path: /api/health" "$ui"
 for f in api-migrations-job.yaml api-bootstrap-job.yaml; do
   expect "$f: no service account token" "automountServiceAccountToken: false" "$(render -f "$prod" -s "templates/$f")"
 done
-sensor="$(render --set api.appEnv=development --set sensor.enabled=true -s templates/sensor-deployment.yaml)"
+sensor="$(render --set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true -s templates/sensor-deployment.yaml)"
 expect "sensor: no service account token" "automountServiceAccountToken: false" "$sensor"
 
 # 4. Credentials stay out of the migration URL (any character works).

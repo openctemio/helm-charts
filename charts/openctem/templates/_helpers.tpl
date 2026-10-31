@@ -173,7 +173,7 @@ mode: daemon
 replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
-  tag: v0.29.1
+  tag: v0.32.0
   digest: ""
   pullPolicy: IfNotPresent
 region: default
@@ -191,6 +191,12 @@ instanceEnrollment:
 enrollmentToken:
   existingSecret: ""
   existingSecretKey: ""
+pairingCode: ""
+pairingCodeExistingSecret: ""
+pairingCodeExistingSecretKey: ""
+allowInsecureHTTP: false
+persistence:
+  keepOnUninstall: true
 tools: ""
 keyAutoRenew: ""
 verbose: false
@@ -287,6 +293,8 @@ sandbox:
 writableDirs:
   - /tmp
 writableDirsSizeLimit: ""
+workspaces:
+  sizeLimit: 2Gi
 resources: {}
 terminationGracePeriodSeconds: 45
 nodeSelector: {}

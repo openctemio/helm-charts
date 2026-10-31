@@ -27,11 +27,18 @@ maintainers:
     url: https://openctem.io
 annotations:
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: changed
+      description: "BREAKING for installs with the sensor enabled that render an http:// sensor API URL (the default in-cluster API Service): the render now fails until sensor.apiUrl is an https URL or sensor.allowInsecureHTTP=true is set (development and evaluation only)"
+    - kind: added
+      description: "sensor.pairingCode / sensor.pairingCodeExistingSecret, and a re-pair runbook in the README"
+    - kind: changed
+      description: "The sensor identity volume is kept on helm uninstall (sensor.persistence.keepOnUninstall, default true); delete it by hand to remove the identity"
 
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.34.0
+version: 0.35.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to

@@ -1814,6 +1814,14 @@
         "writableDirsSizeLimit": {
           "type": "string"
         },
+        "workspaces": {
+          "type": "object",
+          "properties": {
+            "sizeLimit": {
+              "type": "string"
+            }
+          }
+        },
         "terminationGracePeriodSeconds": {
           "type": "integer",
           "minimum": 0
@@ -1865,6 +1873,26 @@
         },
         "affinity": {
           "type": "object"
+        },
+        "pairingCode": {
+          "type": "string"
+        },
+        "pairingCodeExistingSecret": {
+          "type": "string"
+        },
+        "pairingCodeExistingSecretKey": {
+          "type": "string"
+        },
+        "allowInsecureHTTP": {
+          "type": "boolean"
+        },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "keepOnUninstall": {
+              "type": "boolean"
+            }
+          }
         }
       },
       "additionalProperties": true

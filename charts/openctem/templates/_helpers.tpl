@@ -293,6 +293,8 @@ sandbox:
 writableDirs:
   - /tmp
 writableDirsSizeLimit: ""
+workspaces:
+  sizeLimit: 2Gi
 resources: {}
 terminationGracePeriodSeconds: 45
 nodeSelector: {}

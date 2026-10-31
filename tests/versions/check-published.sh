@@ -64,7 +64,7 @@ level=warning
 if [[ -z "$newest" ]]; then
   echo "::warning::could not list the sensor releases of $SENSOR_REPO"
 elif [[ -n "$sensor" && "$sensor" != "$newest" ]]; then
-  echo "::$level::sensor.image.tag $sensor is not the newest sensor release $newest: set values.yaml sensor.image.tag (and the README values table) to $newest, and copy its docker/seccomp/sensor.json to files/seccomp/openctem-sensor.json"
+  echo "::$level::sensor.image.tag $sensor is not the newest sensor release $newest: set values.yaml sensor.image.tag, openctem.sensorDefaults in templates/_helpers.tpl and the README values table to $newest, and copy its docker/seccomp/sensor.json to files/seccomp/openctem-sensor.json"
   missing=$((missing + 1))
 else
   echo "ok: sensor.image.tag $sensor is the newest sensor release"

@@ -12,6 +12,11 @@
 # pulled images that did not exist. Release tags are read with git ls-remote:
 # no registry credentials needed.
 #
+# The sensor tag must also be the NEWEST sensor release (a chart installs the
+# current sensor; sensor releases do not wait for a chart), and the chart's
+# seccomp profile (files/seccomp/openctem-sensor.json, installed on the nodes)
+# must be that release's docker/seccomp/sensor.json.
+#
 # Overrides for tests: CHART_DIR, PLATFORM_REPO, SENSOR_REPO (any git URL or path).
 set -euo pipefail
 
@@ -51,6 +56,37 @@ check() { # what repo tag
 
 check "appVersion (API, web, migrations images)" "$PLATFORM_REPO" "$app"
 check "sensor.image.tag" "$SENSOR_REPO" "$sensor"
+
+# Newest sensor release, from the tags (vX.Y.Z only).
+newest="$(git ls-remote --tags --refs "$SENSOR_REPO" 2>/dev/null | sed -nE 's#.*refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+)$#\1#p' | sort -V | tail -1)"
+level=warning
+[[ "$STRICT" == 1 ]] && level=error
+if [[ -z "$newest" ]]; then
+  echo "::warning::could not list the sensor releases of $SENSOR_REPO"
+elif [[ -n "$sensor" && "$sensor" != "$newest" ]]; then
+  echo "::$level::sensor.image.tag $sensor is not the newest sensor release $newest: set values.yaml sensor.image.tag (and the README values table) to $newest, and copy its docker/seccomp/sensor.json to files/seccomp/openctem-sensor.json"
+  missing=$((missing + 1))
+else
+  echo "ok: sensor.image.tag $sensor is the newest sensor release"
+fi
+
+# The seccomp profile of that release (a shallow fetch of the tag).
+profile="$CHART_DIR/files/seccomp/openctem-sensor.json"
+if [[ -n "$sensor" && -f "$profile" ]]; then
+  tmp="$(mktemp -d)"
+  if git -C "$tmp" init -q && git -C "$tmp" fetch -q --depth 1 "$SENSOR_REPO" "refs/tags/$sensor" 2>/dev/null \
+    && git -C "$tmp" show FETCH_HEAD:docker/seccomp/sensor.json >"$tmp/release.json" 2>/dev/null; then
+    if cmp -s "$profile" "$tmp/release.json"; then
+      echo "ok: files/seccomp/openctem-sensor.json is sensor $sensor's profile"
+    else
+      echo "::$level::files/seccomp/openctem-sensor.json differs from docker/seccomp/sensor.json of sensor $sensor: copy it"
+      missing=$((missing + 1))
+    fi
+  else
+    echo "::warning::could not read docker/seccomp/sensor.json of sensor $sensor"
+  fi
+  rm -rf "$tmp"
+fi
 
 if [[ $missing -gt 0 && "$STRICT" == 1 ]]; then
   exit 1

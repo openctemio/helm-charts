@@ -1472,7 +1472,7 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.23.2"
+    tag: "v0.29.1"
     # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
     # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
     digest: ""

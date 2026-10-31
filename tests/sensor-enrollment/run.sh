@@ -13,7 +13,7 @@ fails=0
 pass() { echo "ok   - $1"; }
 fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 
-render() { helm template t "$chart" --set api.appEnv=development --set sensor.enabled=true "$@" 2>&1; }
+render() { helm template t "$chart" --set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true "$@" 2>&1; }
 
 expect() { # expect <description> <pattern> <output>
   if grep -qF -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: $2)"; fi

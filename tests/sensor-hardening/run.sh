@@ -12,7 +12,7 @@ fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 expect() { if grep -qF -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: $2)"; fi; }
 reject() { if grep -qF -- "$2" <<<"$3"; then fail "$1 (unexpected: $2)"; else pass "$1"; fi; }
 
-base=(--set api.appEnv=development --set sensor.enabled=true --set sensor.apiKey=rda_test)
+base=(--set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true --set sensor.apiKey=rda_test)
 render() { helm template t "$chart" "${base[@]}" -s templates/sensor-deployment.yaml "$@" 2>&1; }
 renderAll() { helm template t "$chart" "${base[@]}" "$@" 2>&1; }
 

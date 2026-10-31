@@ -1865,6 +1865,26 @@
         },
         "affinity": {
           "type": "object"
+        },
+        "pairingCode": {
+          "type": "string"
+        },
+        "pairingCodeExistingSecret": {
+          "type": "string"
+        },
+        "pairingCodeExistingSecretKey": {
+          "type": "string"
+        },
+        "allowInsecureHTTP": {
+          "type": "boolean"
+        },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "keepOnUninstall": {
+              "type": "boolean"
+            }
+          }
         }
       },
       "additionalProperties": true

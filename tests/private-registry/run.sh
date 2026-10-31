@@ -17,7 +17,7 @@ expect() { if grep -qF -- "$2" <<<"$3"; then pass "$1"; else fail "$1 (missing: 
 reject() { if grep -qF -- "$2" <<<"$3"; then fail "$1 (unexpected: $2)"; else pass "$1"; fi; }
 
 # 1. Defaults: unchanged references, no digest.
-out="$(render --set sensor.enabled=true --set console.enabled=true --set gateway.mode=caddy --set gateway.host=x.example.com --set "gateway.trustedProxies={10.42.0.0/16}")"
+out="$(render --set sensor.enabled=true --set sensor.allowInsecureHTTP=true --set console.enabled=true --set gateway.mode=caddy --set gateway.host=x.example.com --set "gateway.trustedProxies={10.42.0.0/16}")"
 expect "default: api by tag" "image: \"ghcr.io/openctemio/openctem-api:" "$out"
 expect "default: sensor by tag" "image: \"ghcr.io/openctemio/sensor:v" "$out"
 reject "default: no digest" "@sha256:1111" "$out"

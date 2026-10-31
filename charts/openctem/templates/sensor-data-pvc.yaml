@@ -3,14 +3,20 @@
 {{- if and $sensor.enabled (eq $sensor._layout "data") $persist.enabled (not $persist.existingClaim) }}
 # The sensor's data at /var/lib/openctem: state/ (its paired identity or
 # the API key it renews on its own), outbox/ (results the platform has not
-# accepted yet) and content/ (the scanner cache). Holds a credential;
-# deleted with the release like the sensor itself.
+# accepted yet) and content/ (the scanner cache). Holds a credential. Kept
+# when the release is uninstalled (sensor.persistence.keepOnUninstall,
+# default true): delete it by hand.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "openctem.sensorFullname" . }}-data
   labels:
     {{- include "openctem.sensorLabels" . | nindent 4 }}
+  {{- if (($sensor.persistence | default dict).keepOnUninstall) }}
+  annotations:
+    # Keeps the sensor's identity across helm uninstall (sensor.persistence.keepOnUninstall).
+    helm.sh/resource-policy: keep
+  {{- end }}
 spec:
   accessModes:
     {{- toYaml $persist.accessModes | nindent 4 }}

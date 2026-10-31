@@ -20,6 +20,16 @@
 {{- if not (has ($sensor.enrollment | default "pairing") (list "pairing" "instance" "token")) }}
 {{- fail "\n\nsensor.enrollment must be pairing, instance or token.\n" }}
 {{- end }}
+{{- $apiUrl := $sensor.apiUrl | default (printf "http://%s:%v" (include "openctem.apiFullname" .) .Values.api.service.port) -}}
+{{- if and (hasPrefix "http://" (lower $apiUrl)) (not (regexMatch "^http://(localhost|127\\.[0-9.]+|\\[::1\\])([:/]|$)" (lower $apiUrl))) (not $sensor.allowInsecureHTTP) }}
+{{- fail (printf "\n\nThe sensor would use %s, which is plain http to a host that is not loopback. The sensor refuses that (SENSOR_ALLOW_INSECURE_HTTP). Set sensor.apiUrl to an https URL of the API (preferred), or set sensor.allowInsecureHTTP=true for development and evaluation only.\n" $apiUrl) }}
+{{- end }}
+{{- if and $sensor.pairingCode $sensor.pairingCodeExistingSecret }}
+{{- fail "\n\nSet only one of sensor.pairingCode and sensor.pairingCodeExistingSecret.\n" }}
+{{- end }}
+{{- if and (or $sensor.pairingCode $sensor.pairingCodeExistingSecret) (or $instance $orgToken (not $pairing)) }}
+{{- fail "\n\nsensor.pairingCode applies only to sensor.enrollment=pairing without an API key.\n" }}
+{{- end }}
 {{- if and $instance (not $pairing) }}
 {{- fail "\n\nsensor.enrollment=instance enrolls the sensor with its own key as a shared sensor: leave sensor.apiKey and sensor.existingSecret empty.\n" }}
 {{- end }}
@@ -157,7 +167,11 @@ spec:
           env:
             # Co-located: talk to the in-cluster API service.
             - name: SENSOR_API_URL
-              value: {{ $sensor.apiUrl | default (printf "http://%s:%v" (include "openctem.apiFullname" .) .Values.api.service.port) | quote }}
+              value: {{ $apiUrl | quote }}
+            {{- if $sensor.allowInsecureHTTP }}
+            - name: SENSOR_ALLOW_INSECURE_HTTP
+              value: "1"
+            {{- end }}
             - name: SENSOR_REGION
               value: {{ $sensor.region | quote }}
             {{- if $pairing }}
@@ -166,6 +180,18 @@ spec:
             # Sensors > Add sensor; then it signs every request.
             - name: SENSOR_NAME
               value: {{ $sensor.name | default (include "openctem.sensorFullname" .) | quote }}
+            {{- if $sensor.pairingCodeExistingSecret }}
+            # A single-use pairing code from the console (10 minutes). The sensor
+            # uses it once, never reuses a spent code and ignores it once paired.
+            - name: SENSOR_PAIRING_CODE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sensor.pairingCodeExistingSecret | quote }}
+                  key: {{ $sensor.pairingCodeExistingSecretKey | default "pairing-code" | quote }}
+            {{- else if $sensor.pairingCode }}
+            - name: SENSOR_PAIRING_CODE
+              value: {{ $sensor.pairingCode | quote }}
+            {{- end }}
             {{- if $instance }}
             # sensor.enrollment=instance: a single-use token the
             # sensor-enrollment Job registered; the sensor enrolls as a shared

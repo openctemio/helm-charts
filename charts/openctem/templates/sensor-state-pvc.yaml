@@ -2,14 +2,20 @@
 {{- $persist := ((($sensor.state | default dict).persistence) | default dict) -}}
 {{- if and $sensor.enabled (eq $sensor._layout "split") $persist.enabled (not $persist.existingClaim) }}
 # The sensor's state: its paired identity (private key and sensor ID), or
-# the API key it renews on its own. Holds a credential; deleted with the
-# release like the sensor itself.
+# the API key it renews on its own. Holds a credential. Kept when the
+# release is uninstalled (sensor.persistence.keepOnUninstall, default true):
+# delete it by hand.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "openctem.sensorFullname" . }}-state
   labels:
     {{- include "openctem.sensorLabels" . | nindent 4 }}
+  {{- if (($sensor.persistence | default dict).keepOnUninstall) }}
+  annotations:
+    # Keeps the sensor's identity across helm uninstall (sensor.persistence.keepOnUninstall).
+    helm.sh/resource-policy: keep
+  {{- end }}
 spec:
   accessModes:
     {{- toYaml $persist.accessModes | nindent 4 }}

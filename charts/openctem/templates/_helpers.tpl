@@ -191,6 +191,12 @@ instanceEnrollment:
 enrollmentToken:
   existingSecret: ""
   existingSecretKey: ""
+pairingCode: ""
+pairingCodeExistingSecret: ""
+pairingCodeExistingSecretKey: ""
+allowInsecureHTTP: false
+persistence:
+  keepOnUninstall: true
 tools: ""
 keyAutoRenew: ""
 verbose: false

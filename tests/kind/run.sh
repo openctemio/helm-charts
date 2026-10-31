@@ -88,7 +88,7 @@ if docker manifest inspect "ghcr.io/openctemio/openctem-api:$app" >/dev/null 2>&
 fi
 install=(upgrade --install "$rel" "$chart" -n "$ns"
   --set api.appEnv=development
-  --set sensor.enabled=true
+  --set sensor.enabled=true --set sensor.allowInsecureHTTP=true
   --set sensor.storageLayout=split
   --set sensor.state.persistence.existingClaim=sensor-state
   --set sensor.content.persistence.size=1Gi)

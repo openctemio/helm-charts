@@ -93,6 +93,13 @@ jobs:
           # the sensor's SENSOR_INSTANCE_ENROLLMENT_TOKEN, and the refusals.
           tests/sensor-enrollment/run.sh
 
+      - name: Bundled sensor pairing code, http refusal, kept volume (render checks)
+        run: |
+          # sensor.pairingCode / pairingCodeExistingSecret, the refusal of
+          # plain http to the in-cluster API, and the identity volume kept
+          # on uninstall.
+          tests/sensor-pairing/run.sh
+
       - name: Attachment storage (render checks)
         run: |
           # api.attachments: default RWO volume (Recreate), S3, RWX with

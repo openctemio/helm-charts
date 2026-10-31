@@ -62,5 +62,18 @@ reject "split, keepOnUninstall=false: no keep annotation" "helm.sh/resource-poli
 out="$(render "${http[@]}" --set sensor.storageLayout=split -s templates/sensor-content-pvc.yaml)"
 reject "the disposable content cache is not kept" "helm.sh/resource-policy" "$out"
 
+# The split layout gives the sensor a writable store (on the state volume) and
+# workspaces (an emptyDir) under its read-only root; the data layout does not
+# need either variable.
+out="$(render "${http[@]}" --set sensor.storageLayout=split -s templates/sensor-deployment.yaml)"
+expect "split: store under the state volume" "value: /var/lib/openctem/state/store" "$out"
+expect "split: workspaces mounted" "mountPath: /var/lib/openctem/workspaces" "$out"
+expect "split: workspaces size limit default" "sizeLimit: 2Gi" "$out"
+expect "split: root stays read-only" "readOnlyRootFilesystem: true" "$out"
+out="$(render "${http[@]}" --set sensor.storageLayout=split --set sensor.workspaces.sizeLimit=5Gi -s templates/sensor-deployment.yaml)"
+expect "split: workspaces size limit set" "sizeLimit: 5Gi" "$out"
+out="$(render "${http[@]}" -s templates/sensor-deployment.yaml)"
+reject "data layout: no store variable" "SENSOR_STORE_DIR" "$out"
+
 if [ "$fails" -ne 0 ]; then echo "$fails check(s) failed"; exit 1; fi
 echo "all sensor pairing checks passed"

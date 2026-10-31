@@ -783,6 +783,16 @@ enabled that renders an `http://` sensor API URL (the default) fails to render
 after this upgrade until you choose one of the two options below. Nothing
 running is changed until you do.
 
+The same release changes `storageLayout: split` installs: the sensor's local
+store (the key that encrypts its outbox) now lives on the state volume at
+`state/store` (`SENSOR_STORE_DIR`, a 0700 directory with 0600 files), and job
+workspaces run in an emptyDir at `/var/lib/openctem/workspaces`
+(`sensor.workspaces.sizeLimit`, default `2Gi`, lost with the pod). The root
+filesystem stays read-only. The first start creates the store; a sensor that
+never had a writable store cannot have a queued outbox, so there is nothing
+to migrate. Keep the state and outbox volumes together: an outbox that
+outlives its state volume cannot be read.
+
 The sensor refuses plain `http` to a host that is not loopback
 (`SENSOR_ALLOW_INSECURE_HTTP`), and the default `sensor.apiUrl` is the
 in-cluster API Service over `http`. Since chart 0.35.0 the render therefore
@@ -1911,6 +1921,7 @@ description from its `# --` comment (generated with
 | `sensor.verbose` | bool | `false` |  |
 | `sensor.writableDirs` | list | `["/tmp"]` | Writable emptyDirs mounted over the read-only root filesystem. Besides its state, content and outbox volumes the sensor writes only /tmp: each scan runs with its own home directory there, and the tools' configuration and cache go there too (XDG_CONFIG_HOME, XDG_CACHE_HOME). Do not mount over /home/openctem: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good when it cannot download one). |
 | `sensor.writableDirsSizeLimit` | string | `""` | emptyDir size limit of each writable directory (empty: none). |
+| `sensor.workspaces.sizeLimit` | string | `"2Gi"` | storageLayout split: size limit of the emptyDir the sensor runs jobs in (`/var/lib/openctem/workspaces`), lost with the pod. The local store lives on the state volume at `state/store`. |
 | `tests.enabled` | bool | `true` |  |
 | `tests.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `tests.image.repository` | string | `"busybox"` | Small image with wget (busybox). Pinned for reproducibility. |

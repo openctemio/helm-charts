@@ -238,6 +238,15 @@ spec:
               value: /var/lib/openctem/state
             - name: SENSOR_CONTENT_DIR
               value: /var/lib/openctem/content
+            {{- if $split }}
+            # The local store holds the key that encrypts the outbox: it sits
+            # on the state volume (as sensitive as the signing key), apart
+            # from the outbox it protects. Scratch workspaces are an emptyDir.
+            - name: SENSOR_STORE_DIR
+              value: /var/lib/openctem/state/store
+            - name: SENSOR_WORKSPACE_DIR
+              value: /var/lib/openctem/workspaces
+            {{- end }}
             # Per-task network confinement (RFC-060).
             - name: SENSOR_SANDBOX_NETWORK
               value: {{ $sandbox.network | default "auto" | quote }}
@@ -291,6 +300,8 @@ spec:
               mountPath: /var/lib/openctem/state
             - name: content
               mountPath: /var/lib/openctem/content
+            - name: workspaces
+              mountPath: /var/lib/openctem/workspaces
             {{- else }}
             # One data volume: state/, outbox/ and content/ (the sensor
             # creates them on a fresh volume).
@@ -384,6 +395,10 @@ spec:
           # A cache: downloaded again when the pod is replaced.
           emptyDir: {}
           {{- end }}
+        - name: workspaces
+          # Scratch space for running jobs; lost with the pod.
+          emptyDir:
+            sizeLimit: {{ ($sensor.workspaces | default dict).sizeLimit | default "2Gi" }}
         {{- end }}
         {{- range $i, $d := $sensor.writableDirs }}
         - name: writable-{{ $i }}

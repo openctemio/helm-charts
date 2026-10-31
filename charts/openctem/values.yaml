@@ -1820,6 +1820,13 @@ sensor:
     - /tmp
   # -- emptyDir size limit of each writable directory (empty: none).
   writableDirsSizeLimit: ""
+  workspaces:
+    # -- storageLayout split: size limit of the emptyDir the sensor runs jobs
+    #    in (/var/lib/openctem/workspaces). Lost with the pod. The sensor's
+    #    local store (the key that encrypts the outbox) lives on the state
+    #    volume at state/store, so keep the state and outbox volumes together:
+    #    an outbox that outlives its state volume cannot be read.
+    sizeLimit: 2Gi
   resources: {}
   # -- Seconds Kubernetes waits after SIGTERM. The sensor drains for up to 30s
   #    and hands unfinished work back so the platform re-queues it at once;

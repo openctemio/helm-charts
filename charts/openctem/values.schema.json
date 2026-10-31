@@ -1814,6 +1814,14 @@
         "writableDirsSizeLimit": {
           "type": "string"
         },
+        "workspaces": {
+          "type": "object",
+          "properties": {
+            "sizeLimit": {
+              "type": "string"
+            }
+          }
+        },
         "terminationGracePeriodSeconds": {
           "type": "integer",
           "minimum": 0

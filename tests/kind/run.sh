@@ -172,7 +172,7 @@ spec:
   containers:
     - name: check
       image: $check_image
-      command: ["/bin/sh", "-c", "stat -c '%a %n' /state/identity /state/identity/*; find /content -type l -exec readlink {} ';' | sed 's/^/link /'"]
+      command: ["/bin/sh", "-c", "stat -c '%a %n' /state/identity /state/identity/* /state/store; stat -c 'store-file %a %W %Y %n' /state/store/master.key; find /content -type l -exec readlink {} ';' | sed 's/^/link /'"]
       volumeMounts:
         - name: state
           mountPath: /state
@@ -215,6 +215,19 @@ if grep -Eq "^2?700 /state/identity$" <<<"$modes" && grep -q "^600 /state/identi
 else
   fail "identity created 0700/0600"
 fi
+# The local store (the key that encrypts the outbox) is on the state volume,
+# private, and the root filesystem stays read-only.
+if grep -Eq "^2?700 /state/store$" <<<"$modes" && grep -q "^store-file 600 " <<<"$modes"; then
+  pass "local store on the state volume, 0700 dir and 0600 files"
+else
+  fail "local store on the state volume, 0700 dir and 0600 files"
+fi
+store_before="$(grep '^store-file ' <<<"$modes" | sort)"
+if [[ "$(kubectl -n "$ns" get "$sensor" -o jsonpath='{.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem}')" == true ]]; then
+  pass "sensor root filesystem stays read-only"
+else
+  fail "sensor root filesystem stays read-only"
+fi
 # The content store adopted the baked release: its first version links to
 # the image's /home/openctem/nuclei-templates (visible, not mounted over).
 if grep -q "^link /home/openctem/nuclei-templates" <<<"$modes"; then
@@ -228,6 +241,13 @@ if grep -q "^600 /state/identity/signing.key$" <<<"$modes"; then
   pass "identity still 0600 after the pod was replaced"
 else
   fail "identity still 0600 after the pod was replaced: $modes"
+fi
+# The store (and with it the key of any queued outbox) survives the pod:
+# the same master.key, with the same creation and modification times.
+if [[ -n "$store_before" && "$(grep '^store-file ' <<<"$modes" | sort)" == "$store_before" ]]; then
+  pass "local store survived the pod replacement"
+else
+  fail "local store survived the pod replacement: before: $store_before; after: $(grep '^store-file ' <<<"$modes")"
 fi
 if wait_log "pairing with|has mode"; then
   if sensor_log | grep -q "has mode"; then

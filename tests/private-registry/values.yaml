@@ -39,6 +39,9 @@ sensor:
     digest: sha256:6666666666666666666666666666666666666666666666666666666666666666
   sandbox:
     installerImage: ""
+    network: required
+  localPolicy:
+    enabled: true
 tests:
   image:
     repository: registry.example.com/mirror/busybox

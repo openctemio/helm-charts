@@ -135,5 +135,50 @@ else
   expect "unknown sandbox.network fails the render" "must be auto, required or off" "$out"
 fi
 
+# 2. Resources by default (a runaway scan must not starve the platform).
+out="$(render)"
+expect "default CPU request" "cpu: 500m" "$out"
+expect "default memory limit" "memory: 2Gi" "$out"
+
+# 3. The sensor's NetworkPolicy (rendered with the sensor, without
+#    networkPolicy.enabled): no ingress, egress to DNS, the API pods and the
+#    internet minus private, cluster, CGNAT, loopback and link-local ranges.
+np="$(helm template t "$chart" "${base[@]}" -s templates/sensor-networkpolicy.yaml 2>&1)"
+expect "sensor NetworkPolicy rendered by default" "name: t-openctem-sensor" "$np"
+expect "selects the sensor pods" "app.kubernetes.io/component: sensor" "$np"
+expect "ingress and egress governed" "- Egress" "$np"
+reject "no ingress rule (nothing may connect)" "ingress:" "$np"
+expect "egress to DNS" "port: 53" "$np"
+expect "egress to the API pods" "app.kubernetes.io/component: api" "$np"
+expect "egress to the API port" "port: 8080" "$np"
+for c in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 fc00::/7 fe80::/10; do
+  expect "internet egress excepts $c" "- $c" "$np"
+done
+reject "no egress to PostgreSQL" "postgresql" "$np"
+reject "no egress to Redis" "redis" "$np"
+reject "no egress to PostgreSQL port" "5432" "$np"
+reject "no egress to Redis port" "6379" "$np"
+np="$(helm template t "$chart" "${base[@]}" -s templates/sensor-networkpolicy.yaml \
+  --set 'sensor.networkPolicy.egress.extra[0].to[0].ipBlock.cidr=10.20.0.0/16' 2>&1)"
+expect "extra egress rule" "cidr: 10.20.0.0/16" "$np"
+expect "gateway egress with gateway.mode=caddy" "app.kubernetes.io/component: gateway" \
+  "$(helm template t "$chart" "${base[@]}" --set gateway.mode=caddy --set gateway.host=o.example.com \
+     --set 'gateway.trustedProxies={10.244.0.0/16}' -s templates/sensor-networkpolicy.yaml 2>&1)"
+if out="$(helm template t "$chart" "${base[@]}" --set sensor.networkPolicy.enabled=false -s templates/sensor-networkpolicy.yaml 2>&1)"; then
+  fail "sensor.networkPolicy.enabled=false renders no policy"
+else
+  expect "sensor.networkPolicy.enabled=false renders no policy" "could not find template" "$out"
+fi
+# The release-wide datastore policies do not admit the sensor.
+all="$(renderAll --set networkPolicy.enabled=true -s templates/networkpolicy.yaml)"
+for ds in postgres redis; do
+  blk="$(awk -v n="t-openctem-allow-$ds" '/^---/{p=0} $0 ~ "name: "n"$"{p=1} p' <<<"$all")"
+  if grep -q "operator: NotIn" <<<"$blk" && grep -q "values: \[sensor\]" <<<"$blk"; then
+    pass "$ds ingress excludes the sensor pods"
+  else
+    fail "$ds ingress excludes the sensor pods"
+  fi
+done
+
 if [[ $fails -gt 0 ]]; then echo "$fails failed"; exit 1; fi
 echo "all sensor hardening checks passed"

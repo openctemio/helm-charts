@@ -1,0 +1,96 @@
+{{- /*
+The bundled sensor's own NetworkPolicy (sensor.networkPolicy), rendered
+whenever the sensor is enabled, independent of networkPolicy.enabled.
+
+Threat model: the sensor parses responses of hostile scan targets. Its tools
+run in per-task network namespaces behind an egress forwarder that admits
+only the task's scope, but code execution in the sensor process itself would
+start from the pod's network. This policy keeps that process away from the
+platform: no ingress at all (the sensor serves nothing), and egress only to
+  - DNS (port 53),
+  - the API pods (the sensor protocol), and the bundled gateway with
+    gateway.mode=caddy (an https sensor.apiUrl through it),
+  - the internet for scanning: 0.0.0.0/0 and ::/0 minus
+    sensor.networkPolicy.egress.exceptCidrs (by default the private and
+    cluster ranges, CGNAT, loopback and link-local, where the cloud metadata
+    service 169.254.169.254 answers),
+  - sensor.networkPolicy.egress.extra.
+PostgreSQL, Redis, the console, the UI and every other in-cluster pod are
+not listed, so they are refused (pod addresses lie in the excepted ranges;
+add public pod/service CIDRs of your cluster to exceptCidrs).
+*/ -}}
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- $np := $sensor.networkPolicy | default dict -}}
+{{- if and $sensor.enabled $np.enabled }}
+{{- $egress := $np.egress | default dict -}}
+{{- $v4 := list -}}
+{{- $v6 := list -}}
+{{- range $c := ($egress.exceptCidrs | default list) -}}
+{{- if contains ":" $c -}}
+{{- $v6 = append $v6 $c -}}
+{{- else -}}
+{{- $v4 = append $v4 $c -}}
+{{- end -}}
+{{- end -}}
+{{- $gwMode := include "openctem.gatewayMode" . -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openctem.sensorFullname" . }}
+  labels:
+    {{- include "openctem.sensorLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "openctem.sensorSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress rule: nothing may connect to the sensor.
+  egress:
+    # DNS (the sensor and its tools resolve scan targets).
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # The platform API (sensor protocol over HTTP, and the v3 mTLS port).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "openctem.apiSelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+        {{- if include "openctem.sensorTransportOn" . }}
+        - port: {{ .Values.api.sensorTransport.mtls.port }}
+          protocol: TCP
+        {{- end }}
+    {{- if eq $gwMode "caddy" }}
+    # The bundled gateway (an https sensor.apiUrl through it).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "openctem.gatewaySelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+    # Scan targets: the internet, without the excepted ranges.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with $v4 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            {{- with $v6 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+    {{- with $egress.extra }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

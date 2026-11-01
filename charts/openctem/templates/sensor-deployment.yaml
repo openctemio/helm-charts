@@ -63,6 +63,23 @@
 {{- if and (eq $userSeccomp "Unconfined") }}
 {{- fail "\n\nsensor.podSecurityContext.seccompProfile Unconfined is refused: use sensor.sandbox.seccompProfile=openctem for confinement.\n" }}
 {{- end }}
+{{- /* A shared sensor of the instance runs jobs of many organizations on one
+       host: since sdk-go v0.35.0 an identity enrolled at instance scope
+       refuses to start without shared mode (SENSOR_SHARED_MODE=1), and shared
+       mode refuses to start without the tool sandbox, network confinement
+       and a local policy. Refuse the render here, before the single-use
+       enrollment token is spent by a pod that can only crash-loop. */ -}}
+{{- if $instance }}
+{{- if ne ($sandbox.network | default "auto") "required" }}
+{{- fail "\n\nsensor.enrollment=instance runs a shared sensor (SENSOR_SHARED_MODE=1), which refuses to start unless every tool runs sandboxed and network-confined: set sensor.sandbox.network=required.\n" }}
+{{- end }}
+{{- if and (not $ownSeccomp) (ne $userSeccomp "Localhost") }}
+{{- fail "\n\nsensor.enrollment=instance needs the sensor's seccomp profile, which allows the namespaces per-task confinement uses: set sensor.sandbox.seccompProfile=openctem (or your own Localhost profile in sensor.podSecurityContext.seccompProfile).\n" }}
+{{- end }}
+{{- if not $lp.enabled }}
+{{- fail "\n\nsensor.enrollment=instance runs a shared sensor, which refuses to start without a local policy (the host owner's limits on what jobs of any organization may scan): set sensor.localPolicy.enabled=true with sensor.localPolicy.policy or sensor.localPolicy.existingConfigMap (README: \"Bundled shared sensor\").\n" }}
+{{- end }}
+{{- end }}
 {{- if and $split $persist.enabled (gt (int $sensor.replicaCount) 1) }}
 {{- fail "\n\nsensor.outbox.persistence.enabled needs sensor.replicaCount=1: an outbox belongs to one sensor process (the sensor locks it).\n" }}
 {{- end }}
@@ -194,13 +211,18 @@ spec:
             {{- end }}
             {{- if $instance }}
             # sensor.enrollment=instance: a single-use token the
-            # sensor-enrollment Job registered; the sensor enrolls as a shared
-            # sensor on first start and ignores it once it has an identity.
-            - name: SENSOR_INSTANCE_ENROLLMENT_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openctem.sensorEnrollmentSecretName" (dict "context" . "sensor" $sensor) }}
-                  key: {{ include "openctem.sensorEnrollmentSecretKey" (dict "sensor" $sensor) }}
+            # sensor-enrollment Job registered, read from the mounted Secret
+            # (never the environment); the sensor enrolls as a shared sensor
+            # on first start and ignores it once it has an identity.
+            - name: SENSOR_INSTANCE_ENROLLMENT_TOKEN_FILE
+              value: /var/run/secrets/openctem/instance-enrollment/token
+            # Shared mode: every job sandboxed and network-confined in its own
+            # task directory, the local policy required, only signed jobs.
+            # An identity enrolled at instance scope does not start without it.
+            - name: SENSOR_SHARED_MODE
+              value: "1"
+            - name: SENSOR_SANDBOX
+              value: required
             {{- end }}
             {{- if $orgToken }}
             # sensor.enrollment=token: an organization enrollment token, read
@@ -324,6 +346,11 @@ spec:
               mountPath: /var/run/secrets/openctem/enrollment
               readOnly: true
             {{- end }}
+            {{- if $instance }}
+            - name: instance-enrollment-token
+              mountPath: /var/run/secrets/openctem/instance-enrollment
+              readOnly: true
+            {{- end }}
             {{- with $sensor.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -332,6 +359,17 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        {{- if $instance }}
+        # The instance enrollment token: readable by the sensor's group only,
+        # never writable (the sensor refuses a group- or world-writable file).
+        - name: instance-enrollment-token
+          secret:
+            secretName: {{ include "openctem.sensorEnrollmentSecretName" (dict "context" . "sensor" $sensor) }}
+            defaultMode: 0440
+            items:
+              - key: {{ include "openctem.sensorEnrollmentSecretKey" (dict "sensor" $sensor) }}
+                path: token
+        {{- end }}
         {{- if $orgToken }}
         # The organization enrollment token: readable by the sensor's group
         # only, never writable (the sensor refuses a group- or

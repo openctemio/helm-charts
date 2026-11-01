@@ -1472,7 +1472,7 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.33.0"
+    tag: "v0.35.0"
     # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
     # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
     digest: ""
@@ -1512,8 +1512,11 @@ sensor:
   #    sensor of the instance (api RFC-100). The chart generates a
   #    single-use enrollment token into a Secret, a post-install/post-upgrade
   #    Job registers it with `bootstrap-admin sensor-token` (valid one hour),
-  #    and the sensor enrolls with it (SENSOR_INSTANCE_ENROLLMENT_TOKEN) on
-  #    first start, without anyone approving it. A shared sensor takes no
+  #    and the sensor enrolls with it (a read-only file,
+  #    SENSOR_INSTANCE_ENROLLMENT_TOKEN_FILE) on first start, without anyone
+  #    approving it. It runs in shared mode (SENSOR_SHARED_MODE=1), so the
+  #    render fails without sandbox.network=required, the sensor's seccomp
+  #    profile and localPolicy.enabled=true. A shared sensor takes no
   #    organization's jobs until a super administrator turns shared sensors
   #    on (Console > System > Platform scanning). A sensor that is already
   #    paired keeps its identity (no forced migration); see the README.
@@ -1827,7 +1830,48 @@ sensor:
     #    volume at state/store, so keep the state and outbox volumes together:
     #    an outbox that outlives its state volume cannot be read.
     sizeLimit: 2Gi
-  resources: {}
+  # -- Requests and limits of the sensor pod (its scanners run in it). The
+  #    default keeps a runaway scan from starving the platform on the same
+  #    nodes; the values-small/medium/large presets size it to their tier.
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  # Egress and ingress of the sensor pod (rendered whenever the sensor is
+  # enabled, independent of networkPolicy.enabled). The sensor parses hostile
+  # scan output, so a compromised sensor process must not reach the
+  # platform's datastores, the signer, other in-cluster services or the
+  # cloud metadata address. Needs a CNI that enforces NetworkPolicy.
+  networkPolicy:
+    # -- Render the sensor NetworkPolicy: no ingress at all; egress only to
+    #    DNS, the API pods (and the bundled gateway with gateway.mode=caddy),
+    #    and addresses outside networkPolicy.egress.exceptCidrs.
+    enabled: true
+    egress:
+      # -- Ranges the sensor may never reach directly (the cluster's pod and
+      #    service networks and the private LAN behind the nodes, CGNAT, and
+      #    link-local, where the cloud metadata service 169.254.169.254
+      #    answers). Add your cluster's pod/service CIDRs here when they are
+      #    public addresses. The API pods stay reachable by pod selector.
+      exceptCidrs:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 100.64.0.0/10
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+        - 0.0.0.0/8
+        - fc00::/7
+        - fe80::/10
+        - ::1/128
+      # -- Extra egress rules (NetworkPolicyEgressRule list), for example an
+      #    external sensor.apiUrl or a scan proxy on a private address, or the
+      #    private ranges an internal-scanning sensor (allowPrivateTargets)
+      #    may reach.
+      extra: []
   # -- Seconds Kubernetes waits after SIGTERM. The sensor drains for up to 30s
   #    and hands unfinished work back so the platform re-queues it at once;
   #    the Kubernetes default (30) can cut that off.

@@ -173,7 +173,7 @@ mode: daemon
 replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
-  tag: v0.33.0
+  tag: v0.35.0
   digest: ""
   pullPolicy: IfNotPresent
 region: default
@@ -295,7 +295,28 @@ writableDirs:
 writableDirsSizeLimit: ""
 workspaces:
   sizeLimit: 2Gi
-resources: {}
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+networkPolicy:
+  enabled: true
+  egress:
+    exceptCidrs:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 100.64.0.0/10
+      - 169.254.0.0/16
+      - 127.0.0.0/8
+      - 0.0.0.0/8
+      - fc00::/7
+      - fe80::/10
+      - ::1/128
+    extra: []
 terminationGracePeriodSeconds: 45
 nodeSelector: {}
 tolerations: []

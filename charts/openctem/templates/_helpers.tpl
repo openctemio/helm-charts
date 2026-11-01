@@ -302,6 +302,19 @@ resources:
   limits:
     cpu: "2"
     memory: 2Gi
+jobSigning:
+  root: ""
+  keys: []
+  fromSigner: true
+  exporter:
+    image: "docker.io/curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
+    resources:
+      requests:
+        cpu: 5m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 32Mi
 networkPolicy:
   enabled: true
   egress:

@@ -1840,6 +1840,42 @@ sensor:
     limits:
       cpu: "2"
       memory: 2Gi
+  # Job-signing pin (OpenCTEM docs/architecture/job-signing.md): which
+  # signer keys the sensor accepts jobs from. A pin given here is read from a
+  # read-only ConfigMap file (SENSOR_JOB_SIGNING_ROOT_FILE /
+  # SENSOR_JOB_SIGNING_KEYS_FILE) and is exclusive: the keys the API served
+  # when the sensor paired are no longer trusted next to it, so an API that
+  # was compromised at install time cannot plant its own key.
+  jobSigning:
+    # -- The installation's offline job-signing root (`openctem-signer root
+    #    keygen`): its key id (SHA256:<64 hex>) or base64 Ed25519 public key.
+    #    The sensor then accepts the signer keys of the key set this root
+    #    signed (api.signer.keyset.existingSecret must serve it). REQUIRED
+    #    with api.appEnv=production when the sensor is enabled.
+    root: ""
+    # -- Signer public keys to pin (SHA256:<64 hex> key ids or base64
+    #    Ed25519 keys), as an alternative to root (no key rotation without
+    #    a values change).
+    keys: []
+    # -- With neither root nor keys and the chart's job signer enabled: pin
+    #    that signer's own public key. The signer writes it to a volume only
+    #    it writes (SIGNER_PUBLISH_DIR), a small exporter container in the API
+    #    pod (it alone holds a Kubernetes token, allowed only get/patch of the
+    #    one ConfigMap <api>-signer-pub) copies it into that ConfigMap, and
+    #    the sensor mounts it read-only. The API container never sees the
+    #    token or the volume. The sensor pod waits until the key is there.
+    #    false: no pin (the sensor trusts the keys the API serves at pairing).
+    fromSigner: true
+    exporter:
+      # -- Image of the exporter: it needs sh and curl.
+      image: "docker.io/curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
+      resources:
+        requests:
+          cpu: 5m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
   # Egress and ingress of the sensor pod (rendered whenever the sensor is
   # enabled, independent of networkPolicy.enabled). The sensor parses hostile
   # scan output, so a compromised sensor process must not reach the

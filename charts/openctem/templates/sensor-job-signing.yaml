@@ -1,0 +1,90 @@
+{{- /*
+The bundled sensor's job-signing pin (sensor.jobSigning; OpenCTEM
+docs/architecture/job-signing.md).
+
+Threat model: a sensor that pins nothing trusts the job-signing keys the API
+serves when it first pairs. An API compromised at install time could then
+plant its own key, and the sensor would run jobs signed with it. The pin
+comes from somewhere the API cannot write:
+  - sensor.jobSigning.root / .keys: values the operator sets out of band,
+    rendered into <sensor>-job-signing;
+  - otherwise (sensor.jobSigning.fromSigner, the chart's signer enabled):
+    the signer's own public key. The signer writes it to an emptyDir only it
+    writes; the exporter container of the API pod copies it into
+    <api>-signer-pub. The exporter alone mounts a Kubernetes token (a
+    projected volume; the API container has none), and the Role below allows
+    only get and patch of that one ConfigMap. The chart renders the
+    ConfigMap empty (create cannot be limited to a name) and never owns its
+    data, so an upgrade keeps the key.
+The sensor reads the pin from a read-only file (SENSOR_JOB_SIGNING_*_FILE),
+which makes it exclusive: keys taken at pairing are not trusted next to it.
+*/ -}}
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- if $sensor.enabled }}
+{{- $js := $sensor.jobSigning | default dict -}}
+{{- $pinRe := "^(SHA256:[0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$" -}}
+{{- if and $js.root (not (regexMatch $pinRe (toString $js.root))) }}
+{{- fail "\n\nsensor.jobSigning.root must be the offline root's key id (SHA256:<64 hex digits>) or its base64 Ed25519 public key (openctem-signer root keygen prints both).\n" }}
+{{- end }}
+{{- range $k := ($js.keys | default list) }}
+{{- if not (regexMatch $pinRe (toString $k)) }}
+{{- fail (printf "\n\nsensor.jobSigning.keys: %q is neither a key id (SHA256:<64 hex digits>) nor a base64 Ed25519 public key.\n" (toString $k)) }}
+{{- end }}
+{{- end }}
+{{- if and (eq (toString $.Values.api.appEnv) "production") (not $js.root) }}
+{{- fail "\n\nsensor.enabled=true with api.appEnv=production needs sensor.jobSigning.root: the installation's offline job-signing root (openctem-signer root keygen; the signer serves the key set it signs from api.signer.keyset.existingSecret). Without it the sensor would trust the signer key the API serves when it first connects.\n" }}
+{{- end }}
+{{- if and $js.root (include "openctem.signerEnabled" $) (not $sensor.apiUrl) (not $.Values.api.signer.keyset.existingSecret) }}
+{{- fail "\n\nsensor.jobSigning.root needs api.signer.keyset.existingSecret: the sensor accepts only signer keys from a key set the root signed, and without one the API serves none (every job would be refused).\n" }}
+{{- end }}
+{{- if or $js.root $js.keys }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openctem.sensorFullname" . }}-job-signing
+  labels:
+    {{- include "openctem.sensorLabels" . | nindent 4 }}
+data:
+  {{- with $js.root }}
+  root: {{ . | quote }}
+  {{- end }}
+  {{- with $js.keys }}
+  keys: {{ join "\n" . | quote }}
+  {{- end }}
+{{- else if include "openctem.signerPublishForSensor" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openctem.signerPubConfigMap" . }}
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+# No data: the exporter writes signer.pub, the signer's public key.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "openctem.signerPubConfigMap" . }}-exporter
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: [{{ include "openctem.signerPubConfigMap" . | quote }}]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "openctem.signerPubConfigMap" . }}-exporter
+  labels:
+    {{- include "openctem.apiLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "openctem.signerPubConfigMap" . }}-exporter
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "openctem.apiServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

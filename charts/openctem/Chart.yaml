@@ -28,21 +28,15 @@ maintainers:
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: fixed
-      description: "sensor.enrollment=instance sets SENSOR_SHARED_MODE=1: a sensor enrolled at instance scope stopped at start (sdk-go v0.35.0 and later) after spending its single-use token, then crash-looped"
     - kind: security
-      description: "BREAKING for sensor.enrollment=instance: the render fails without sensor.sandbox.network=required, the sensor's seccomp profile and sensor.localPolicy.enabled=true, which shared mode requires"
+      description: "The bundled sensor pins the job-signing key from a read-only file (sensor.jobSigning): the offline root or keys from values, else the chart signer's own public key, which a dedicated exporter container (the only one with a Kubernetes token, limited to get/patch of one ConfigMap) copies into <api>-signer-pub"
     - kind: security
-      description: "The instance enrollment token reaches the sensor as a read-only file (SENSOR_INSTANCE_ENROLLMENT_TOKEN_FILE), never the environment"
-    - kind: security
-      description: "sensor.networkPolicy (on by default): the sensor pod accepts no connection and reaches only DNS, the API, the bundled gateway and public addresses (no datastores, cluster ranges or cloud metadata); the PostgreSQL and Redis policies exclude the sensor"
-    - kind: changed
-      description: "Default sensor resources: requests 500m CPU / 1Gi memory, limits 2 CPU / 2Gi"
+      description: "BREAKING for production: api.appEnv=production with sensor.enabled=true fails to render without sensor.jobSigning.root, and sensor.jobSigning.root needs api.signer.keyset.existingSecret"
 
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.36.0
+version: 0.37.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to

@@ -206,6 +206,48 @@ The full ceremony, the key set signed by an offline root
 variables (`api.signer.extraEnv`) are in the OpenCTEM documentation,
 `api/docs/architecture/job-signing.md`.
 
+### The bundled sensor pins the signer key (`sensor.jobSigning`)
+
+A sensor that pins nothing trusts the job-signing keys the API serves when it
+first connects, so an API compromised at install time could plant its own key.
+The bundled sensor therefore reads a pin from a read-only ConfigMap file
+(`SENSOR_JOB_SIGNING_ROOT_FILE` or `SENSOR_JOB_SIGNING_KEYS_FILE`). A pin read
+from a file is exclusive: the keys taken at pairing are not trusted next to it.
+
+| Values | Pin | Use |
+|---|---|---|
+| `sensor.jobSigning.root` | The offline root's key id (`SHA256:<hex>`) or public key; the sensor accepts the signer keys of the key set it signed, so keys rotate without touching the sensor. Needs `api.signer.keyset.existingSecret` | **Required in production** (`api.appEnv=production` with the sensor enabled fails to render without it) |
+| `sensor.jobSigning.keys` | Signer public keys or key ids | When you manage keys without a root |
+| neither (default, `sensor.jobSigning.fromSigner=true`) | The chart signer's own public key | Development and evaluation |
+
+With the default, the signer writes its public key (`SIGNER_PUBLISH_DIR`) to a
+memory volume only it writes. A small exporter container in the API pod
+(`signer-pub-exporter`, shell and curl, `sensor.jobSigning.exporter.image`)
+copies it into the ConfigMap `<release>-openctem-api-signer-pub`, which the
+sensor mounts read-only. The exporter is the only container with a Kubernetes
+token: a projected, one-hour token of the API's service account, mounted into
+it alone (the pod keeps `automountServiceAccountToken: false`), and the Role
+`<release>-openctem-api-signer-pub-exporter` allows only `get` and `patch` of
+that one ConfigMap. The API container mounts neither the token nor the key
+volume. The sensor pod waits (`ContainerCreating`) until the key is in the
+ConfigMap, so it never pairs unpinned. Notes:
+
+- With `networkPolicy.api.egress.allowAll=false`, add the Kubernetes API
+  server to `networkPolicy.api.egress.extra`, or the exporter cannot write.
+- A private registry mirrors `sensor.jobSigning.exporter.image` too.
+- A new signer key (a lost key volume) is republished at once; restart the
+  sensor afterwards, since it reads its pin at start.
+
+For production, create the root and the key set as the OpenCTEM job-signing
+documentation describes, then:
+
+```bash
+kubectl -n openctem create secret generic openctem-signer-keyset --from-file=keyset.json
+helm upgrade openctem charts/openctem -n openctem -f values.yaml \
+  --set api.signer.keyset.existingSecret=openctem-signer-keyset \
+  --set sensor.jobSigning.root=SHA256:<root key id>
+```
+
 ## First install: platform admin and first organization
 
 OpenCTEM has no self-registration and, by default, no self-service
@@ -1053,6 +1095,20 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Upgrading to 0.37.0 (the bundled sensor pins the job-signing key)
+
+- **Production renders with `sensor.enabled=true` fail without
+  `sensor.jobSigning.root`** (and `sensor.jobSigning.root` needs
+  `api.signer.keyset.existingSecret`). See "The bundled sensor pins the signer
+  key".
+- Otherwise the bundled sensor now pins the chart signer's own public key,
+  through the `signer-pub-exporter` container, the ConfigMap
+  `<release>-openctem-api-signer-pub` and a Role limited to it. The pin is
+  exclusive: a sensor that paired with another platform's keys refuses its
+  jobs. Set `sensor.jobSigning.fromSigner=false` to keep the previous
+  behaviour (no pin).
+- Private registries: mirror `sensor.jobSigning.exporter.image`.
+
 ## Upgrading to 0.36.0 (shared sensor mode, sensor NetworkPolicy, sensor resources)
 
 - **`sensor.enrollment=instance` now runs the sensor in shared mode** and the
@@ -1147,6 +1203,7 @@ their own keys:
 | Backup CronJob (rclone, postgres) | `backup.rclone.image.repository` / `.tag`, `backup.dump.image.repository` / `.tag` |
 | Sensor seccomp installer (busybox) | `sensor.sandbox.installerImage` (full reference) |
 | Signer key installer (busybox) | `api.signer.keyInstaller.image.repository` / `.tag` |
+| Signer public key exporter (curl) | `sensor.jobSigning.exporter.image` (full reference) |
 | Bundled PostgreSQL / Redis (evaluation only) | `postgresql.image.repository`, `redis.image.repository`. The Bitnami subcharts also read `global.imageRegistry`: with it set they pull `<registry>/bitnamilegacy/postgresql` and `<registry>/bitnamilegacy/redis`. Production uses an external database and `postgresql.enabled=false`, `redis.enabled=false`. |
 
 Example (see `tests/private-registry/values.yaml`, which CI renders):
@@ -1960,6 +2017,14 @@ description from its `# --` comment (generated with
 | `sensor.image.tag` | string | `"v0.33.0"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
 | `sensor.instanceEnrollment.existingSecret` | string | `""` | Pre-created Secret holding the token (octe_ and 49 letters or digits) instead of the generated one, for GitOps. |
 | `sensor.instanceEnrollment.existingSecretKey` | string | `""` | Key within the secret. Empty: "token". |
+| `sensor.jobSigning.exporter.image` | string | see `values.yaml` | Image of the exporter: it needs sh and curl. |
+| `sensor.jobSigning.exporter.resources.limits.cpu` | string | `"50m"` |  |
+| `sensor.jobSigning.exporter.resources.limits.memory` | string | `"32Mi"` |  |
+| `sensor.jobSigning.exporter.resources.requests.cpu` | string | `"5m"` |  |
+| `sensor.jobSigning.exporter.resources.requests.memory` | string | `"16Mi"` |  |
+| `sensor.jobSigning.fromSigner` | bool | `true` | With neither root nor keys and the chart's job signer enabled: pin that signer's own public key. The signer writes it to a volume only it writes (SIGNER_PUBLISH_DIR), a small exporter container in the API pod (it alone holds a Kubernetes token, allowed only get/patch of the one ConfigMap <api>-signer-pub) copies it into that ConfigMap, and the sensor mounts it read-only. The API container never sees the token or the volume. The sensor pod waits until the key is there. false: no pin (the sensor trusts the keys the API serves at pairing). |
+| `sensor.jobSigning.keys` | list | `[]` | Signer public keys to pin (SHA256:<64 hex> key ids or base64 Ed25519 keys), as an alternative to root (no key rotation without a values change). |
+| `sensor.jobSigning.root` | string | `""` | The installation's offline job-signing root (`openctem-signer root keygen`): its key id (SHA256:<64 hex>) or base64 Ed25519 public key. The sensor then accepts the signer keys of the key set this root signed (api.signer.keyset.existingSecret must serve it). REQUIRED with api.appEnv=production when the sensor is enabled. |
 | `sensor.keyAutoRenew` | string | `""` | Renew the sensor API key before it expires and when the platform asks (SENSOR_KEY_AUTORENEW). The renewed key is kept in the state volume (/var/lib/openctem/state/sensor-credentials.json), not the Secret: the renewal retires the key in the Secret. Empty (default): on exactly when state.persistence.enabled (a renewed key on an emptyDir is lost with the pod, which then starts with the retired key). true / false force it. |
 | `sensor.localPolicy` | object | see `values.yaml` | The sensor-local policy (api RFC-040 §5.7): a read-only file the network owner writes, mounted at /etc/openctem/sensor-policy.yaml. The sensor refuses every job outside it (targets, ports, tools, job types, custom templates, interactsh, rate, kill switch) whatever the platform sends; a policy it cannot load stops it. Off by default so an upgrade keeps today's behavior (the sensor then reports local_policy "absent"); new installs should turn it on and replace the example ranges. Keys: docs/LOCAL_POLICY.md in openctemio/sensor. Needs sensor >= the release that ships the local policy (older images ignore the file). |
 | `sensor.localPolicy.existingConfigMap` | string | `""` | A pre-created ConfigMap holding sensor-policy.yaml (kept out of this release so whoever installs the platform need not own the policy). Takes precedence over policy. |

@@ -309,6 +309,9 @@ spec:
         {{- if include "openctem.signerEnabled" . }}
         {{- include "openctem.signerContainer" . | nindent 8 }}
         {{- end }}
+        {{- if include "openctem.signerPublishForSensor" . }}
+        {{- include "openctem.signerPubExporterContainer" . | nindent 8 }}
+        {{- end }}
       {{- $vols := include "openctem.apiAttachmentsVolume" . }}
       volumes:
         - name: tmp
@@ -336,6 +339,9 @@ spec:
         {{- end }}
         {{- if include "openctem.signerEnabled" . }}
         {{- include "openctem.signerVolumes" . | nindent 8 }}
+        {{- end }}
+        {{- if include "openctem.signerPublishForSensor" . }}
+        {{- include "openctem.signerPubVolumes" . | nindent 8 }}
         {{- end }}
         {{- with .Values.api.volumes }}
         {{- toYaml . | nindent 8 }}

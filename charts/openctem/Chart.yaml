@@ -37,6 +37,8 @@ annotations:
     - kind: security
       description: "sensor.networkPolicy (on by default): the sensor pod accepts no connection and reaches only DNS, the API, the bundled gateway and public addresses (no datastores, cluster ranges or cloud metadata); the PostgreSQL and Redis policies exclude the sensor"
     - kind: changed
+      description: "Bundled sensor v0.35.0"
+    - kind: changed
       description: "Default sensor resources: requests 500m CPU / 1Gi memory, limits 2 CPU / 2Gi"
 
 # This is the chart version. This version number should be incremented each time you make changes

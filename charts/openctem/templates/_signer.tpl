@@ -99,6 +99,10 @@ pod that nothing else can reach it through.
 - name: SIGNER_GENERATE_KEY
   value: "true"
 {{- end }}
+{{- if include "openctem.signerPublishForSensor" . }}
+- name: SIGNER_PUBLISH_DIR
+  value: /run/openctem-signer-pub
+{{- end }}
 {{- with .Values.api.signer.ledger.mode }}
 - name: SIGNER_LEDGER
   value: {{ . | quote }}
@@ -238,4 +242,132 @@ initContainers:
       mountPath: /etc/openctem-signer/keyset
       readOnly: true
     {{- end }}
+    {{- if include "openctem.signerPublishForSensor" . }}
+    - name: signer-pub
+      mountPath: /run/openctem-signer-pub
+    {{- end }}
+{{- end -}}
+
+{{/*
+"true" when the sensor pins this chart's own signer key (sensor.jobSigning
+.fromSigner, no root or keys given): the signer publishes its public key to
+a volume only it writes, and the exporter container copies it into the
+<api>-signer-pub ConfigMap the sensor mounts.
+*/}}
+{{- define "openctem.signerPublishForSensor" -}}
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- $js := $sensor.jobSigning | default dict -}}
+{{- if and $sensor.enabled (include "openctem.signerEnabled" .) $js.fromSigner (not $js.root) (not $js.keys) }}true{{ end -}}
+{{- end -}}
+
+{{/* The ConfigMap the exporter writes the signer's public key into. */}}
+{{- define "openctem.signerPubConfigMap" -}}
+{{- printf "%s-signer-pub" (include "openctem.apiFullname" .) -}}
+{{- end -}}
+
+{{/*
+The exporter container (API pod): copies signer.pub from the signer's
+publish volume into the <api>-signer-pub ConfigMap. It alone mounts a
+Kubernetes token (a projected volume; the pod keeps
+automountServiceAccountToken false), whose Role allows only get and patch of
+that one ConfigMap. Shell and curl only; the key is checked to be 44
+base64 characters before it is sent.
+*/}}
+{{- define "openctem.signerPubExporterContainer" -}}
+{{- $sensor := include "openctem.sensor" . | fromYaml -}}
+{{- $ex := ($sensor.jobSigning | default dict).exporter | default dict -}}
+- name: signer-pub-exporter
+  image: {{ $ex.image | quote }}
+  imagePullPolicy: IfNotPresent
+  command: ["/bin/sh", "-c"]
+  args:
+    - |
+      set -u
+      f=/run/openctem-signer-pub/signer.pub
+      t=/var/run/secrets/openctem-exporter
+      url="https://kubernetes.default.svc/api/v1/namespaces/$(cat "$t/namespace")/configmaps/$CONFIGMAP"
+      last=""
+      logged=""
+      n=0
+      while true; do
+        # Published again every 10 minutes, so an emptied ConfigMap is refilled.
+        n=$((n + 1)); if [ "$n" -ge 30 ]; then n=0; last=""; fi
+        if [ -f "$f" ]; then
+          k="$(tr -d '\n' < "$f")"
+          case "$k" in
+            *[!A-Za-z0-9+/=]*) echo "signer.pub is not a base64 key; not published" >&2 ;;
+            *)
+              if [ "${#k}" -ne 44 ]; then
+                echo "signer.pub is not a 32-byte key; not published" >&2
+              elif [ "$k" != "$last" ]; then
+                if curl -fsS -o /dev/null --max-time 20 --cacert "$t/ca.crt" \
+                  -H "Authorization: Bearer $(cat "$t/token")" \
+                  -H "Content-Type: application/merge-patch+json" \
+                  -X PATCH --data "{\"data\":{\"signer.pub\":\"$k\"}}" "$url"; then
+                  if [ "$k" != "$logged" ]; then
+                    echo "signer public key published to ConfigMap $CONFIGMAP"
+                    logged="$k"
+                  fi
+                  last="$k"
+                fi
+              fi
+              ;;
+          esac
+        fi
+        sleep 20
+      done
+  env:
+    - name: CONFIGMAP
+      value: {{ include "openctem.signerPubConfigMap" . | quote }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    privileged: false
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
+  {{- with $ex.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  volumeMounts:
+    - name: signer-pub
+      mountPath: /run/openctem-signer-pub
+      readOnly: true
+    - name: signer-pub-exporter-token
+      mountPath: /var/run/secrets/openctem-exporter
+      readOnly: true
+{{- end -}}
+
+{{/* The publish volume and the exporter's token (pod level). */}}
+{{- define "openctem.signerPubVolumes" -}}
+# The signer's public key: written by the signer only, read by the exporter.
+- name: signer-pub
+  emptyDir:
+    medium: Memory
+    sizeLimit: 1Mi
+# A short-lived token of the API's service account, mounted into the
+# exporter container only.
+- name: signer-pub-exporter-token
+  projected:
+    defaultMode: 0444
+    sources:
+      - serviceAccountToken:
+          path: token
+          expirationSeconds: 3600
+      - configMap:
+          name: kube-root-ca.crt
+          items:
+            - key: ca.crt
+              path: ca.crt
+      - downwardAPI:
+          items:
+            - path: namespace
+              fieldRef:
+                fieldPath: metadata.namespace
 {{- end -}}

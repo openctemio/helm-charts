@@ -17,6 +17,9 @@
 {{- $instance := eq ($sensor.enrollment | default "pairing") "instance" -}}
 {{- $orgToken := eq ($sensor.enrollment | default "pairing") "token" -}}
 {{- $et := $sensor.enrollmentToken | default dict -}}
+{{- $js := $sensor.jobSigning | default dict -}}
+{{- $pinValues := or $js.root $js.keys -}}
+{{- $pinSigner := include "openctem.signerPublishForSensor" . -}}
 {{- if not (has ($sensor.enrollment | default "pairing") (list "pairing" "instance" "token")) }}
 {{- fail "\n\nsensor.enrollment must be pairing, instance or token.\n" }}
 {{- end }}
@@ -107,7 +110,7 @@ spec:
       {{- include "openctem.sensorSelectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- if or (and $sensor.apiKey (not $sensor.existingSecret)) (and $lp.enabled (not $lp.existingConfigMap)) $sensor.podAnnotations }}
+      {{- if or (and $sensor.apiKey (not $sensor.existingSecret)) (and $lp.enabled (not $lp.existingConfigMap)) $sensor.podAnnotations $pinValues }}
       annotations:
         {{- if and $sensor.apiKey (not $sensor.existingSecret) }}
         checksum/credentials-secret: {{ include (print $.Template.BasePath "/sensor-secret.yaml") . | sha256sum }}
@@ -115,6 +118,10 @@ spec:
         {{- if and $lp.enabled (not $lp.existingConfigMap) }}
         # The sensor reads its policy once at start: a changed policy rolls the pod.
         checksum/local-policy: {{ include (print $.Template.BasePath "/sensor-policy-configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if $pinValues }}
+        # The sensor reads its pin once at start: a changed pin rolls the pod.
+        checksum/job-signing: {{ toJson (pick $js "root" "keys") | sha256sum }}
         {{- end }}
         {{- with $sensor.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -244,6 +251,23 @@ spec:
                   name: {{ include "openctem.sensorSecretName" (dict "context" . "sensor" $sensor) }}
                   key: {{ include "openctem.sensorSecretKey" (dict "sensor" $sensor) }}
             {{- end }}
+            {{- if $pinValues }}
+            # The job-signing pin from sensor.jobSigning (read-only file:
+            # exclusive, the keys served at pairing are not trusted next to it).
+            {{- if $js.root }}
+            - name: SENSOR_JOB_SIGNING_ROOT_FILE
+              value: /etc/openctem/job-signing/root
+            {{- end }}
+            {{- if $js.keys }}
+            - name: SENSOR_JOB_SIGNING_KEYS_FILE
+              value: /etc/openctem/job-signing/keys
+            {{- end }}
+            {{- else if $pinSigner }}
+            # The chart signer's own public key, which the signer published
+            # (read-only file: exclusive, see sensor.jobSigning.fromSigner).
+            - name: SENSOR_JOB_SIGNING_KEYS_FILE
+              value: /etc/openctem/job-signing/signer.pub
+            {{- end }}
             {{- with $sensor.caFingerprint }}
             - name: SENSOR_CA_FINGERPRINT
               value: {{ . | quote }}
@@ -346,6 +370,11 @@ spec:
               mountPath: /var/run/secrets/openctem/enrollment
               readOnly: true
             {{- end }}
+            {{- if or $pinValues $pinSigner }}
+            - name: job-signing
+              mountPath: /etc/openctem/job-signing
+              readOnly: true
+            {{- end }}
             {{- if $instance }}
             - name: instance-enrollment-token
               mountPath: /var/run/secrets/openctem/instance-enrollment
@@ -359,6 +388,23 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        {{- if $pinValues }}
+        - name: job-signing
+          configMap:
+            name: {{ include "openctem.sensorFullname" . }}-job-signing
+            defaultMode: 0444
+        {{- else if $pinSigner }}
+        # Filled by the API pod's exporter: until signer.pub is there the
+        # volume cannot be set up and the sensor does not start (it never
+        # pairs unpinned).
+        - name: job-signing
+          configMap:
+            name: {{ include "openctem.signerPubConfigMap" . }}
+            defaultMode: 0444
+            items:
+              - key: signer.pub
+                path: signer.pub
+        {{- end }}
         {{- if $instance }}
         # The instance enrollment token: readable by the sensor's group only,
         # never writable (the sensor refuses a group- or world-writable file).

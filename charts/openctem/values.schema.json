@@ -1921,6 +1921,39 @@
             }
           },
           "additionalProperties": false
+        },
+        "jobSigning": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "type": "string",
+              "pattern": "^$|^(SHA256:[0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$"
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(SHA256:[0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$"
+              }
+            },
+            "fromSigner": {
+              "type": "boolean"
+            },
+            "exporter": {
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "resources": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

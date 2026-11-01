@@ -10,7 +10,8 @@
 #    starts in shared mode (sandbox and network confinement required, the
 #    local policy loaded) and stays up: no container restart for
 #    STAY_SECONDS, and the platform records it as an instance-scope sensor
-#    that heartbeats (sensors.last_seen_at moves).
+#    that heartbeats (sensors.last_seen_at moves). Its job-signing pin is the
+#    chart signer's own key, which the API pod's exporter published.
 #    Before this chart fixed it, the sensor spent its token, then stopped
 #    ("enrolled as a shared sensor of the instance; set SENSOR_SHARED_MODE=1")
 #    and crash-looped.
@@ -138,6 +139,27 @@ if [[ -n "$last" && "$last" != "$first" ]]; then
   pass "platform lists an instance-scope sensor that heartbeats ($first -> $last)"
 else
   fail "platform lists an instance-scope sensor that heartbeats (before: '$first', after: '$last')"
+fi
+
+# 2b. The job-signing pin: the exporter copied the signer's public key into
+#     <api>-signer-pub and the sensor verifies jobs against exactly that key
+#     (its key id, SHA-256 of the raw key, is in the "Signed jobs" line).
+pub="$(kubectl -n "$ns" get configmap "$rel-openctem-api-signer-pub" -o jsonpath='{.data.signer\.pub}' 2>/dev/null || true)"
+if [[ "$pub" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+  pass "exporter published the signer's public key to the ConfigMap"
+  kid="SHA256:$(printf '%s' "$pub" | base64 -d | sha256sum | cut -d' ' -f1)"
+  if sensor_log | grep -q "Signed jobs: required.*$kid"; then
+    pass "sensor requires jobs signed by the pinned signer key ($kid)"
+  else
+    fail "sensor requires jobs signed by the pinned signer key ($kid): $(sensor_log | grep -i 'signed jobs' | tail -2)"
+  fi
+else
+  fail "exporter published the signer's public key to the ConfigMap (got '$pub')"
+fi
+if kubectl -n "$ns" logs "deploy/$rel-openctem-api" -c signer-pub-exporter 2>/dev/null | grep -q "published to ConfigMap"; then
+  pass "exporter logged the publication"
+else
+  fail "exporter logged the publication"
 fi
 
 # 3. The sensor NetworkPolicy, probe (sensor labels) against control.

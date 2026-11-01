@@ -31,6 +31,8 @@ check "sensor with its own seccomp profile (installer DaemonSet)" --set api.appE
   --set sensor.sandbox.seccompProfile=openctem --set sensor.sandbox.network=required
 check "bundled shared sensor (instance), sensor NetworkPolicy" --set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true \
   --set sensor.enrollment=instance --set sensor.sandbox.network=required --set sensor.localPolicy.enabled=true
+check "sensor pinned to an offline job-signing root" --set api.appEnv=development --set sensor.enabled=true --set sensor.allowInsecureHTTP=true \
+  --set "sensor.jobSigning.root=SHA256:$(printf 'a%.0s' {1..64})" --set api.signer.keyset.existingSecret=ks
 check "gateway caddy" --set api.appEnv=development --set gateway.mode=caddy --set gateway.host=openctem.example.com --set "gateway.trustedProxies={10.244.0.0/16}"
 check "gateway caddy, sensor gRPC by ALPN (layer4 image), NetworkPolicy" --set api.appEnv=development --set gateway.mode=caddy \
   --set gateway.host=openctem.example.com --set "gateway.trustedProxies={10.244.0.0/16}" --set gateway.caddy.image.layer4=true \

@@ -301,10 +301,16 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    # Every pod of the release except the bundled sensor (it scans hostile
+    # targets and never talks to the datastores).
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/instance: {{ .Release.Name }}
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: NotIn
+                values: [sensor]
       ports:
         - port: 5432
           protocol: TCP
@@ -326,10 +332,16 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    # Every pod of the release except the bundled sensor (it scans hostile
+    # targets and never talks to the datastores).
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/instance: {{ .Release.Name }}
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: NotIn
+                values: [sensor]
       ports:
         - port: 6379
           protocol: TCP

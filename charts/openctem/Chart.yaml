@@ -28,17 +28,21 @@ maintainers:
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "sensor.enrollment=instance sets SENSOR_SHARED_MODE=1: a sensor enrolled at instance scope stopped at start (sdk-go v0.35.0 and later) after spending its single-use token, then crash-looped"
+    - kind: security
+      description: "BREAKING for sensor.enrollment=instance: the render fails without sensor.sandbox.network=required, the sensor's seccomp profile and sensor.localPolicy.enabled=true, which shared mode requires"
+    - kind: security
+      description: "The instance enrollment token reaches the sensor as a read-only file (SENSOR_INSTANCE_ENROLLMENT_TOKEN_FILE), never the environment"
+    - kind: security
+      description: "sensor.networkPolicy (on by default): the sensor pod accepts no connection and reaches only DNS, the API, the bundled gateway and public addresses (no datastores, cluster ranges or cloud metadata); the PostgreSQL and Redis policies exclude the sensor"
     - kind: changed
-      description: "BREAKING for installs with the sensor enabled that render an http:// sensor API URL (the default in-cluster API Service): the render now fails until sensor.apiUrl is an https URL or sensor.allowInsecureHTTP=true is set (development and evaluation only)"
-    - kind: added
-      description: "sensor.pairingCode / sensor.pairingCodeExistingSecret, and a re-pair runbook in the README"
-    - kind: changed
-      description: "The sensor identity volume is kept on helm uninstall (sensor.persistence.keepOnUninstall, default true); delete it by hand to remove the identity"
+      description: "Default sensor resources: requests 500m CPU / 1Gi memory, limits 2 CPU / 2Gi"
 
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.35.1
+version: 0.36.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to

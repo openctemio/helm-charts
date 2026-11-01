@@ -270,3 +270,56 @@ jobs:
           kubectl get pods -A -o wide
           kubectl -n openctem-smoke describe pods
           kubectl -n openctem-smoke logs deploy/smoke-openctem-sensor --all-containers || true
+
+  kind-shared-sensor:
+    # The bundled sensor as a shared sensor of the instance
+    # (sensor.enrollment=instance) on a kind cluster: it enrolls, runs in
+    # shared mode (sandbox and network confinement required, local policy)
+    # and stays up heartbeating; and its NetworkPolicy refuses PostgreSQL,
+    # Redis and the Kubernetes API while the API and the internet stay
+    # reachable (tests/kind/shared-sensor.sh).
+    runs-on: ubuntu-latest
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+      KUBECTL_VERSION: v1.34.1
+      KUBECTL_SHA256: 7721f265e18709862655affba5343e85e1980639395d5754473dafaadcaa69e3
+      KIND_CLUSTER: chart-shared
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.1.3
+
+      - name: Install kind and kubectl
+        run: |
+          curl -fsSLo /tmp/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  /tmp/kind" | sha256sum -c -
+          curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  /tmp/kubectl" | sha256sum -c -
+          sudo install -m 0755 /tmp/kind /tmp/kubectl /usr/local/bin/
+
+      - name: Allow unprivileged user namespaces (per-task sandbox)
+        # Ubuntu 23.10+ restricts them through AppArmor; shared mode refuses
+        # to run without the sandbox, as it should.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Create the cluster
+        run: kind create cluster --name "$KIND_CLUSTER" --wait 120s
+
+      - name: Resolve chart dependencies
+        run: helm dependency build charts/openctem
+
+      - name: Shared sensor run
+        run: tests/kind/shared-sensor.sh
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n openctem-shared describe pods
+          kubectl -n openctem-shared logs deploy/shared-openctem-sensor --all-containers || true
+          kubectl -n openctem-shared logs job/shared-openctem-api-sensor-enrollment || true

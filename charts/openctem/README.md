@@ -706,6 +706,26 @@ API egress defaults to permissive (`networkPolicy.api.egress.allowAll=true`) so
 threat-intel / CVE / CT feeds keep working; pin it with
 `networkPolicy.api.egress.extra` when you can enumerate those endpoints.
 
+The bundled sensor has its own policy (`sensor.networkPolicy`), rendered
+whenever the sensor is enabled, with or without `networkPolicy.enabled`. The
+sensor parses responses of hostile scan targets, so its pod accepts no
+connection and may connect only to DNS (port 53), the API pods (port 8080 and
+the sensor protocol v3 port), the bundled gateway (`gateway.mode=caddy`,
+port 443) and the internet minus `sensor.networkPolicy.egress.exceptCidrs`:
+RFC 1918 and ULA ranges, CGNAT, loopback and link-local, where the cloud
+metadata service (`169.254.169.254`) answers. PostgreSQL, Redis, the console,
+the UI and other in-cluster services are therefore refused, and the
+release-wide PostgreSQL and Redis policies also exclude the sensor pods.
+
+- If your cluster's pod or service network uses public addresses, add those
+  CIDRs to `sensor.networkPolicy.egress.exceptCidrs`.
+- An external `sensor.apiUrl` on a private address (an internal load
+  balancer), a scan proxy, or the private ranges a sensor with
+  `sensor.allowPrivateTargets=1` may scan go in
+  `sensor.networkPolicy.egress.extra` (a list of NetworkPolicy egress rules).
+- The Kubernetes API server of a managed cluster may have a public address;
+  the sensor pod carries no service account token.
+
 ## Monitoring (optional)
 
 Operator alerting on the running platform: what to watch, the alert rules
@@ -902,16 +922,61 @@ and keeps it across upgrades. A post-install/post-upgrade Job
 (`<release>-openctem-api-sensor-enrollment`) registers the token with
 `bootstrap-admin sensor-token -from-env SENSOR_INSTANCE_ENROLLMENT_TOKEN`. The
 API stores only its keyed hash, valid one hour, and the first sensor that
-presents it spends it. The sensor reads the token from the Secret
-(`SENSOR_INSTANCE_ENROLLMENT_TOKEN`), pairs with its own key on first start,
-and ignores the token once its identity is in the data volume. Until the Job
-has run, the sensor's start is refused and the pod restarts.
+presents it spends it. The sensor reads the token from the Secret, mounted
+read-only as a file (`SENSOR_INSTANCE_ENROLLMENT_TOKEN_FILE`, never the
+environment), pairs with its own key on first start, and ignores the token
+once its identity is in the data volume. Until the Job has run, the sensor's
+start is refused and the pod restarts.
+
+A shared sensor runs jobs of many organizations on the platform's own
+cluster, so it runs in **shared mode** (`SENSOR_SHARED_MODE=1`, which the
+chart sets): every tool sandboxed and network-confined in its own task
+directory, only signed jobs, and the host owner's local policy required. A
+sensor enrolled at instance scope does not start without shared mode, and
+shared mode does not start without these controls, so the render fails
+unless all of them are in place:
+
+- `sensor.sandbox.network=required` (not `auto`);
+- the sensor's seccomp profile (`sensor.sandbox.seccompProfile=openctem`, the
+  default, or your own `Localhost` profile in
+  `sensor.podSecurityContext.seccompProfile`); the nodes must allow
+  unprivileged user namespaces (see `sensor.sandbox.seccompProfile`);
+- a local policy (`sensor.localPolicy.enabled=true`). The chart's default
+  policy is a placeholder that allows only `203.0.113.0/24`; for a shared
+  sensor that scans public targets, use:
+
+```yaml
+# shared-sensor.yaml
+sensor:
+  enabled: true
+  enrollment: instance
+  sandbox:
+    network: required
+  localPolicy:
+    enabled: true
+    policy: |
+      apiVersion: openctem.io/sensor-policy/v1
+      targets:
+        # No "allow": any public target a signed job names, minus "deny" and
+        # the built-in deny list (loopback, link-local, metadata, CGNAT).
+        allow_private: false
+      checks:
+        allow: [scan, validate, retest, refresh_content]
+      allow_custom_templates: false
+      allow_interactsh: false
+      rate:
+        max_rps: 100
+        max_job_seconds: 14400
+```
 
 ```bash
-helm upgrade openctem charts/openctem -n openctem -f values.yaml \
-  --set sensor.enabled=true --set sensor.enrollment=instance
+helm upgrade openctem charts/openctem -n openctem -f values.yaml -f shared-sensor.yaml
 kubectl -n openctem logs deploy/openctem-openctem-sensor   # "Enrolled: shared sensor ..."
 ```
+
+Internal and heavy scanning belong on a sensor installed on its own host: a
+kernel escape from a sensor on the platform's nodes would reach the
+platform's data.
 
 A shared sensor takes no organization's jobs until a super administrator
 turns shared sensors on (Console > System > Platform scanning). Until that is
@@ -987,6 +1052,27 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.36.0 (shared sensor mode, sensor NetworkPolicy, sensor resources)
+
+- **`sensor.enrollment=instance` now runs the sensor in shared mode** and the
+  render fails without `sensor.sandbox.network=required`, the sensor's seccomp
+  profile and `sensor.localPolicy.enabled=true` (see "As a shared sensor of
+  the instance"). Before, such a sensor spent its single-use token, then
+  stopped with "enrolled as a shared sensor of the instance; set
+  SENSOR_SHARED_MODE=1" and crash-looped. If yours did, add the values, then
+  re-enroll it: delete the token Secret `<release>-openctem-sensor-enrollment`
+  and the identity (the data or state volume), run `helm upgrade` (a new token
+  is generated and registered) and restart the sensor.
+- The instance enrollment token reaches the sensor as a read-only file
+  (`SENSOR_INSTANCE_ENROLLMENT_TOKEN_FILE`) instead of an environment variable.
+- **New `sensor.networkPolicy` (on by default)**: the sensor pod accepts no
+  connection and reaches only DNS, the API (and the bundled gateway) and
+  public addresses. A sensor whose `sensor.apiUrl` or scan targets are on
+  private addresses needs `sensor.networkPolicy.egress.extra` (see
+  "NetworkPolicy"), or `sensor.networkPolicy.enabled=false`.
+- **Default sensor resources**: requests 500m CPU / 1Gi, limits 2 CPU / 2Gi
+  (the size presets keep their own). Set `sensor.resources` to change them.
 
 ## Upgrading to 0.35.0 (sensor pairing code, kept identity volume)
 
@@ -1860,7 +1946,7 @@ description from its `# --` comment (generated with
 | `sensor.data.persistence.size` | string | `"8Gi"` | The state is tiny; the outbox is capped by sensor.outbox.maxBytes and the content cache takes most of it (the trivy DB ~1.5 GB per version). |
 | `sensor.data.persistence.storageClass` | string | `""` | Empty: the cluster's default StorageClass. |
 | `sensor.enabled` | bool | `false` | Enable the bundled co-located sensor. Disabled by default (opt-in). |
-| `sensor.enrollment` | string | `"pairing"` | How a sensor without an API key gets its identity. "pairing" (the default): an organization sensor, approved by an organization administrator under Sensors > Add sensor. "instance": a shared sensor of the instance (api RFC-100). The chart generates a single-use enrollment token into a Secret, a post-install/post-upgrade Job registers it with `bootstrap-admin sensor-token` (valid one hour), and the sensor enrolls with it (SENSOR_INSTANCE_ENROLLMENT_TOKEN) on first start, without anyone approving it. A shared sensor takes no organization's jobs until a super administrator turns shared sensors on (Console > System > Platform scanning). A sensor that is already paired keeps its identity (no forced migration); see the README. "token": an organization sensor enrolled with an organization enrollment token an administrator created under Sensors > Enrollment tokens (shown once; put it in a Secret and name it in sensor.enrollmentToken.existingSecret). The sensor joins that organization with the token's zones, grant profile and labels, at trust level New, without a per-sensor approval unless the token asks for one. Needs a sensor image that reads SENSOR_ENROLLMENT_TOKEN_FILE. |
+| `sensor.enrollment` | string | `"pairing"` | How a sensor without an API key gets its identity. "pairing" (the default): an organization sensor, approved by an organization administrator under Sensors > Add sensor. "instance": a shared sensor of the instance (api RFC-100). The chart generates a single-use enrollment token into a Secret, a post-install/post-upgrade Job registers it with `bootstrap-admin sensor-token` (valid one hour), and the sensor enrolls with it (a read-only file, SENSOR_INSTANCE_ENROLLMENT_TOKEN_FILE) on first start, without anyone approving it. It runs in shared mode (SENSOR_SHARED_MODE=1), so the render fails without sandbox.network=required, the sensor's seccomp profile and localPolicy.enabled=true. A shared sensor takes no organization's jobs until a super administrator turns shared sensors on (Console > System > Platform scanning). A sensor that is already paired keeps its identity (no forced migration); see the README. "token": an organization sensor enrolled with an organization enrollment token an administrator created under Sensors > Enrollment tokens (shown once; put it in a Secret and name it in sensor.enrollmentToken.existingSecret). The sensor joins that organization with the token's zones, grant profile and labels, at trust level New, without a per-sensor approval unless the token asks for one. Needs a sensor image that reads SENSOR_ENROLLMENT_TOKEN_FILE. |
 | `sensor.enrollmentToken.existingSecret` | string | `""` | Pre-created Secret holding the organization enrollment token (sensor.enrollment=token, required then). The chart never renders the token; it is mounted read-only as a file (SENSOR_ENROLLMENT_TOKEN_FILE), never put in the environment. |
 | `sensor.enrollmentToken.existingSecretKey` | string | `""` | Key within the secret. Empty: "token". |
 | `sensor.existingSecret` | string | `""` | Name of a pre-created Secret holding the API key. Takes precedence over apiKey; nothing secret is then rendered by Helm. |
@@ -1883,6 +1969,9 @@ description from its `# --` comment (generated with
 | `sensor.mode` | string | `"daemon"` | How the sensor runs. Only "daemon": `-daemon -enable-commands`, running the scans the platform dispatches. It authenticates with its own key (pairing, the default) or with an API key (apiKey / existingSecret). "platform" (the bootstrap-token self-registration chart <= 0.4.x ran) was removed in chart 0.9.0: no OpenCTEM API serves /api/v1/platform/register, so it never registered. |
 | `sensor.name` | string | `""` | Name the sensor proposes when it pairs (SENSOR_NAME); the administrator who approves it may change it. Empty: the sensor's Deployment name (<release>-openctem-sensor). |
 | `sensor.netRaw` | bool | `false` | Add the NET_RAW capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
+| `sensor.networkPolicy.egress.exceptCidrs` | list | see `values.yaml` | Ranges the sensor may never reach directly (the cluster's pod and service networks and the private LAN behind the nodes, CGNAT, and link-local, where the cloud metadata service 169.254.169.254 answers). Add your cluster's pod/service CIDRs here when they are public addresses. The API pods stay reachable by pod selector. |
+| `sensor.networkPolicy.egress.extra` | list | `[]` | Extra egress rules (NetworkPolicyEgressRule list), for example an external sensor.apiUrl or a scan proxy on a private address, or the private ranges an internal-scanning sensor (allowPrivateTargets) may reach. |
+| `sensor.networkPolicy.enabled` | bool | `true` | Render the sensor NetworkPolicy: no ingress at all; egress only to DNS, the API pods (and the bundled gateway with gateway.mode=caddy), and addresses outside networkPolicy.egress.exceptCidrs. |
 | `sensor.nodeSelector` | object | `{}` |  |
 | `sensor.outbox` | object | see `values.yaml` | The sensor's outbox: results kept at /var/lib/openctem/outbox until the platform accepted them. maxBytes and maxAge apply in both layouts; persistence and emptyDirSizeLimit only to storageLayout split (fsGroup to every sensor PVC). Split layout: by default it is an emptyDir, which survives a container restart but NOT a pod deletion, reschedule or upgrade: results still queued then are lost. Enable persistence for a PVC. |
 | `sensor.outbox.emptyDirSizeLimit` | string | `""` | emptyDir size limit when persistence is off (empty: none). |
@@ -1902,7 +1991,7 @@ description from its `# --` comment (generated with
 | `sensor.podSecurityContext` | object | see `values.yaml` | Pod security context. The sensor image runs as uid/gid 999 (the single-tool -nuclei/-trivy/-semgrep/-betterleaks images use 1001: set runAsUser/runAsGroup/fsGroup to 1001 for them). runAsNonRoot needs a numeric runAsUser because the image's USER is a name. Keep fsGroupChangePolicy OnRootMismatch: the kubelet then sets the group of a volume's files only while the volume's root lacks it (a new volume). With the default, Always, every mount makes each file group-readable, and the sensor refuses an identity key its group can read: a paired sensor would not start after its pod is replaced. |
 | `sensor.region` | string | `"default"` | SENSOR_REGION reported by the sensor. |
 | `sensor.replicaCount` | int | `1` |  |
-| `sensor.resources` | object | `{}` |  |
+| `sensor.resources` | object | `{"limits":{"cpu":"2","memory":"2Gi"},"requests":{"cpu":"500m","memory":"1Gi"}}` | Requests and limits of the sensor pod (its scanners run in it). The default keeps a runaway scan from starving the platform on the same nodes; the values-small/medium/large presets size it to their tier. |
 | `sensor.sandbox` | object | see `values.yaml` | Per-task network confinement (OpenCTEM RFC-060): each tool runs in its own network namespace, and its traffic leaves only through the task's egress forwarder, which admits only the task's scope. |
 | `sensor.sandbox.installProfile` | bool | `true` | With seccompProfile openctem: install the profile with a DaemonSet (root, no capabilities, read-only root filesystem, writes only the kubelet's seccomp/openctem directory). false: install it yourself at <kubelet root>/seccomp/openctem/<the file name the Deployment names>. |
 | `sensor.sandbox.installerImage` | string | see `values.yaml` | Image of the installer: it needs sh, cp, chmod, mv and sleep. The sensor images from v0.18.0 have no shell, so the default is busybox, pinned by digest. Empty: the sensor image (releases before v0.18.0). |

@@ -28,9 +28,12 @@ job=(-s templates/sensor-enrollment.yaml)
 dep=(-s templates/sensor-deployment.yaml)
 api=(-s templates/api-deployment.yaml)
 
-# 1. Defaults: the Job passes -feed-relay, the sensor keeps its own default.
+# 1. Defaults: no -feed-relay until the appVersion knows it (opt in with
+#    feedRelay.newInstallRelay=true); the sensor keeps its own default.
 out="$(render "${inst[@]}" "${job[@]}")"
-expect "default: Job passes -feed-relay" '- "-feed-relay"' "$out"
+reject "default: Job passes no -feed-relay" '-feed-relay' "$out"
+out="$(render "${inst[@]}" --set feedRelay.newInstallRelay=true "${job[@]}")"
+expect "newInstallRelay=true: Job passes -feed-relay" '- "-feed-relay"' "$out"
 out="$(render "${inst[@]}" "${dep[@]}")"
 reject "default: SENSOR_FEED_RELAY unset (sensor default)" "name: SENSOR_FEED_RELAY" "$out"
 

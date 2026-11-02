@@ -197,6 +197,9 @@ pairingCodeExistingSecretKey: ""
 allowInsecureHTTP: false
 persistence:
   keepOnUninstall: true
+feedRelay:
+  enabled: true
+  origins: []
 tools: ""
 keyAutoRenew: ""
 verbose: false

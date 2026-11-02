@@ -1462,8 +1462,11 @@ extraManifests: []
 feedRelay:
   # -- Pass -feed-relay on the instance-enrollment Job. Also needs
   #    sensor.feedRelay.enabled=true (a sensor that never relays cannot be the
-  #    relay). false: new installs stay direct, like existing ones.
-  newInstallRelay: true
+  #    relay). false: new installs stay direct, like existing ones. Off by
+  #    default until the chart's appVersion ships `-feed-relay` (older images
+  #    fail the enrollment Job on the unknown flag); the chart turns it on
+  #    with that appVersion bump.
+  newInstallRelay: false
 
 sensor:
   # -- Enable the bundled co-located sensor. Disabled by default (opt-in).

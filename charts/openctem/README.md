@@ -1099,14 +1099,14 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 
 - New values: `sensor.feedRelay.enabled` (default `true`),
   `sensor.feedRelay.origins` (default `[]`) and `feedRelay.newInstallRelay`
-  (default `true`). See "Feed relay" below.
-- **Existing installs stay direct.** The sensor-enrollment Job now passes
-  `-feed-relay`, but the flag is ignored when the feed delivery setting
-  already exists, and the feed relay migration writes `direct` on every
-  database that already has users. Running it on every upgrade is safe.
-- The flag needs an OpenCTEM image whose `bootstrap-admin` knows
-  `-feed-relay`. With an older `api.image.tag`, set
-  `feedRelay.newInstallRelay=false` or the Job fails on the unknown flag.
+  (default `false`). See "Feed relay" below.
+- `feedRelay.newInstallRelay` stays off until the chart's `appVersion` ships an
+  OpenCTEM image whose `bootstrap-admin` knows `-feed-relay` (an older image
+  fails the enrollment Job on the unknown flag); that chart release turns it
+  on. Set it to `true` yourself only with such an `api.image.tag`.
+- **Existing installs stay direct** either way: the flag is ignored when the
+  feed delivery setting already exists, and the feed relay migration writes
+  `direct` on every database that already has users.
 
 ### Feed relay
 
@@ -1965,7 +1965,7 @@ description from its `# --` comment (generated with
 | `database.port` | int | `5432` |  |
 | `database.tls.ca` | object | `{"existingSecret":"","key":"ca.crt"}` | CA that signed the PostgreSQL server certificate, for api.migrations.sslMode verify-ca / verify-full with a private CA. A Secret in the release namespace; mounted read-only into the API, the migration and bootstrap Jobs, with PGSSLROOTCERT pointing at it. |
 | `extraManifests` | list | `[]` |  |
-| `feedRelay.newInstallRelay` | bool | `true` | Pass -feed-relay on the instance-enrollment Job. Also needs sensor.feedRelay.enabled=true (a sensor that never relays cannot be the relay). false: new installs stay direct, like existing ones. |
+| `feedRelay.newInstallRelay` | bool | `false` | Pass -feed-relay on the instance-enrollment Job. Also needs sensor.feedRelay.enabled=true (a sensor that never relays cannot be the relay). false: new installs stay direct, like existing ones. Off by default until the chart's appVersion ships `-feed-relay` (older images fail the enrollment Job on the unknown flag); the chart turns it on with that appVersion bump. |
 | `fullnameOverride` | string | `""` |  |
 | `gateway.caddy` | object | see `values.yaml` | ------------------------------------------------------------------------- |
 | `gateway.caddy.frontProxies` | list | `[]` | CIDRs of proxies IN FRONT of Caddy whose X-Forwarded-For Caddy believes (tls.mode=http behind an L7 proxy). Empty: none. |

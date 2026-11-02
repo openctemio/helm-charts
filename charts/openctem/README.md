@@ -1126,8 +1126,12 @@ extra environment.
   `sensor.feedRelay.enabled=true`.
 - `sensor.feedRelay.origins` adds https origins (a mirror) to the official
   ones (the `openctemio/vulnfeed-bundles` and release feed GitHub release
-  URLs). The same list is rendered into the signer's `SIGNER_FEED_ORIGINS`;
-  without it the signer refuses the origin. The sensor NetworkPolicy already
+  URLs). An origin is the full download prefix and is matched exactly (for a
+  vulnerability feed mirror: its `VULNFEED_BASE_URL` plus `/latest/download`).
+  The signer's `SIGNER_FEED_ORIGINS` is rendered as the official origins plus
+  this list (a set `SIGNER_FEED_ORIGINS` replaces the signer's built-in
+  official list, so the chart always includes it); without it the signer
+  refuses the origin. The sensor NetworkPolicy already
   allows HTTPS to the public internet; a mirror on a private address needs a
   rule in `sensor.networkPolicy.egress.extra`.
 - Threat model: the relay only issues GET requests to allowlisted origins and
@@ -2055,7 +2059,7 @@ description from its `# --` comment (generated with
 | `sensor.extraVolumeMounts` | list | `[]` |  |
 | `sensor.extraVolumes` | list | `[]` | Extra volumes and mounts for the sensor container (for example a host directory holding the kill switch file). |
 | `sensor.feedRelay.enabled` | bool | `true` | Let this sensor relay the platform's signed feed files (RFC-142): the API makes no outbound feed requests; a shared sensor with a pinned job-signing key downloads the files from allowlisted https origins (GET only) and uploads them to the API. true (default) leaves SENSOR_FEED_RELAY unset (the sensor default, on when it can). false renders SENSOR_FEED_RELAY=0: this sensor never relays (host policy, narrow only). The platform does not fall back to direct by itself: with false, turn feed delivery to direct in the console, or a relay install gets no feed updates. |
-| `sensor.feedRelay.origins` | list | `[]` | Extra https origins (a mirror) on top of the official feed origins (SENSOR_FEED_RELAY_ORIGINS). Scheme and host only, for example https://mirror.example.com. The chart also puts them in the job signer's allowlist (SIGNER_FEED_ORIGINS); do not set that variable in api.signer.extraEnv as well. The sensor NetworkPolicy already allows HTTPS to the public internet; a mirror on a private address needs a rule in sensor.networkPolicy.egress.extra. |
+| `sensor.feedRelay.origins` | list | `[]` | Extra https origins (a mirror) on top of the official feed origins (SENSOR_FEED_RELAY_ORIGINS). The full https download prefix, matched exactly: for a vulnerability feed mirror, the mirror's VULNFEED_BASE_URL plus /latest/download, for example https://mirror.example.com/vulnfeed-bundles/releases/latest/download. The chart renders the job signer's allowlist (SIGNER_FEED_ORIGINS) as the official origins plus these; do not set that variable in api.signer.extraEnv as well. The sensor NetworkPolicy already allows HTTPS to the public internet; a mirror on a private address needs a rule in sensor.networkPolicy.egress.extra. |
 | `sensor.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |

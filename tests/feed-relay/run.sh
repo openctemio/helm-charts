@@ -47,11 +47,11 @@ out="$(render "${inst[@]}" --set sensor.feedRelay.enabled=false "${job[@]}")"
 reject "enabled=false: no -feed-relay" '-feed-relay' "$out"
 
 # 4. Origins reach the sensor and the signer; off drops both.
-orig=(--set 'sensor.feedRelay.origins[0]=https://mirror.example.com' --set 'sensor.feedRelay.origins[1]=https://m2.example.com:8443')
+orig=(--set 'sensor.feedRelay.origins[0]=https://mirror.example.com/vulnfeed/latest/download' --set 'sensor.feedRelay.origins[1]=https://m2.example.com:8443')
 out="$(render "${inst[@]}" "${orig[@]}" "${dep[@]}")"
-if grep -A1 'name: SENSOR_FEED_RELAY_ORIGINS' <<<"$out" | grep -q 'value: "https://mirror.example.com,https://m2.example.com:8443"'; then pass "origins: sensor env"; else fail "origins: sensor env"; fi
+if grep -A1 'name: SENSOR_FEED_RELAY_ORIGINS' <<<"$out" | grep -q 'value: "https://mirror.example.com/vulnfeed/latest/download,https://m2.example.com:8443"'; then pass "origins: sensor env"; else fail "origins: sensor env"; fi
 out="$(render "${inst[@]}" "${orig[@]}" "${api[@]}")"
-if grep -A1 'name: SIGNER_FEED_ORIGINS' <<<"$out" | grep -q 'value: "https://mirror.example.com,https://m2.example.com:8443"'; then pass "origins: signer allowlist"; else fail "origins: signer allowlist"; fi
+if grep -A1 'name: SIGNER_FEED_ORIGINS' <<<"$out" | grep -q 'value: "https://github.com/openctemio/vulnfeed-bundles/releases/latest/download,https://github.com/openctemio/openctem/releases/latest/download,https://mirror.example.com/vulnfeed/latest/download,https://m2.example.com:8443"'; then pass "origins: signer allowlist keeps the official origins"; else fail "origins: signer allowlist"; fi
 out="$(render "${inst[@]}" "${dep[@]}")"
 reject "no origins: no SENSOR_FEED_RELAY_ORIGINS" "SENSOR_FEED_RELAY_ORIGINS" "$out"
 out="$(render "${inst[@]}" "${api[@]}")"
@@ -61,7 +61,8 @@ reject "relay off: origins not added to the signer" "SIGNER_FEED_ORIGINS" "$out"
 
 # 5. Refusals.
 must_fail "http origin" "is not an https origin" "${inst[@]}" --set 'sensor.feedRelay.origins[0]=http://mirror.example.com'
-must_fail "origin with a path" "is not an https origin" "${inst[@]}" --set 'sensor.feedRelay.origins[0]=https://mirror.example.com/feeds'
+must_fail "origin with a query" "is not an https origin" "${inst[@]}" --set 'sensor.feedRelay.origins[0]=https://mirror.example.com/feeds?x=1'
+must_fail "origin with dot segments" "is not an https origin" "${inst[@]}" --set 'sensor.feedRelay.origins[0]=https://mirror.example.com/a/../b'
 must_fail "comma inside one origin" "is not an https origin" "${inst[@]}" --set 'sensor.feedRelay.origins[0]=https://a.example.com\,https://b.example.com'
 must_fail "signer allowlist set twice" "SIGNER_FEED_ORIGINS is set in api.signer.extraEnv" "${inst[@]}" "${orig[@]}" \
   --set 'api.signer.extraEnv[0].name=SIGNER_FEED_ORIGINS' --set 'api.signer.extraEnv[0].value=https://x.example.com'

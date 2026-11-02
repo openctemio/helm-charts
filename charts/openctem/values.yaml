@@ -1587,9 +1587,12 @@ sensor:
     #    install gets no feed updates.
     enabled: true
     # -- Extra https origins (a mirror) on top of the official feed origins
-    #    (SENSOR_FEED_RELAY_ORIGINS). Scheme and host only, for example
-    #    https://mirror.example.com. The chart also puts them in the job
-    #    signer's allowlist (SIGNER_FEED_ORIGINS); do not set that variable in
+    #    (SENSOR_FEED_RELAY_ORIGINS). The full https download prefix, matched
+    #    exactly: for a vulnerability feed mirror, the mirror's VULNFEED_BASE_URL
+    #    plus /latest/download, for example
+    #    https://mirror.example.com/vulnfeed-bundles/releases/latest/download.
+    #    The chart renders the job signer's allowlist (SIGNER_FEED_ORIGINS) as
+    #    the official origins plus these; do not set that variable in
     #    api.signer.extraEnv as well. The sensor NetworkPolicy already allows
     #    HTTPS to the public internet; a mirror on a private address needs a
     #    rule in sensor.networkPolicy.egress.extra.

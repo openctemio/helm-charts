@@ -125,7 +125,7 @@ pod that nothing else can reach it through.
 {{- fail "\n\nSIGNER_FEED_ORIGINS is set in api.signer.extraEnv and sensor.feedRelay.origins is not empty: the chart sets the signer allowlist from sensor.feedRelay.origins. Remove one of them.\n" }}
 {{- end }}
 - name: SIGNER_FEED_ORIGINS
-  value: {{ . | quote }}
+  value: {{ printf "%s,%s" (include "openctem.feedRelayOfficialOrigins" $) . | quote }}
 {{- end }}
 {{- with .Values.api.signer.extraEnv }}
 {{ toYaml . }}

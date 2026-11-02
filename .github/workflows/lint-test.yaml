@@ -93,6 +93,12 @@ jobs:
           # the sensor's SENSOR_INSTANCE_ENROLLMENT_TOKEN, and the refusals.
           tests/sensor-enrollment/run.sh
 
+      - name: Feed relay toggles (render checks)
+        run: |
+          # -feed-relay on the enrollment Job, SENSOR_FEED_RELAY, and the
+          # extra origins in the sensor and the signer allowlist.
+          tests/feed-relay/run.sh
+
       - name: Bundled sensor job-signing pin (render checks)
         run: |
           # sensor.jobSigning: the chart signer's key exported to a ConfigMap

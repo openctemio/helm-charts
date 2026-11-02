@@ -87,6 +87,11 @@ spec:
             - "SENSOR_INSTANCE_ENROLLMENT_TOKEN"
             - {{ printf "-name=%s" ($sensor.name | default (include "openctem.sensorFullname" .)) | replace "$" "$$" | quote }}
             - {{ printf "-reason=bundled sensor of the Helm release %s" .Release.Name | quote }}
+            {{- if include "openctem.feedRelayNewInstall" . }}
+            # New install: feeds are relayed by this sensor. Ignored when the
+            # feed delivery setting already exists (an upgrade stays direct).
+            - "-feed-relay"
+            {{- end }}
           env:
             {{- include "openctem.bootstrapDbEnv" . | nindent 12 }}
             # The token is stored as the keyed hash the API checks: the API's

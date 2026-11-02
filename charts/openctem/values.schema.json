@@ -1954,6 +1954,21 @@
             }
           },
           "additionalProperties": false
+        },
+        "feedRelay": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "origins": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true
@@ -2263,6 +2278,15 @@
           "type": "array"
         }
       }
+    },
+    "feedRelay": {
+      "type": "object",
+      "properties": {
+        "newInstallRelay": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

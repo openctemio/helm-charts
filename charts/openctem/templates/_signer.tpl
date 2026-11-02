@@ -22,6 +22,15 @@ into the signer container alone.
 {{- toJson $n -}}
 {{- end -}}
 
+{{/* Names of the variables in api.signer.extraEnv (as a JSON array). */}}
+{{- define "openctem.signerExtraEnvKeys" -}}
+{{- $n := list -}}
+{{- range $e := .Values.api.signer.extraEnv -}}
+{{- if kindIs "map" $e -}}{{- $n = append $n (toString ($e.name | default "")) -}}{{- end -}}
+{{- end -}}
+{{- toJson $n -}}
+{{- end -}}
+
 {{/* "true" when the key is generated on first start into a volume. */}}
 {{- define "openctem.signerGenerateKey" -}}
 {{- $s := .Values.api.signer -}}
@@ -110,6 +119,13 @@ pod that nothing else can reach it through.
 {{- if .Values.api.signer.keyset.existingSecret }}
 - name: SIGNER_KEYSET_FILE
   value: /etc/openctem-signer/keyset/{{ .Values.api.signer.keyset.key }}
+{{- end }}
+{{- with include "openctem.feedRelayOrigins" . }}
+{{- if has "SIGNER_FEED_ORIGINS" (include "openctem.signerExtraEnvKeys" $ | fromJsonArray) }}
+{{- fail "\n\nSIGNER_FEED_ORIGINS is set in api.signer.extraEnv and sensor.feedRelay.origins is not empty: the chart sets the signer allowlist from sensor.feedRelay.origins. Remove one of them.\n" }}
+{{- end }}
+- name: SIGNER_FEED_ORIGINS
+  value: {{ . | quote }}
 {{- end }}
 {{- with .Values.api.signer.extraEnv }}
 {{ toYaml . }}

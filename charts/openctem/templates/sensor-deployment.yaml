@@ -335,6 +335,19 @@ spec:
             - name: SENSOR_KILL_SWITCH_FILE
               value: {{ . | quote }}
             {{- end }}
+            {{- $frOn := (hasKey ($sensor.feedRelay | default dict) "enabled" | ternary $sensor.feedRelay.enabled true) }}
+            {{- if not $frOn }}
+            # sensor.feedRelay.enabled=false: this sensor never relays feeds
+            # (host policy; the platform does not fall back to direct itself).
+            - name: SENSOR_FEED_RELAY
+              value: "0"
+            {{- end }}
+            {{- with include "openctem.feedRelayOrigins" . }}
+            # Extra https origins on top of the official feed origins; also in
+            # the signer allowlist (SIGNER_FEED_ORIGINS).
+            - name: SENSOR_FEED_RELAY_ORIGINS
+              value: {{ . | quote }}
+            {{- end }}
             {{- with $sensor.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

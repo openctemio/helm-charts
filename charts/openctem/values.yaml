@@ -1452,6 +1452,19 @@ extraManifests: []
 #
 # NOTE for chart developers: templates/_helpers.tpl "openctem.sensorDefaults"
 # must list exactly these defaults (tests/sensor-migration/run.sh checks it).
+# Feed relay for NEW installs (RFC-142). The sensor-enrollment Job passes
+# `-feed-relay` to `bootstrap-admin sensor-token`, so a new database starts
+# with feed delivery = relay and the bundled sensor (sensor.enrollment=instance)
+# that enrolls with the token is the relay. Existing databases are unchanged:
+# the flag is ignored when the feed delivery setting already exists (the feed
+# relay migration wrote direct on every database that has users). Needs an
+# OpenCTEM image whose bootstrap-admin knows `-feed-relay`.
+feedRelay:
+  # -- Pass -feed-relay on the instance-enrollment Job. Also needs
+  #    sensor.feedRelay.enabled=true (a sensor that never relays cannot be the
+  #    relay). false: new installs stay direct, like existing ones.
+  newInstallRelay: true
+
 sensor:
   # -- Enable the bundled co-located sensor. Disabled by default (opt-in).
   enabled: false
@@ -1562,6 +1575,25 @@ sensor:
     #    it by hand to remove the identity. Has no effect on a claim set with
     #    existingClaim (the chart does not own it).
     keepOnUninstall: true
+  feedRelay:
+    # -- Let this sensor relay the platform's signed feed files (RFC-142):
+    #    the API makes no outbound feed requests; a shared sensor with a pinned
+    #    job-signing key downloads the files from allowlisted https origins
+    #    (GET only) and uploads them to the API. true (default) leaves
+    #    SENSOR_FEED_RELAY unset (the sensor default, on when it can). false
+    #    renders SENSOR_FEED_RELAY=0: this sensor never relays (host policy,
+    #    narrow only). The platform does not fall back to direct by itself:
+    #    with false, turn feed delivery to direct in the console, or a relay
+    #    install gets no feed updates.
+    enabled: true
+    # -- Extra https origins (a mirror) on top of the official feed origins
+    #    (SENSOR_FEED_RELAY_ORIGINS). Scheme and host only, for example
+    #    https://mirror.example.com. The chart also puts them in the job
+    #    signer's allowlist (SIGNER_FEED_ORIGINS); do not set that variable in
+    #    api.signer.extraEnv as well. The sensor NetworkPolicy already allows
+    #    HTTPS to the public internet; a mirror on a private address needs a
+    #    rule in sensor.networkPolicy.egress.extra.
+    origins: []
   instanceEnrollment:
     # -- Pre-created Secret holding the token (octe_ and 49 letters or
     #    digits) instead of the generated one, for GitOps.

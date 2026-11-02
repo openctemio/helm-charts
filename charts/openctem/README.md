@@ -1095,6 +1095,46 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Upgrading to 0.38.0 (feed relay toggles)
+
+- New values: `sensor.feedRelay.enabled` (default `true`),
+  `sensor.feedRelay.origins` (default `[]`) and `feedRelay.newInstallRelay`
+  (default `true`). See "Feed relay" below.
+- **Existing installs stay direct.** The sensor-enrollment Job now passes
+  `-feed-relay`, but the flag is ignored when the feed delivery setting
+  already exists, and the feed relay migration writes `direct` on every
+  database that already has users. Running it on every upgrade is safe.
+- The flag needs an OpenCTEM image whose `bootstrap-admin` knows
+  `-feed-relay`. With an older `api.image.tag`, set
+  `feedRelay.newInstallRelay=false` or the Job fails on the unknown flag.
+
+### Feed relay
+
+With feed relay the API makes no outbound requests for feeds. A platform-owned
+(instance-scope, shared) sensor downloads the signed feed files and uploads
+them to the API; the spool lives in PostgreSQL, so the API needs no volume or
+extra environment.
+
+- The bundled sensor relays by default when it is a shared sensor
+  (`sensor.enrollment=instance`) with a pinned job-signing key. `sensor.feedRelay.enabled=false`
+  renders `SENSOR_FEED_RELAY=0`: this sensor never relays. The platform never
+  falls back to direct by itself, so turn feed delivery to direct in the
+  console as well.
+- `feedRelay.newInstallRelay=true` makes a new database start in relay mode:
+  the Job runs `bootstrap-admin sensor-token ... -feed-relay` and the bundled
+  sensor that enrolls with the token becomes the relay. It is only passed when
+  `sensor.feedRelay.enabled=true`.
+- `sensor.feedRelay.origins` adds https origins (a mirror) to the official
+  ones (the `openctemio/vulnfeed-bundles` and release feed GitHub release
+  URLs). The same list is rendered into the signer's `SIGNER_FEED_ORIGINS`;
+  without it the signer refuses the origin. The sensor NetworkPolicy already
+  allows HTTPS to the public internet; a mirror on a private address needs a
+  rule in `sensor.networkPolicy.egress.extra`.
+- Threat model: the relay only issues GET requests to allowlisted origins and
+  uploads signed files; the API verifies signatures. Turning it off is host
+  policy and can only narrow. Extra origins widen the allowlist and therefore
+  must be in the signer's list too.
+
 ## Upgrading to 0.37.0 (the bundled sensor pins the job-signing key)
 
 - **Production renders with `sensor.enabled=true` fail without
@@ -1921,6 +1961,7 @@ description from its `# --` comment (generated with
 | `database.port` | int | `5432` |  |
 | `database.tls.ca` | object | `{"existingSecret":"","key":"ca.crt"}` | CA that signed the PostgreSQL server certificate, for api.migrations.sslMode verify-ca / verify-full with a private CA. A Secret in the release namespace; mounted read-only into the API, the migration and bootstrap Jobs, with PGSSLROOTCERT pointing at it. |
 | `extraManifests` | list | `[]` |  |
+| `feedRelay.newInstallRelay` | bool | `true` | Pass -feed-relay on the instance-enrollment Job. Also needs sensor.feedRelay.enabled=true (a sensor that never relays cannot be the relay). false: new installs stay direct, like existing ones. |
 | `fullnameOverride` | string | `""` |  |
 | `gateway.caddy` | object | see `values.yaml` | ------------------------------------------------------------------------- |
 | `gateway.caddy.frontProxies` | list | `[]` | CIDRs of proxies IN FRONT of Caddy whose X-Forwarded-For Caddy believes (tls.mode=http behind an L7 proxy). Empty: none. |
@@ -2013,6 +2054,8 @@ description from its `# --` comment (generated with
 | `sensor.extraEnv` | list | `[]` |  |
 | `sensor.extraVolumeMounts` | list | `[]` |  |
 | `sensor.extraVolumes` | list | `[]` | Extra volumes and mounts for the sensor container (for example a host directory holding the kill switch file). |
+| `sensor.feedRelay.enabled` | bool | `true` | Let this sensor relay the platform's signed feed files (RFC-142): the API makes no outbound feed requests; a shared sensor with a pinned job-signing key downloads the files from allowlisted https origins (GET only) and uploads them to the API. true (default) leaves SENSOR_FEED_RELAY unset (the sensor default, on when it can). false renders SENSOR_FEED_RELAY=0: this sensor never relays (host policy, narrow only). The platform does not fall back to direct by itself: with false, turn feed delivery to direct in the console, or a relay install gets no feed updates. |
+| `sensor.feedRelay.origins` | list | `[]` | Extra https origins (a mirror) on top of the official feed origins (SENSOR_FEED_RELAY_ORIGINS). Scheme and host only, for example https://mirror.example.com. The chart also puts them in the job signer's allowlist (SIGNER_FEED_ORIGINS); do not set that variable in api.signer.extraEnv as well. The sensor NetworkPolicy already allows HTTPS to the public internet; a mirror on a private address needs a rule in sensor.networkPolicy.egress.extra. |
 | `sensor.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |

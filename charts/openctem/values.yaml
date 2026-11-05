@@ -1495,7 +1495,7 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.37.0"
+    tag: "v0.38.3"
     # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
     # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
     digest: ""
@@ -1832,9 +1832,15 @@ sensor:
   #    own network namespace, and its traffic leaves only through the task's
   #    egress forwarder, which admits only the task's scope.
   sandbox:
-    # -- auto: confine when the node allows it, else run unconfined and
-    #    report it; required: refuse to run a task unconfined; off: never.
-    network: auto
+    # -- The tool sandbox (SENSOR_SANDBOX): required (default): the sensor
+    #    refuses to start unless every control is enforced; auto: enforce what
+    #    the node supports and log the rest; off: plain child processes.
+    mode: required
+    # -- required (default): refuse to run a task unconfined, so a node that
+    #    cannot confine fails loudly; auto: confine when the node allows it,
+    #    else run unconfined and report it (the escape hatch, with mode auto,
+    #    for nodes where the profile cannot be installed); off: never.
+    network: required
     # -- openctem (default): the sensor's own profile (the runtime's default
     #    plus clone/unshare of new namespaces), installed on the nodes by a
     #    DaemonSet (installProfile) and used as a Localhost profile, so each

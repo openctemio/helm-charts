@@ -1784,6 +1784,9 @@
         "sandbox": {
           "type": "object",
           "properties": {
+            "mode": {
+              "type": "string"
+            },
             "network": {
               "type": "string"
             },

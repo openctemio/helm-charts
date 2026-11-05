@@ -52,8 +52,11 @@
 {{- fail "\n\nsensor.data.persistence needs sensor.replicaCount=1: the data volume is a ReadWriteOnce volume of one sensor process, and it holds one sensor's identity (replicas sharing a key are flagged as a cloned identity). Run one release per sensor, or set sensor.data.persistence.enabled=false for a multi-replica Deployment with an API key (then key auto-renewal stays off).\n" }}
 {{- end }}
 {{- $sandbox := $sensor.sandbox | default dict -}}
-{{- if not (has ($sandbox.network | default "auto") (list "auto" "required" "off")) }}
+{{- if not (has ($sandbox.network | default "required") (list "auto" "required" "off")) }}
 {{- fail "\n\nsensor.sandbox.network must be auto, required or off.\n" }}
+{{- end }}
+{{- if not (has ($sandbox.mode | default "required") (list "auto" "required" "off")) }}
+{{- fail "\n\nsensor.sandbox.mode must be auto, required or off.\n" }}
 {{- end }}
 {{- if not (has ($sandbox.seccompProfile | default "runtime-default") (list "runtime-default" "openctem")) }}
 {{- fail "\n\nsensor.sandbox.seccompProfile must be runtime-default or openctem.\n" }}
@@ -61,7 +64,7 @@
 {{- $ownSeccomp := eq $sandbox.seccompProfile "openctem" -}}
 {{- $userSeccomp := ((($sensor.podSecurityContext | default dict).seccompProfile | default dict).type | default "RuntimeDefault") -}}
 {{- if and (eq $sandbox.network "required") (not $ownSeccomp) (eq $userSeccomp "RuntimeDefault") }}
-{{- fail "\n\nsensor.sandbox.network=required cannot work under the runtime's default seccomp profile, which blocks the namespaces confinement needs: set sensor.sandbox.seccompProfile=openctem (or your own Localhost profile in sensor.podSecurityContext.seccompProfile).\n" }}
+{{- fail "\n\nsensor.sandbox.network=required cannot work under the runtime's default seccomp profile, which blocks the namespaces confinement needs: set sensor.sandbox.seccompProfile=openctem (or your own Localhost profile in sensor.podSecurityContext.seccompProfile), or, where the profile cannot be installed, accept unconfined tools with sensor.sandbox.network=auto and sensor.sandbox.mode=auto.\n" }}
 {{- end }}
 {{- if and (eq $userSeccomp "Unconfined") }}
 {{- fail "\n\nsensor.podSecurityContext.seccompProfile Unconfined is refused: use sensor.sandbox.seccompProfile=openctem for confinement.\n" }}
@@ -73,7 +76,10 @@
        and a local policy. Refuse the render here, before the single-use
        enrollment token is spent by a pod that can only crash-loop. */ -}}
 {{- if $instance }}
-{{- if ne ($sandbox.network | default "auto") "required" }}
+{{- if ne ($sandbox.mode | default "required") "required" }}
+{{- fail "\n\nsensor.enrollment=instance runs a shared sensor (SENSOR_SHARED_MODE=1), which refuses to start unless the tool sandbox is required: set sensor.sandbox.mode=required.\n" }}
+{{- end }}
+{{- if ne ($sandbox.network | default "required") "required" }}
 {{- fail "\n\nsensor.enrollment=instance runs a shared sensor (SENSOR_SHARED_MODE=1), which refuses to start unless every tool runs sandboxed and network-confined: set sensor.sandbox.network=required.\n" }}
 {{- end }}
 {{- if and (not $ownSeccomp) (ne $userSeccomp "Localhost") }}
@@ -228,8 +234,6 @@ spec:
             # An identity enrolled at instance scope does not start without it.
             - name: SENSOR_SHARED_MODE
               value: "1"
-            - name: SENSOR_SANDBOX
-              value: required
             {{- end }}
             {{- if $orgToken }}
             # sensor.enrollment=token: an organization enrollment token, read
@@ -293,9 +297,13 @@ spec:
             - name: SENSOR_WORKSPACE_DIR
               value: /var/lib/openctem/workspaces
             {{- end }}
-            # Per-task network confinement (RFC-060).
+            # The tool sandbox and per-task network confinement (RFC-060):
+            # required by default, so a node that cannot confine tasks fails
+            # loudly instead of running tools unconfined.
+            - name: SENSOR_SANDBOX
+              value: {{ $sandbox.mode | default "required" | quote }}
             - name: SENSOR_SANDBOX_NETWORK
-              value: {{ $sandbox.network | default "auto" | quote }}
+              value: {{ $sandbox.network | default "required" | quote }}
             # The home directory stays the image's (read-only): it holds the
             # baked nuclei-templates release. Tools write their configuration
             # and cache under /tmp instead.

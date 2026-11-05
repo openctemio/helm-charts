@@ -23,7 +23,7 @@ expect "runAsUser 999 (the default image's user)" "runAsUser: 999" "$out"
 expect "fsGroup 999" "fsGroup: 999" "$out"
 expect "fsGroup only on a new volume (identity stays 0600)" "fsGroupChangePolicy: OnRootMismatch" "$out"
 expect "seccomp: the sensor's own Localhost profile by default" "type: Localhost" "$out"
-expect "seccomp RuntimeDefault when asked" "type: RuntimeDefault" "$(render --set sensor.sandbox.seccompProfile=runtime-default)"
+expect "seccomp RuntimeDefault when asked" "type: RuntimeDefault" "$(render --set sensor.sandbox.seccompProfile=runtime-default --set sensor.sandbox.network=auto --set sensor.sandbox.mode=auto)"
 expect "no privilege escalation" "allowPrivilegeEscalation: false" "$out"
 expect "read-only root filesystem" "readOnlyRootFilesystem: true" "$out"
 expect "drop ALL capabilities" "- ALL" "$out"
@@ -98,11 +98,18 @@ expect "extra mount" "mountPath: /run/owner" "$out"
 
 # 8. Per-task network confinement (RFC-060) and the sensor seccomp profile.
 out="$(render)"
-expect "confinement auto by default" 'value: "auto"' "$out"
+expect "confinement required by default (fails loudly, decision D7)" "$(printf 'name: SENSOR_SANDBOX_NETWORK\n              value: "required"')" "$out"
+expect "tool sandbox required by default" "$(printf 'name: SENSOR_SANDBOX\n              value: "required"')" "$out"
+reject "no silent degrade by default" 'value: "auto"' "$out"
+esc="$(render --set sensor.sandbox.network=auto --set sensor.sandbox.mode=auto)"
+expect "escape hatch: network auto" "$(printf 'name: SENSOR_SANDBOX_NETWORK\n              value: "auto"')" "$esc"
+expect "escape hatch: mode auto" "$(printf 'name: SENSOR_SANDBOX\n              value: "auto"')" "$esc"
+if out2="$(render --set sensor.sandbox.mode=maybe)"; then fail "unknown sandbox.mode fails the render"; else expect "unknown sandbox.mode fails the render" "must be auto, required or off" "$out2"; fi
+out="$(render)"
 expect "Localhost profile by default" "type: Localhost" "$out"
 expect "installer by default" "sensor-seccomp" "$(renderAll)"
-reject "runtime-default: no Localhost profile" "type: Localhost" "$(render --set sensor.sandbox.seccompProfile=runtime-default)"
-reject "runtime-default: no installer" "sensor-seccomp" "$(renderAll --set sensor.sandbox.seccompProfile=runtime-default)"
+reject "runtime-default: no Localhost profile" "type: Localhost" "$(render --set sensor.sandbox.seccompProfile=runtime-default --set sensor.sandbox.network=auto --set sensor.sandbox.mode=auto)"
+reject "runtime-default: no installer" "sensor-seccomp" "$(renderAll --set sensor.sandbox.seccompProfile=runtime-default --set sensor.sandbox.network=auto --set sensor.sandbox.mode=auto)"
 out="$(renderAll --set sensor.sandbox.seccompProfile=openctem --set sensor.sandbox.network=required)"
 expect "Localhost profile" "type: Localhost" "$out"
 expect "profile named by digest" "localhostProfile: openctem/sensor-" "$out"
@@ -119,10 +126,10 @@ out="$(renderAll --set sensor.sandbox.seccompProfile=openctem --set sensor.sandb
 reject "installProfile=false: no installer" "kind: DaemonSet" "$out"
 expect "installProfile=false: still Localhost" "type: Localhost" "$out"
 expect "required under the sensor's own profile renders" "type: Localhost" "$(render --set sensor.sandbox.network=required)"
-if out="$(render --set sensor.sandbox.network=required --set sensor.sandbox.seccompProfile=runtime-default)"; then
-  fail "required under the runtime default profile fails the render"
+if out="$(render --set sensor.sandbox.seccompProfile=runtime-default)"; then
+  fail "required (the default) under the runtime default profile fails the render"
 else
-  expect "required under the runtime default profile fails the render" "cannot work under the runtime's default seccomp profile" "$out"
+  expect "required (the default) under the runtime default profile fails the render" "cannot work under the runtime's default seccomp profile" "$out"
 fi
 if out="$(render --set sensor.podSecurityContext.seccompProfile.type=Unconfined)"; then
   fail "Unconfined seccomp fails the render"

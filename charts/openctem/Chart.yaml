@@ -29,7 +29,7 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: security
-      description: "BREAKING: the bundled sensor now requires its tool sandbox and per-task network confinement by default (sensor.sandbox.mode and sensor.sandbox.network default to required, were auto), so a node that cannot confine tasks fails loudly instead of running tools unconfined. Set both to auto to keep the old behaviour"
+      description: "BREAKING: the bundled sensor now requires its tool sandbox and per-task network confinement by default (sensor.sandbox.mode and sensor.sandbox.network default to required, were auto), so a node that cannot confine tasks fails loudly instead of running tools unconfined. Set both to auto to keep the old behaviour. The bundled sensor moves to v0.38.3"
     - kind: changed
       description: "appVersion v0.19.1 and the bundled sensor v0.37.0 (CTIS 2.0); the API gets ADMIN_PUBLIC_URL (admin.publicUrl, else derived from admin.site) so console security keys work"
     - kind: security

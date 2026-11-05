@@ -3,6 +3,52 @@ entries:
   openctem:
   - annotations:
       artifacthub.io/changes: |
+        - kind: security
+          description: "BREAKING: the bundled sensor now requires its tool sandbox and per-task network confinement by default (sensor.sandbox.mode and sensor.sandbox.network default to required, were auto), so a node that cannot confine tasks fails loudly instead of running tools unconfined. Set both to auto to keep the old behaviour. The bundled sensor moves to v0.38.3"
+        - kind: changed
+          description: "appVersion v0.19.1 and the bundled sensor v0.37.0 (CTIS 2.0); the API gets ADMIN_PUBLIC_URL (admin.publicUrl, else derived from admin.site) so console security keys work"
+        - kind: security
+          description: "The bundled sensor pins the job-signing key from a read-only file (sensor.jobSigning): the offline root or keys from values, else the chart signer's own public key, which a dedicated exporter container (the only one with a Kubernetes token, limited to get/patch of one ConfigMap) copies into <api>-signer-pub"
+        - kind: security
+          description: "BREAKING for production: api.appEnv=production with sensor.enabled=true fails to render without sensor.jobSigning.root, and sensor.jobSigning.root needs api.signer.keyset.existingSecret"
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
+    appVersion: v0.19.1
+    created: "2026-11-05T17:27:59.661775336Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.5.6
+    - condition: redis.enabled
+      name: redis
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 25.3.2
+    description: 'OpenCTEM (Continuous Threat Exposure Management) platform: the API,
+      the web console, database migrations and an optional co-located scanning sensor,
+      plus optional PostgreSQL and Redis for evaluation.'
+    digest: 0f526ba2963a7221b4b7b3597094fd4ad69456a94fadbc8ceb1ff42a8ca7a49b
+    home: https://openctem.io
+    icon: https://docs.openctem.io/brand/app-icon.svg
+    keywords:
+    - security
+    - ctem
+    - exposure-management
+    - vulnerability-management
+    maintainers:
+    - email: info@openctem.io
+      name: OpenCTEM
+      url: https://openctem.io
+    name: openctem
+    sources:
+    - https://github.com/openctemio/helm-charts
+    - https://github.com/openctemio/openctem
+    type: application
+    urls:
+    - https://github.com/openctemio/helm-charts/releases/download/openctem-0.40.0/openctem-0.40.0.tgz
+    version: 0.40.0
+  - annotations:
+      artifacthub.io/changes: |
         - kind: changed
           description: "appVersion v0.19.1 and the bundled sensor v0.37.0 (CTIS 2.0); the API gets ADMIN_PUBLIC_URL (admin.publicUrl, else derived from admin.site) so console security keys work"
         - kind: security
@@ -1658,4 +1704,4 @@ entries:
     urls:
     - https://github.com/openctemio/helm-charts/releases/download/openctem-0.1.1/openctem-0.1.1.tgz
     version: 0.1.1
-generated: "2026-11-05T01:22:12.99587722Z"
+generated: "2026-11-05T17:27:59.661921226Z"

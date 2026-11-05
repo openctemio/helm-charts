@@ -28,6 +28,8 @@ maintainers:
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: security
+      description: "BREAKING: the bundled sensor now requires its tool sandbox and per-task network confinement by default (sensor.sandbox.mode and sensor.sandbox.network default to required, were auto), so a node that cannot confine tasks fails loudly instead of running tools unconfined. Set both to auto to keep the old behaviour"
     - kind: changed
       description: "appVersion v0.19.1 and the bundled sensor v0.37.0 (CTIS 2.0); the API gets ADMIN_PUBLIC_URL (admin.publicUrl, else derived from admin.site) so console security keys work"
     - kind: security
@@ -38,7 +40,7 @@ annotations:
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.39.0
+version: 0.40.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to

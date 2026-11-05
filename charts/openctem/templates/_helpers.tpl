@@ -288,7 +288,8 @@ securityContext:
       - ALL
 netRaw: false
 sandbox:
-  network: auto
+  mode: required
+  network: required
   seccompProfile: openctem
   installProfile: true
   kubeletRoot: /var/lib/kubelet

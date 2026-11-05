@@ -56,7 +56,7 @@ expect "instance: token Secret mounted read-only, group-readable only" "defaultM
 # sdk-go v0.35.0+: an identity enrolled at instance scope refuses to start
 # without shared mode, which needs the sandbox and network confinement.
 if grep -A1 'name: SENSOR_SHARED_MODE' <<<"$dep" | grep -q 'value: "1"'; then pass "instance: SENSOR_SHARED_MODE=1"; else fail "instance: SENSOR_SHARED_MODE=1"; fi
-if grep -A1 'name: SENSOR_SANDBOX$' <<<"$dep" | grep -q 'value: required'; then pass "instance: SENSOR_SANDBOX=required"; else fail "instance: SENSOR_SANDBOX=required"; fi
+if grep -A1 'name: SENSOR_SANDBOX$' <<<"$dep" | grep -q 'value: "\?required'; then pass "instance: SENSOR_SANDBOX=required"; else fail "instance: SENSOR_SANDBOX=required"; fi
 if grep -A1 'name: SENSOR_SANDBOX_NETWORK' <<<"$dep" | grep -q 'value: "required"'; then pass "instance: SENSOR_SANDBOX_NETWORK=required"; else fail "instance: SENSOR_SANDBOX_NETWORK=required"; fi
 expect "instance: local policy mounted" "name: SENSOR_LOCAL_POLICY" "$dep"
 expect "instance: the sensor's own seccomp profile" "type: Localhost" "$dep"
@@ -86,8 +86,10 @@ must_fail "instance with an API key Secret" "leave sensor.apiKey and sensor.exis
 must_fail "unknown enrollment" "enrollment" --set sensor.enrollment=bogus
 # A shared sensor that could only crash-loop (and spend its single-use token)
 # is refused at render time.
-must_fail "instance without network confinement required" "set sensor.sandbox.network=required" \
-  --set sensor.enrollment=instance --set sensor.localPolicy.enabled=true
+must_fail "instance with network confinement off" "set sensor.sandbox.network=required" \
+  --set sensor.enrollment=instance --set sensor.sandbox.network=off --set sensor.localPolicy.enabled=true
+must_fail "instance with the tool sandbox on auto" "set sensor.sandbox.mode=required" \
+  --set sensor.enrollment=instance --set sensor.sandbox.mode=auto --set sensor.localPolicy.enabled=true
 must_fail "instance with sandbox auto" "set sensor.sandbox.network=required" \
   --set sensor.enrollment=instance --set sensor.sandbox.network=auto --set sensor.localPolicy.enabled=true
 must_fail "instance with the runtime default seccomp profile" "seccomp" \

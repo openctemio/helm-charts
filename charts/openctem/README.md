@@ -1089,12 +1089,52 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.localPolicy.killSwitchFile` | empty | `SENSOR_KILL_SWITCH_FILE`: while the file exists the sensor runs no job and heartbeats "paused by local policy". Put it on a volume the host owner can write (`sensor.extraVolumes` / `extraVolumeMounts`); in-cluster, `kill_switch: true` in the policy plus a rollout does the same. |
 | `sensor.podSecurityContext` | `runAsNonRoot`, uid/gid/fsGroup `999`, `fsGroupChangePolicy: OnRootMismatch`, seccomp `RuntimeDefault` | The default image runs as uid/gid 999. The single-tool images (`-nuclei`, `-trivy`, `-semgrep`, `-opengrep`, `-betterleaks`) use 1001: set `runAsUser`, `runAsGroup` and `fsGroup` to 1001 for them. `runAsNonRoot` needs the numeric `runAsUser` (the image's `USER` is a name). Keep `OnRootMismatch`: with `Always` the kubelet makes every file group-readable at each mount, and the sensor refuses an identity key its group can read, so a paired sensor would not start after its pod is replaced. |
 | `sensor.securityContext` | no privilege escalation, read-only root filesystem, `drop: [ALL]` | Container hardening (RFC-040 §5.10). Set a key to `null` to drop it. |
-| `sensor.sandbox.network` | `auto` | Per-task network confinement (RFC-060, `SENSOR_SANDBOX_NETWORK`): `auto` confines when the node allows it, `required` refuses to run a task unconfined, `off` never confines. |
+| `sensor.sandbox.mode` | `required` | The tool sandbox (`SENSOR_SANDBOX`): `required` refuses to start unless every control is enforced, `auto` enforces what the node supports, `off` runs plain child processes. |
+| `sensor.sandbox.network` | `required` | Per-task network confinement (RFC-060, `SENSOR_SANDBOX_NETWORK`): `required` (default from 0.40.0) refuses to run a task unconfined, `auto` confines when the node allows it and otherwise runs unconfined, `off` never confines. |
 | `sensor.sandbox.seccompProfile` | `openctem` | `openctem` (default from chart 0.23.0): run the sensor under its own seccomp profile (the runtime default plus new namespaces), installed on the nodes by a DaemonSet (`sensor.sandbox.installProfile`, `kubeletRoot`, `installerImage`), so tasks run network-confined. `runtime-default`: the runtime's profile; tasks run unconfined. |
 | `sensor.verbose` | `false` | Adds `-verbose` to the sensor's arguments (more detail in its log). |
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.40.0 (the sensor sandbox is required)
+
+Before 0.40.0 the bundled sensor ran with `SENSOR_SANDBOX_NETWORK=auto`: on a
+node that could not confine tool tasks (no seccomp profile on the node, user
+namespaces refused) it logged a warning and ran the tools with the pod's full
+network. From 0.40.0 both settings default to `required`, so that case stops
+the sensor (or refuses the task) with a clear error instead of degrading.
+
+- New value `sensor.sandbox.mode` (`SENSOR_SANDBOX`): `required` by default;
+  `auto` enforces what the node supports and logs the rest; `off` runs plain
+  child processes. `sensor.sandbox.network` (`SENSOR_SANDBOX_NETWORK`) now
+  defaults to `required` as well.
+- How the profile reaches the nodes (unchanged, and the simplest secure
+  option): the chart's installer DaemonSet (`sensor.sandbox.installProfile:
+  true`) copies the sensor's own seccomp profile to
+  `<kubelet root>/seccomp/openctem/sensor-<digest>.json` (root, no
+  capabilities, read-only root filesystem, one hostPath). The profile is the
+  sensor release's `docker/seccomp/sensor.json`, copied into the chart at
+  release time and named by its digest, so a new sensor version brings a new
+  file and the old one keeps serving pods that are still rolling. Where a
+  hostPath is refused, install the file yourself and set `installProfile:
+  false`.
+- Before upgrading, check each node: the DaemonSet runs on it, and user
+  namespaces are allowed (on Ubuntu 23.10 and later,
+  `kernel.apparmor_restrict_unprivileged_userns=0` or an AppArmor profile that
+  permits them). Look for the sensor's `runtime.sandbox_network` check on the
+  Sensors page after the upgrade.
+- Escape hatch for nodes that cannot be fixed (a restricted namespace, a
+  managed pool): `sensor.sandbox.mode: auto` and `sensor.sandbox.network:
+  auto`, with `sensor.sandbox.seccompProfile: runtime-default` if the
+  DaemonSet cannot run. Tasks then run unconfined and the platform keeps jobs
+  that need confinement for other sensors. A render with
+  `seccompProfile: runtime-default` and the new defaults fails and names this
+  fix. `sensor.enrollment: instance` (a shared sensor) accepts only `required`.
+- The sensor's NetworkPolicy (`sensor.networkPolicy`, on by default since
+  0.36.0) is unchanged: no ingress, egress only to DNS, the API (and the
+  gateway) and the internet minus `sensor.networkPolicy.egress.exceptCidrs`;
+  list scan targets in private ranges under `sensor.networkPolicy.egress.extra`.
 
 ## Upgrading to 0.39.0 (appVersion v0.19.1, console origin)
 
@@ -1658,7 +1698,7 @@ How it works:
 3. Make sure the node also allows unprivileged user namespaces. On Ubuntu 23.10 and later, `kernel.apparmor_restrict_unprivileged_userns=1` takes every capability away inside a new user namespace for AppArmor-unconfined processes, so confinement cannot set it up. Either use a runtime that applies its default AppArmor profile, or allow user namespaces for the sensor.
 4. Check the result: the sensor reports whether each task ran confined (`network_enforced`), and its setup checklist on the Sensors page shows the `runtime.sandbox_network` check with the fix for the cause it detected.
 
-Where a DaemonSet with a hostPath cannot run (a restricted namespace, a managed node pool), set `sensor.sandbox.seccompProfile: runtime-default`: the sensor then runs unconfined (`auto`) and the platform keeps confinement-needing jobs for other sensors.
+Where a DaemonSet with a hostPath cannot run (a restricted namespace, a managed node pool), set `sensor.sandbox.seccompProfile: runtime-default`, `sensor.sandbox.network: auto` and `sensor.sandbox.mode: auto` (the defaults are `required`, which refuses to run there): the sensor then runs unconfined and the platform keeps confinement-needing jobs for other sensors.
 
 `sensor.localPolicy` adds the sensor-local policy (off by default, so nothing
 changes until you enable it). Enable it with ranges of your own: see the
@@ -2129,7 +2169,8 @@ description from its `# --` comment (generated with
 | `sensor.sandbox.installProfile` | bool | `true` | With seccompProfile openctem: install the profile with a DaemonSet (root, no capabilities, read-only root filesystem, writes only the kubelet's seccomp/openctem directory). false: install it yourself at <kubelet root>/seccomp/openctem/<the file name the Deployment names>. |
 | `sensor.sandbox.installerImage` | string | see `values.yaml` | Image of the installer: it needs sh, cp, chmod, mv and sleep. The sensor images from v0.18.0 have no shell, so the default is busybox, pinned by digest. Empty: the sensor image (releases before v0.18.0). |
 | `sensor.sandbox.kubeletRoot` | string | `"/var/lib/kubelet"` | The kubelet's root directory on the nodes. |
-| `sensor.sandbox.network` | string | `"auto"` | auto: confine when the node allows it, else run unconfined and report it; required: refuse to run a task unconfined; off: never. |
+| `sensor.sandbox.mode` | string | `"required"` | The tool sandbox (SENSOR_SANDBOX): required (default): the sensor refuses to start unless every control is enforced; auto: enforce what the node supports and log the rest; off: plain child processes. |
+| `sensor.sandbox.network` | string | `"required"` | required (default): refuse to run a task unconfined, so a node that cannot confine fails loudly; auto: confine when the node allows it, else run unconfined and report it (the escape hatch, with mode auto, for nodes where the profile cannot be installed); off: never. |
 | `sensor.sandbox.seccompProfile` | string | `"openctem"` | openctem (default): the sensor's own profile (the runtime's default plus clone/unshare of new namespaces), installed on the nodes by a DaemonSet (installProfile) and used as a Localhost profile, so each task runs network-confined and the sensor can take jobs that need it (a web scope). The node must also allow unprivileged user namespaces (on Ubuntu 23.10+, kernel.apparmor_restrict_unprivileged_userns=0 or an AppArmor profile that permits them). runtime-default: the container runtime's seccomp profile, which blocks the namespaces confinement needs (tasks then run unconfined under auto, and fail under required); use it where a DaemonSet with a hostPath cannot run. |
 | `sensor.scanRoots` | string | `""` | SENSOR_SCAN_ROOTS: ':'-separated directories that filesystem targets of dispatched code scans (betterleaks, semgrep, trivy fs) must resolve inside. Empty: the sensor's working directory (/scan in the image). |
 | `sensor.securityContext` | object | see `values.yaml` | Container security context: no privilege escalation, a read-only root filesystem (the directories the sensor and its tools write are emptyDirs or the state/content/outbox volumes: see writableDirs) and no capabilities (netRaw adds NET_RAW back). |

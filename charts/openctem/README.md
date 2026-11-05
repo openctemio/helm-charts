@@ -39,7 +39,8 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.23.4 | v0.9.6 | same |
 | 0.23.5 – 0.28.0 | v0.9.7 | same |
 | 0.29.0 – 0.31.0 | v0.10.1 | same, plus `ghcr.io/openctemio/openctem-console` (chart 0.28.0 and later) |
-| 0.32.0 and later | v0.12.0 | same |
+| 0.32.0 – 0.38.0 | v0.12.0 | same |
+| 0.39.0 and later | v0.19.1 | same |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).
@@ -1062,7 +1063,7 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | Value | Default | Meaning |
 |---|---|---|
 | `sensor.mode` | `daemon` | The only mode: the sensor runs the scans the platform dispatches. The chart passes no mode flag: from sensor v0.21.0 the daemon taking platform commands is the sensor's default mode. `platform` (bootstrap-token self-registration) was removed in 0.9.0 and fails the render: no OpenCTEM API serves it. |
-| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.35.0` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. From v0.23.1 a job that carries an organization's identification (User-Agent and headers, such as a bug-bounty program's) sends it on every HTTP request, and the Tenable.sc connector is its own image (`ghcr.io/openctemio/connector-tenable`). The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). opengrep, semgrep, trivy and betterleaks run from the single-tool images (`<version>-opengrep` from v0.22.0, `-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
+| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.37.0` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. From v0.23.1 a job that carries an organization's identification (User-Agent and headers, such as a bug-bounty program's) sends it on every HTTP request, and the Tenable.sc connector is its own image (`ghcr.io/openctemio/connector-tenable`). The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). opengrep, semgrep, trivy and betterleaks run from the single-tool images (`<version>-opengrep` from v0.22.0, `-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
 | `sensor.name` | empty | `SENSOR_NAME`: the name the sensor proposes when it pairs (the approving administrator may change it). Empty: the Deployment name, `<release>-openctem-sensor`. |
 | `sensor.caFingerprint` / `sensor.platformKey` | empty | Pairing pins from the platform's pairing instructions (public values): `SENSOR_CA_FINGERPRINT`, the SHA-256 of the platform CA the sensor must see in the TLS chain (needs an `https` `sensor.apiUrl` with a host name), and `SENSOR_PLATFORM_KEY`, the thumbprint of the platform's pairing key. |
 | `sensor.pairingCode` / `sensor.pairingCodeExistingSecret` / `.pairingCodeExistingSecretKey` | empty / empty / `pairing-code` | `SENSOR_PAIRING_CODE`: a single-use, 10-minute code from Sensors > Add sensor > Create a pairing code (or Re-pair... on a sensor). Not a secret, but prefer `--set`. The Secret alternative is read as an environment variable. See "Pair with a code from the console". |
@@ -1094,6 +1095,23 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.netRaw` | `false` | Adds the `NET_RAW` capability (naabu SYN scans, ICMP). Off: port scans use TCP connect. |
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
+
+## Upgrading to 0.39.0 (appVersion v0.19.1, console origin)
+
+- `appVersion` moves from v0.12.0 to v0.19.1 and the bundled sensor from v0.35.0
+  to v0.37.0 (the first sensors below v0.36.0 send CTIS 1.x, which the platform
+  no longer accepts). Read the OpenCTEM release notes between the two versions
+  before upgrading; migrations run in the usual pre-upgrade Job.
+- New value `admin.publicUrl` and a derived `ADMIN_PUBLIC_URL` on the API: the
+  console's public origin, which console security keys and passkeys are bound
+  to. Empty derives it from `admin.site`: `https://<admin.site.host>` in host
+  mode, or the gateway host on `admin.site.port` in port mode with
+  `gateway.mode=caddy`. A name set in `api.extraEnv` wins. Without a derivable
+  origin the API uses the origin of `APP_URL`. Changing the origin makes
+  registered keys unusable (sign in with TOTP or a recovery code and register
+  again).
+- `tests/versions/check-published.sh` now warns when `appVersion` is not the
+  newest platform release.
 
 ## Upgrading to 0.38.0 (feed relay toggles)
 
@@ -1773,6 +1791,7 @@ description from its `# --` comment (generated with
 | `admin.listener.bindPodIP` | bool | `true` | Bind the pod IP (a private address, as the API requires). Set false for IPv6-only pods: the listener then binds every interface with ADMIN_LISTEN_ALLOW_ALL_INTERFACES=true; enable networkPolicy so only the console pods reach it. |
 | `admin.listener.enabled` | bool | `true` | Serve the console API on its own listener in the API pod (ADMIN_LISTEN_ADDR); the main port then answers 404 for /api/v1/admin. The console reaches it through the <api>-admin Service (ADMIN_API_URL). |
 | `admin.listener.port` | int | `8081` | Port of the console listener (plain HTTP, cluster-internal only). |
+| `admin.publicUrl` | string | `""` | Public origin of the console (ADMIN_PUBLIC_URL): the origin console security keys and passkeys are registered for. Empty: derived from admin.site (https://<admin.site.host> in host mode; the gateway host on admin.site.port in port mode with gateway.mode=caddy); with neither, the API uses the origin of APP_URL. Changing it makes registered keys unusable. A name you already set in api.extraEnv wins. |
 | `admin.site.host` | string | `""` | The console's own DNS name, for mode=host (example: admin.example.com). |
 | `admin.site.mode` | string | `"port"` | How the console is reached: host: its own DNS name (admin.site.host, for example admin.example.com) on the gateway's port 443. RECOMMENDED for production: a different host is a different origin for the browser (the strongest isolation) and needs no extra port. port: a second port of gateway.host (admin.site.port) behind a ClusterIP Service (kubectl port-forward). Different ports are NOT a security control: browsers share cookies across ports of one host, so use it for evaluation or a private network. off: no console site (the console is not published). Only the bundled Caddy (gateway.mode=caddy) serves it; for ingress or httpRoute use console.ingress with mode=host. |
 | `admin.site.port` | int | `8443` | Port of the console site in port mode. |
@@ -2063,7 +2082,7 @@ description from its `# --` comment (generated with
 | `sensor.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
-| `sensor.image.tag` | string | `"v0.35.0"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
+| `sensor.image.tag` | string | `"v0.37.0"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
 | `sensor.instanceEnrollment.existingSecret` | string | `""` | Pre-created Secret holding the token (octe_ and 49 letters or digits) instead of the generated one, for GitOps. |
 | `sensor.instanceEnrollment.existingSecretKey` | string | `""` | Key within the secret. Empty: "token". |
 | `sensor.jobSigning.exporter.image` | string | see `values.yaml` | Image of the exporter: it needs sh and curl. |

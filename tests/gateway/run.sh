@@ -430,6 +430,17 @@ gwnp="$(awk '/name: t-openctem-gateway-allow-ingress/,/^---/' <<<"$out")"
 expect "netpol: gateway console port open" "port: 8443" "$gwnp"
 refuse "console: allow-list entries are CIDRs" "allowedCidrs" "${CAD[@]}" --set 'admin.allowedCidrs={office}'
 
+# ADMIN_PUBLIC_URL (the console's security-key origin) is derived like APP_URL.
+apidep() { only api-deployment.yaml "$@"; }
+expect "console origin: port mode, gateway host on admin.site.port" 'name: ADMIN_PUBLIC_URL
+              value: https://ctem.example.com:8443' "$(apidep "${CAD[@]}")"
+expect "console origin: host mode" 'name: ADMIN_PUBLIC_URL
+              value: https://admin.example.com' "$(apidep "${CAD[@]}" --set admin.site.mode=host --set admin.site.host=admin.example.com)"
+expect "console origin: admin.publicUrl wins" 'name: ADMIN_PUBLIC_URL
+              value: https://console.example.org' "$(apidep "${CAD[@]}" --set admin.publicUrl=https://console.example.org/)"
+reject "console origin: api.extraEnv wins" 'value: https://ctem.example.com:8443' "$(apidep "${CAD[@]}" --set 'api.extraEnv[0].name=ADMIN_PUBLIC_URL' --set 'api.extraEnv[0].value=https://x.example.net')"
+reject "console origin: none without a gateway or host" "ADMIN_PUBLIC_URL" "$(apidep "${DEV[@]}")"
+
 echo
 if [ "$fails" -gt 0 ]; then
   echo "$fails check(s) failed"

@@ -206,6 +206,25 @@ API Deployment, which every render includes.
 {{- end }}
 
 {{/*
+The console's public origin (ADMIN_PUBLIC_URL, the origin console security keys
+are registered for). admin.publicUrl wins; else admin.site.host (mode=host) as
+https://<host>; else, with the bundled Caddy in port mode, the gateway's host
+on admin.site.port. Empty when none applies (the API then falls back to the
+origin of APP_URL).
+*/}}
+{{- define "openctem.adminPublicUrl" -}}
+{{- $site := .Values.admin.site -}}
+{{- if .Values.admin.publicUrl -}}
+{{- .Values.admin.publicUrl | trimSuffix "/" -}}
+{{- else if and (eq (toString $site.mode) "host") $site.host -}}
+{{- printf "https://%s" $site.host -}}
+{{- else if and (eq (toString $site.mode) "port") (eq (include "openctem.gatewayMode" .) "caddy") (include "openctem.gatewayPublicUrl" .) -}}
+{{- $u := urlParse (include "openctem.gatewayPublicUrl" .) -}}
+{{- printf "%s://%s:%v" $u.scheme (index $u "host" | splitList ":" | first) $site.port -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Fail the render on a gateway configuration that cannot work. Called from the
 API Deployment, which every render includes.
 */}}
@@ -271,6 +290,10 @@ behind the per-component ingresses).
 {{- $out = append $out (dict "name" $name "value" $url) -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+{{- $admin := include "openctem.adminPublicUrl" . -}}
+{{- if and $admin (not (has "ADMIN_PUBLIC_URL" $have)) -}}
+{{- $out = append $out (dict "name" "ADMIN_PUBLIC_URL" "value" $admin) -}}
 {{- end -}}
 {{- if $out -}}
 {{- toYaml $out -}}

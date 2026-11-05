@@ -1997,6 +1997,10 @@
             }
           }
         },
+        "publicUrl": {
+          "type": "string",
+          "pattern": "^(https?://.+)?$"
+        },
         "allowedCidrs": {
           "type": "array",
           "minItems": 1,

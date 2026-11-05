@@ -57,6 +57,16 @@ check() { # what repo tag
 check "appVersion (API, web, migrations images)" "$PLATFORM_REPO" "$app"
 check "sensor.image.tag" "$SENSOR_REPO" "$sensor"
 
+# Newest platform release. The release workflow of openctemio/openctem opens
+# the chart PR that bumps appVersion, but only when its RELEASE_TOKEN secret is
+# set; without it the bump is silently skipped and the chart drifts (it stayed
+# on v0.12.0 through v0.19.x). A warning, never an error: a chart may hold back
+# on purpose, but the annotation makes the drift visible on every chart PR.
+newest_app="$(git ls-remote --tags --refs "$PLATFORM_REPO" 2>/dev/null | sed -nE 's#.*refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+)$#\1#p' | sort -V | tail -1)"
+if [[ -n "$app" && -n "$newest_app" && "$app" != "$newest_app" ]]; then
+  echo "::warning::appVersion $app is not the newest platform release $newest_app: bump Chart.yaml appVersion (and the chart version), or check the RELEASE_TOKEN secret of the openctemio/openctem release workflow that opens this PR"
+fi
+
 # Newest sensor release, from the tags (vX.Y.Z only).
 newest="$(git ls-remote --tags --refs "$SENSOR_REPO" 2>/dev/null | sed -nE 's#.*refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+)$#\1#p' | sort -V | tail -1)"
 level=warning

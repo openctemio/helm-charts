@@ -28,6 +28,8 @@ maintainers:
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion v0.19.1 and the bundled sensor v0.37.0 (CTIS 2.0); the API gets ADMIN_PUBLIC_URL (admin.publicUrl, else derived from admin.site) so console security keys work"
     - kind: security
       description: "The bundled sensor pins the job-signing key from a read-only file (sensor.jobSigning): the offline root or keys from values, else the chart signer's own public key, which a dedicated exporter container (the only one with a Kubernetes token, limited to get/patch of one ConfigMap) copies into <api>-signer-pub"
     - kind: security
@@ -36,13 +38,13 @@ annotations:
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.38.0
+version: 0.39.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
-appVersion: "v0.12.0"
+appVersion: "v0.19.1"
 
 # NOTE: the bundled Bitnami Postgres/Redis subcharts below are for DEV / EVAL
 # ONLY. Production must use external managed datastores (postgresql.enabled=false,

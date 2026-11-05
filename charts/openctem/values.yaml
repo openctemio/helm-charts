@@ -1251,6 +1251,13 @@ admin:
   # root of its own origin (no /admin path). Never publish the console through
   # a public tunnel without a zero-trust (identity-aware) proxy in front.
   # The platform identity provider's redirect URI is <console origin>/login/callback.
+  # -- Public origin of the console (ADMIN_PUBLIC_URL): the origin console
+  # security keys and passkeys are registered for. Empty: derived from
+  # admin.site (https://<admin.site.host> in host mode; the gateway host on
+  # admin.site.port in port mode with gateway.mode=caddy); with neither, the
+  # API uses the origin of APP_URL. Changing it makes registered keys unusable.
+  # A name you already set in api.extraEnv wins.
+  publicUrl: ""
   site:
     # -- How the console is reached:
     #   host: its own DNS name (admin.site.host, for example
@@ -1488,7 +1495,7 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.35.0"
+    tag: "v0.37.0"
     # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
     # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
     digest: ""

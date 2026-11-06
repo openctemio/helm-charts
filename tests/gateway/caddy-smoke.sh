@@ -5,7 +5,8 @@
 # named like the chart's API and UI Services, and checks the routing over real
 # HTTPS (TLS mode `internal`) and plain HTTP (TLS mode `http`). With the
 # layer4 image (the chart's default gateway image; BUILD_L4=1 builds it from
-# openctem api/deploy/gateway/Dockerfile at the UPSTREAM commit, L4_IMAGE
+# openctem server/deploy/gateway/Dockerfile (api/ before the backend directory
+# rename) at the UPSTREAM commit, L4_IMAGE
 # names another), it checks the sensor ALPN routing
 # (gateway.caddy.sensorGateway=alpn): a ClientHello offering openctem-sensor/3
 # reaches the API's mTLS port behind a PROXY v2 header, everything else is
@@ -236,12 +237,15 @@ check "files: /metrics -> 404" " 404" "${r[@]}" "$base/metrics"
 if [ "${SKIP_L4:-}" != 1 ]; then
   # The chart's default gateway image (published with every OpenCTEM release)
   # carries the layer4 module. BUILD_L4=1 builds it from openctem
-  # api/deploy/gateway at the UPSTREAM commit instead; L4_IMAGE names another.
+  # server/deploy/gateway (api/ before the rename) at the UPSTREAM commit instead; L4_IMAGE names another.
   l4="${L4_IMAGE:-}"
   if [ -z "$l4" ] && [ "${BUILD_L4:-}" = 1 ]; then
     commit="$(sed -n 's/^commit=//p' "$chart/files/gateway/UPSTREAM")"
     l4="octem-gw-l4-smoke:$commit"
-    docker build -q -t "$l4" "${PLATFORM_REPO:-https://github.com/openctemio/openctem.git}#$commit:api/deploy/gateway" >/dev/null
+    repo="${PLATFORM_REPO:-https://github.com/openctemio/openctem.git}"
+    # server/deploy/gateway since the backend directory rename, api/ before it.
+    docker build -q -t "$l4" "$repo#$commit:server/deploy/gateway" >/dev/null 2>&1 \
+      || docker build -q -t "$l4" "$repo#$commit:api/deploy/gateway" >/dev/null
   fi
   if [ -z "$l4" ]; then
     l4="$(helm template t "$chart" "${common[@]}" -s templates/gateway-caddy.yaml | sed -n 's/^ *image: "\(.*\)"$/\1/p' | head -1)"

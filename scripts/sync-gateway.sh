@@ -2,7 +2,8 @@
 # sync-gateway.sh: copy the OpenCTEM gateway files into the chart.
 #
 # The bundled Caddy (gateway.mode=caddy) runs the docker-compose gateway's
-# files from openctemio/openctem `api/deploy/gateway/`, byte for byte:
+# files from openctemio/openctem `server/deploy/gateway/` (`api/deploy/gateway/`
+# in commits before the backend directory rename), byte for byte:
 #   Caddyfile     routing, access-log redaction, headers
 #   planes.caddy  the API planes, GENERATED there from the API's plane table
 #                 (OpenCTEM RFC-041); the chart's Ingress/HTTPRoute path lists
@@ -37,16 +38,20 @@ trap 'rm -rf "$tmp"' EXIT
 git -C "$tmp" init -q
 git -C "$tmp" fetch -q --depth 1 "$PLATFORM_REPO" "$ref"
 sha="$(git -C "$tmp" rev-parse FETCH_HEAD)"
+# The Go backend directory is server/ since the rename after v0.20.x; older
+# refs (release tags up to v0.20.x) still have api/.
+src=server/deploy/gateway
+git -C "$tmp" cat-file -e "FETCH_HEAD:$src" 2>/dev/null || src=api/deploy/gateway
 
 mkdir -p "$DEST/sensors" "$DEST/admin"
 for f in "${files[@]}"; do
-  git -C "$tmp" show "FETCH_HEAD:api/deploy/gateway/$f" > "$DEST/$f"
+  git -C "$tmp" show "FETCH_HEAD:$src/$f" > "$DEST/$f"
 done
 chmod 0644 "$DEST/Caddyfile" "$DEST/planes.caddy"
 
 cat > "$DEST/UPSTREAM" <<EOF
 # The gateway files listed below are copies of openctemio/openctem
-# api/deploy/gateway at this commit. Do not edit them here: change the
+# $src at this commit. Do not edit them here: change the
 # monorepo, then run scripts/sync-gateway.sh <ref>. CI
 # (tests/gateway/upstream.sh) fails when a copy differs from this commit.
 commit=$sha

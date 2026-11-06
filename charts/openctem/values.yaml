@@ -857,7 +857,7 @@ gateway:
   caddy:
     image:
       # -- The OpenCTEM gateway image (Caddy plus the caddy-l4 module, built
-      # from openctemio/openctem api/deploy/gateway/Dockerfile and published
+      # from openctemio/openctem server/deploy/gateway/Dockerfile and published
       # with every release). The stock caddy image works too, with
       # layer4=false (sensors then use the HTTPS binding).
       repository: ghcr.io/openctemio/openctem-gateway
@@ -1007,11 +1007,11 @@ database:
     username: ""
     password: ""
   # -- Least-privilege split (openctem
-  # api/docs/deployment/database-roles.md): the API cannot change the schema. When `username` (or an existing
+  # server/docs/deployment/database-roles.md): the API cannot change the schema. When `username` (or an existing
   # secret) is set, the migration Jobs connect as this schema owner
   # (openctem_migrator) and only the API keeps `database.auth` above, which
   # should then be the DML-only role (openctem_app). Run the openctem
-  # api/deploy/postgres/least-privilege-roles.sql once as the Postgres
+  # server/deploy/postgres/least-privilege-roles.sql once as the Postgres
   # superuser before the first install. Empty = migrations use database.auth
   # (the old single-role layout). External databases only.
   migrator:
@@ -1023,7 +1023,7 @@ database:
     username: ""
     password: ""
   # -- The platform console's own role (openctem
-  # api/docs/deployment/database-roles.md, "The console role"): when set, the
+  # server/docs/deployment/database-roles.md, "The console role"): when set, the
   # API writes administrators, console sessions and the platform identity
   # provider through a second small pool as this role (DB_ADMIN_USER), and
   # bootstrap-admin connects as it. Run least-privilege-roles.sql with
@@ -1180,7 +1180,7 @@ redis:
 # flows: ingress-controller -> ui, ui -> api, api -> postgres:5432,
 # api -> redis:6379, and api egress (DNS + HTTPS for threat-intel / CT feeds).
 # =============================================================================
-# Operator monitoring (OpenCTEM api/docs/operations/monitoring.md): the API's
+# Operator monitoring (OpenCTEM server/docs/operations/monitoring.md): the API's
 # Prometheus metrics and the alert rules, for a cluster that runs the
 # Prometheus Operator. Off by default.
 monitoring:

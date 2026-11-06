@@ -1,6 +1,6 @@
 {{/*
 Gateway: one public HTTPS entry point for the UI and the REST API.
-files/gateway/ is the OpenCTEM gateway (openctemio/openctem api/deploy/gateway,
+files/gateway/ is the OpenCTEM gateway (openctemio/openctem server/deploy/gateway,
 copied by scripts/sync-gateway.sh, checked by tests/gateway/upstream.sh). The
 Ingress and HTTPRoute path lists are read from its planes.caddy, which the
 monorepo generates from the API's plane table (RFC-041), so every gateway mode

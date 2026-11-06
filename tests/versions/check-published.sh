@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-published.sh: do the chart's default image tags exist?
-# (openctemio/openctem api/docs/rfcs/RFC-037 §3.5)
+# (openctemio/openctem server/docs/rfcs/RFC-037 §3.5)
 #
 #   tests/versions/check-published.sh            warn (GitHub annotation) and exit 0
 #   STRICT=1 tests/versions/check-published.sh   exit 1 when a tag is missing

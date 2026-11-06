@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render checks for monitoring.* (OpenCTEM api/docs/operations/monitoring.md):
+# Render checks for monitoring.* (OpenCTEM server/docs/operations/monitoring.md):
 # the API metrics token, the ServiceMonitor, the PrometheusRule and its rules
 # copy, and the NetworkPolicy opening for Prometheus.
 # Usage: tests/monitoring/run.sh  (needs helm and git; dependencies built)

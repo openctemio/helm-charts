@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render checks for the least-privilege database split:
 # migration Jobs connect as database.migrator (the schema owner), the API keeps
-# database.auth (the DML-only role). See openctem api/docs/deployment/database-roles.md.
+# database.auth (the DML-only role). See openctem server/docs/deployment/database-roles.md.
 # Usage: tests/least-privilege/run.sh  (needs helm; dependencies built)
 set -euo pipefail
 

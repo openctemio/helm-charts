@@ -206,7 +206,7 @@ kubectl -n openctem cp <pod>:/tmp/ledger.json ./ledger.json -c api
 The full ceremony, the key set signed by an offline root
 (`api.signer.keyset.existingSecret`), the ledger modes and the signer's
 variables (`api.signer.extraEnv`) are in the OpenCTEM documentation,
-`api/docs/architecture/job-signing.md`.
+`server/docs/architecture/job-signing.md`.
 
 ### The bundled sensor pins the signer key (`sensor.jobSigning`)
 
@@ -352,7 +352,7 @@ default) renders no gateway, and the per-component `api.ingress` /
 
 **Routing** (the same in every mode). `files/gateway/` holds the OpenCTEM
 gateway's `Caddyfile`, `planes.caddy` and `entrypoint.sh`, byte for byte from
-openctemio/openctem `api/deploy/gateway/` at the commit in
+openctemio/openctem `server/deploy/gateway/` at the commit in
 `files/gateway/UPSTREAM`. `planes.caddy` is generated there from the API's
 plane table (OpenCTEM RFC-041), and the `ingress` and `httpRoute` path lists
 are read from it at render time, so every mode routes the same paths. Do not
@@ -477,7 +477,7 @@ every sensor back on v2 at its next call.
 
 **Bundled Caddy with the layer4 image (gRPC on the same port 443).** The
 default gateway image, `ghcr.io/openctemio/openctem-gateway` (Caddy plus
-caddy-l4, built from openctemio/openctem `api/deploy/gateway/Dockerfile`), has
+caddy-l4, built from openctemio/openctem `server/deploy/gateway/Dockerfile`), has
 the module, so this is the default:
 
 ```yaml
@@ -600,7 +600,7 @@ reproducible builds; bump deliberately and re-run `helm dependency update`.
 ### Least-privilege database roles
 
 The API should never connect as the Postgres superuser. With an external
-database, use two roles (OpenCTEM `api/docs/deployment/database-roles.md`):
+database, use two roles (OpenCTEM `server/docs/deployment/database-roles.md`):
 
 - `openctem_migrator` owns the schema; the migration Jobs (up and down) connect
   as it (`database.migrator.*`).
@@ -613,7 +613,7 @@ OpenCTEM repository (idempotent; re-run it after restoring a dump):
 ```bash
 psql "postgres://postgres@db.example.com:5432/openctem" -v ON_ERROR_STOP=1 \
   -v app_password="$APP_PW" -v migrator_password="$MIGRATOR_PW" \
-  -f api/deploy/postgres/least-privilege-roles.sql
+  -f server/deploy/postgres/least-privilege-roles.sql
 ```
 
 then set `database.auth.username=openctem_app` and
@@ -774,7 +774,7 @@ release-wide PostgreSQL and Redis policies also exclude the sensor pods.
 
 Operator alerting on the running platform: what to watch, the alert rules
 and a runbook per alert are in OpenCTEM
-`api/docs/operations/monitoring.md`. On a cluster with the Prometheus
+`server/docs/operations/monitoring.md`. On a cluster with the Prometheus
 Operator:
 
 ```yaml
@@ -2016,11 +2016,11 @@ description from its `# --` comment (generated with
 | `database.auth.passwordKey` | string | `"DB_PASSWORD"` |  |
 | `database.auth.userKey` | string | `"DB_USER"` |  |
 | `database.auth.username` | string | `""` |  |
-| `database.console` | object | see `values.yaml` | The platform console's own role (openctem api/docs/deployment/database-roles.md, "The console role"): when set, the API writes administrators, console sessions and the platform identity provider through a second small pool as this role (DB_ADMIN_USER), and bootstrap-admin connects as it. Run least-privilege-roles.sql with `-v admin_user=... -v admin_password=...` first: it creates the role and takes write on those tables away from the API's role. Needs `migrator`. Empty = the API's role writes them (as before). External databases only. |
+| `database.console` | object | see `values.yaml` | The platform console's own role (openctem server/docs/deployment/database-roles.md, "The console role"): when set, the API writes administrators, console sessions and the platform identity provider through a second small pool as this role (DB_ADMIN_USER), and bootstrap-admin connects as it. Run least-privilege-roles.sql with `-v admin_user=... -v admin_password=...` first: it creates the role and takes write on those tables away from the API's role. Needs `migrator`. Empty = the API's role writes them (as before). External databases only. |
 | `database.console.existingSecret` | string | `""` | Existing secret holding the console role's user and password keys. Empty = the database.auth secret (created with these keys when createSecret). |
 | `database.host` | string | `""` | Settings in this section are used only when postgresql.enabled=false. |
 | `database.maxOpenConns` | string | `""` | DB_MAX_OPEN_CONNS (bundled or external database): the API's pool size. Empty: the API default (25). The size presets set it; keep it below the server's max_connections. A DB_MAX_OPEN_CONNS entry in api.extraEnv takes precedence. |
-| `database.migrator` | object | see `values.yaml` | Least-privilege split (openctem api/docs/deployment/database-roles.md): the API cannot change the schema. When `username` (or an existing secret) is set, the migration Jobs connect as this schema owner (openctem_migrator) and only the API keeps `database.auth` above, which should then be the DML-only role (openctem_app). Run the openctem api/deploy/postgres/least-privilege-roles.sql once as the Postgres superuser before the first install. Empty = migrations use database.auth (the old single-role layout). External databases only. |
+| `database.migrator` | object | see `values.yaml` | Least-privilege split (openctem server/docs/deployment/database-roles.md): the API cannot change the schema. When `username` (or an existing secret) is set, the migration Jobs connect as this schema owner (openctem_migrator) and only the API keeps `database.auth` above, which should then be the DML-only role (openctem_app). Run the openctem server/deploy/postgres/least-privilege-roles.sql once as the Postgres superuser before the first install. Empty = migrations use database.auth (the old single-role layout). External databases only. |
 | `database.migrator.existingSecret` | string | `""` | Existing secret holding the migrator user and password keys. Empty = the database.auth secret (created with these keys when createSecret). |
 | `database.name` | string | `"openctem"` |  |
 | `database.port` | int | `5432` |  |
@@ -2032,7 +2032,7 @@ description from its `# --` comment (generated with
 | `gateway.caddy.frontProxies` | list | `[]` | CIDRs of proxies IN FRONT of Caddy whose X-Forwarded-For Caddy believes (tls.mode=http behind an L7 proxy). Empty: none. |
 | `gateway.caddy.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `gateway.caddy.image.layer4` | bool | `true` | The image carries the layer4 module. Needed by sensorGateway alpn and passthrough, and makes alpn the default (sensor gRPC and the web share port 443). |
-| `gateway.caddy.image.repository` | string | `"ghcr.io/openctemio/openctem-gateway"` | The OpenCTEM gateway image (Caddy plus the caddy-l4 module, built from openctemio/openctem api/deploy/gateway/Dockerfile and published with every release). The stock caddy image works too, with layer4=false (sensors then use the HTTPS binding). |
+| `gateway.caddy.image.repository` | string | `"ghcr.io/openctemio/openctem-gateway"` | The OpenCTEM gateway image (Caddy plus the caddy-l4 module, built from openctemio/openctem server/deploy/gateway/Dockerfile and published with every release). The stock caddy image works too, with layer4=false (sensors then use the HTTPS binding). |
 | `gateway.caddy.image.tag` | string | `""` | Empty: the chart appVersion. |
 | `gateway.caddy.maxBodySize` | string | `"256MB"` | Largest request body (the API enforces the real per-route limits). |
 | `gateway.caddy.persistence.enabled` | bool | `true` | PersistentVolumeClaim for /data (certificates, ACME account, the internal CA). Keep it: losing it re-issues the internal CA and every sensor and browser must trust the new root. false = emptyDir. |

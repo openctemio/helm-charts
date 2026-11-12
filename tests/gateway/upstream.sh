@@ -2,7 +2,8 @@
 # upstream.sh: the chart's gateway files are the OpenCTEM gateway's, unchanged.
 #
 # files/gateway/UPSTREAM names an openctemio/openctem commit and the files
-# copied from its api/deploy/gateway/ (scripts/sync-gateway.sh writes both).
+# copied from its server/deploy/gateway/ (api/deploy/gateway/ before the
+# backend directory rename; scripts/sync-gateway.sh writes both).
 # This fails when a copy differs from that commit, so a hand edit here, or a
 # copy that was not re-synced, cannot drift from the monorepo's generated
 # planes.caddy or its access-log redaction.
@@ -36,13 +37,17 @@ trap 'rm -rf "$tmp"' EXIT
 git -C "$tmp" init -q
 git -C "$tmp" fetch -q --depth 1 "$PLATFORM_REPO" "$commit"
 
+# The gateway directory of a commit: server/ since the backend directory
+# rename, api/ before it.
+gwdir() { if git -C "$tmp" cat-file -e "FETCH_HEAD:server/deploy/gateway" 2>/dev/null; then echo server/deploy/gateway; else echo api/deploy/gateway; fi; }
+src="$(gwdir)"
 fails=0
 for f in "${files[@]}"; do
-  if git -C "$tmp" show "FETCH_HEAD:api/deploy/gateway/$f" | cmp -s - "$CHART_DIR/files/gateway/$f"; then
-    echo "ok   - files/gateway/$f is openctem@${commit:0:12} api/deploy/gateway/$f"
+  if git -C "$tmp" show "FETCH_HEAD:$src/$f" | cmp -s - "$CHART_DIR/files/gateway/$f"; then
+    echo "ok   - files/gateway/$f is openctem@${commit:0:12} $src/$f"
   else
-    echo "FAIL - files/gateway/$f differs from openctem@${commit:0:12} api/deploy/gateway/$f"
-    git -C "$tmp" show "FETCH_HEAD:api/deploy/gateway/$f" | diff - "$CHART_DIR/files/gateway/$f" | head -20 || true
+    echo "FAIL - files/gateway/$f differs from openctem@${commit:0:12} $src/$f"
+    git -C "$tmp" show "FETCH_HEAD:$src/$f" | diff - "$CHART_DIR/files/gateway/$f" | head -20 || true
     fails=$((fails + 1))
   fi
 done
@@ -55,8 +60,9 @@ fi
 # failure: the chart may deliberately pin a release while develop moves on.)
 if [ -n "${LATEST_REF:-}" ]; then
   git -C "$tmp" fetch -q --depth 1 "$PLATFORM_REPO" "$LATEST_REF"
+  src="$(gwdir)"
   for f in "${files[@]}"; do
-    if ! git -C "$tmp" show "FETCH_HEAD:api/deploy/gateway/$f" | cmp -s - "$CHART_DIR/files/gateway/$f"; then
+    if ! git -C "$tmp" show "FETCH_HEAD:$src/$f" | cmp -s - "$CHART_DIR/files/gateway/$f"; then
       echo "::warning file=charts/openctem/files/gateway/$f::files/gateway/$f differs from openctem $LATEST_REF; run scripts/sync-gateway.sh $LATEST_REF"
     fi
   done

@@ -135,7 +135,7 @@ jobs:
       - name: Gateway files are the OpenCTEM gateway's (upstream sync)
         run: |
           # files/gateway/{Caddyfile,planes.caddy,entrypoint.sh} must equal
-          # openctemio/openctem api/deploy/gateway at the commit pinned in
+          # openctemio/openctem server/deploy/gateway at the commit pinned in
           # files/gateway/UPSTREAM (scripts/sync-gateway.sh writes both), and
           # a warning says when that commit is behind openctem develop.
           LATEST_REF=develop tests/gateway/upstream.sh

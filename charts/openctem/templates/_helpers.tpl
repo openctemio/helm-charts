@@ -1182,7 +1182,7 @@ off
 {{- if eq $sg "" -}}{{- $sg = ternary "alpn" "off" (and (eq (toString $img.layer4) "true") (ne (include "openctem.gatewayCaddyTlsMode" .) "http")) -}}{{- end -}}
 {{- if ne $sg "off" -}}
 {{- if ne (toString $img.layer4) "true" -}}
-{{- fail (printf "\n\ngateway.caddy.sensorGateway=%s needs the gateway image with the layer4 module: the default ghcr.io/openctemio/openctem-gateway (gateway.caddy.image.layer4=true), or your own build of openctemio/openctem api/deploy/gateway/Dockerfile. Without it leave sensorGateway empty: sensors use the HTTPS binding.\n" $sg) -}}
+{{- fail (printf "\n\ngateway.caddy.sensorGateway=%s needs the gateway image with the layer4 module: the default ghcr.io/openctemio/openctem-gateway (gateway.caddy.image.layer4=true), or your own build of openctemio/openctem server/deploy/gateway/Dockerfile. Without it leave sensorGateway empty: sensors use the HTTPS binding.\n" $sg) -}}
 {{- end -}}
 {{- if eq (include "openctem.gatewayCaddyTlsMode" .) "http" -}}
 {{- fail (printf "\n\ngateway.caddy.sensorGateway=%s needs a TLS mode (the gateway must see the TLS ClientHello to route it); gateway.caddy.tls.mode=http cannot. Set sensorGateway=off.\n" $sg) -}}

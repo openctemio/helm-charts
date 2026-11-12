@@ -28,6 +28,10 @@ maintainers:
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion v0.21.0 (the platform release that accepts the bundled sensor v0.41.0)"
+    - kind: fixed
+      description: "The bundled sensor default tag is v0.41.0: v0.38.3 (chart 0.40.0 and 0.40.1) was a GitHub release whose image was never published to ghcr.io, so a default install failed to pull the sensor; the seccomp profile file is the v0.41.0 one"
     - kind: security
       description: "BREAKING: the bundled sensor now requires its tool sandbox and per-task network confinement by default (sensor.sandbox.mode and sensor.sandbox.network default to required, were auto), so a node that cannot confine tasks fails loudly instead of running tools unconfined. Set both to auto to keep the old behaviour. The bundled sensor moves to v0.38.3"
     - kind: changed
@@ -40,13 +44,13 @@ annotations:
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.40.0
+version: 0.41.0
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
-appVersion: "v0.19.1"
+appVersion: "v0.21.0"
 
 # NOTE: the bundled Bitnami Postgres/Redis subcharts below are for DEV / EVAL
 # ONLY. Production must use external managed datastores (postgresql.enabled=false,

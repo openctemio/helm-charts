@@ -10,6 +10,52 @@ entries:
         - kind: security
           description: "BREAKING: the bundled sensor now requires its tool sandbox and per-task network confinement by default (sensor.sandbox.mode and sensor.sandbox.network default to required, were auto), so a node that cannot confine tasks fails loudly instead of running tools unconfined. Set both to auto to keep the old behaviour. The bundled sensor moves to v0.38.3"
         - kind: changed
+          description: "Docs, comments and the gateway sync tooling follow the OpenCTEM Go backend directory move from api/ to server/ (source layout only: images, URLs and values are unchanged). scripts/sync-gateway.sh and tests/gateway read server/deploy/gateway and fall back to api/deploy/gateway for older commits"
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
+    appVersion: v0.21.0
+    created: "2026-11-12T14:50:41.313338998Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.5.6
+    - condition: redis.enabled
+      name: redis
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 25.3.2
+    description: 'OpenCTEM (Continuous Threat Exposure Management) platform: the API,
+      the web console, database migrations and an optional co-located scanning sensor,
+      plus optional PostgreSQL and Redis for evaluation.'
+    digest: 73338036f698fdd548d30dc4431926b20740999b61618add91a49cfb767dda1e
+    home: https://openctem.io
+    icon: https://docs.openctem.io/brand/app-icon.svg
+    keywords:
+    - security
+    - ctem
+    - exposure-management
+    - vulnerability-management
+    maintainers:
+    - email: info@openctem.io
+      name: OpenCTEM
+      url: https://openctem.io
+    name: openctem
+    sources:
+    - https://github.com/openctemio/helm-charts
+    - https://github.com/openctemio/openctem
+    type: application
+    urls:
+    - https://github.com/openctemio/helm-charts/releases/download/openctem-0.41.1/openctem-0.41.1.tgz
+    version: 0.41.1
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: changed
+          description: "appVersion v0.21.0 (the platform release that accepts the bundled sensor v0.41.0)"
+        - kind: fixed
+          description: "The bundled sensor default tag is v0.41.0: v0.38.3 (chart 0.40.0 and 0.40.1) was a GitHub release whose image was never published to ghcr.io, so a default install failed to pull the sensor; the seccomp profile file is the v0.41.0 one"
+        - kind: security
+          description: "BREAKING: the bundled sensor now requires its tool sandbox and per-task network confinement by default (sensor.sandbox.mode and sensor.sandbox.network default to required, were auto), so a node that cannot confine tasks fails loudly instead of running tools unconfined. Set both to auto to keep the old behaviour. The bundled sensor moves to v0.38.3"
+        - kind: changed
           description: "appVersion v0.19.1 and the bundled sensor v0.37.0 (CTIS 2.0); the API gets ADMIN_PUBLIC_URL (admin.publicUrl, else derived from admin.site) so console security keys work"
         - kind: security
           description: "The bundled sensor pins the job-signing key from a read-only file (sensor.jobSigning): the offline root or keys from values, else the chart signer's own public key, which a dedicated exporter container (the only one with a Kubernetes token, limited to get/patch of one ConfigMap) copies into <api>-signer-pub"
@@ -1754,4 +1800,4 @@ entries:
     urls:
     - https://github.com/openctemio/helm-charts/releases/download/openctem-0.1.1/openctem-0.1.1.tgz
     version: 0.1.1
-generated: "2026-11-12T13:19:22.464728052Z"
+generated: "2026-11-12T14:50:41.313571092Z"

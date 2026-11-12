@@ -28,6 +28,8 @@ maintainers:
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion v0.21.0 (the platform release that accepts the bundled sensor v0.41.0)"
     - kind: fixed
       description: "The bundled sensor default tag is v0.41.0: v0.38.3 (chart 0.40.0 and 0.40.1) was a GitHub release whose image was never published to ghcr.io, so a default install failed to pull the sensor; the seccomp profile file is the v0.41.0 one"
     - kind: security

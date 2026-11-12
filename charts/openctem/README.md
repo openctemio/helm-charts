@@ -40,7 +40,8 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.23.5 – 0.28.0 | v0.9.7 | same |
 | 0.29.0 – 0.31.0 | v0.10.1 | same, plus `ghcr.io/openctemio/openctem-console` (chart 0.28.0 and later) |
 | 0.32.0 – 0.38.0 | v0.12.0 | same |
-| 0.39.0 and later | v0.19.1 | same |
+| 0.39.0 – 0.40.2 | v0.19.1 | same |
+| 0.41.0 and later | v0.21.0 | same |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).

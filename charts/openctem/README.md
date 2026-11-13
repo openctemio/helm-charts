@@ -42,7 +42,8 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.32.0 – 0.38.0 | v0.12.0 | same |
 | 0.39.0 – 0.40.2 | v0.19.1 | same |
 | 0.41.0 – 0.41.1 | v0.21.0 | same |
-| 0.42.0 and later | v0.22.0 | same |
+| 0.42.0 | v0.22.0 | same |
+| 0.43.0 and later | v0.23.0 | `ghcr.io/openctemio/openctem-server` instead of `openctem-api`; the others as before |
 
 The bundled gateway (`gateway.mode: caddy`) uses
 `ghcr.io/openctemio/openctem-gateway` at the same tag (chart 0.22.0 and later).
@@ -167,7 +168,7 @@ What keeps the key away from the API:
 
 ```bash
 docker run --rm -v "$PWD:/out" --entrypoint /app/openctem-signer \
-  ghcr.io/openctemio/openctem-api:v0.12.0 keygen -out /out/signer.pem   # prints the key id
+  ghcr.io/openctemio/openctem-server:v0.23.0 keygen -out /out/signer.pem   # prints the key id (openctem-api for v0.22.x and earlier)
 kubectl -n openctem create secret generic openctem-signer-key --from-file=signer.pem
 ```
 
@@ -1099,6 +1100,27 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | `sensor.writableDirs` / `.writableDirsSizeLimit` | `/tmp` / empty | `emptyDir`s mounted over the read-only root filesystem. Besides its data volume the sensor writes only `/tmp`: each scan runs with its own home directory there, and `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` point the tools' configuration and cache there. Do not add `/home/openctem`: it holds the nuclei-templates release baked into the image, which the sensor scans with until its first content refresh (and for good on a host that cannot download one). |
 | `sensor.extraVolumes` / `.extraVolumeMounts` | `[]` | Extra volumes for the sensor container (for example a host directory holding the kill switch file). |
 
+## Upgrading to 0.43.0 (OpenCTEM v0.23.0, server image renamed)
+
+OpenCTEM publishes its server image as `ghcr.io/openctemio/openctem-server`
+from v0.23.0; `ghcr.io/openctemio/openctem-api` keeps the tags of v0.9.0 to
+v0.22.x and receives no new ones. The chart's default `api.image.repository`
+follows:
+
+| Value | Old default | New default |
+|---|---|---|
+| `api.image.repository` | `ghcr.io/openctemio/openctem-api` | `ghcr.io/openctemio/openctem-server` |
+
+- Default values: nothing to do.
+- Values that set `api.image.repository` to `ghcr.io/openctemio/openctem-api`
+  (or a mirror path ending in `/openctem-api`): change it to the new name, or
+  the pull of v0.23.0 fails with "not found".
+- `global.imageRegistry`: mirror `openctem-server` into the registry
+  (`<registry>/openctem-server`, with its signature) before upgrading.
+- Running v0.22.x or earlier with this chart (`api.image.tag`): also set
+  `api.image.repository=ghcr.io/openctemio/openctem-api`.
+- Kubernetes object names (`<release>-openctem-api-*`) do not change.
+
 ## Upgrading to 0.40.0 (the sensor sandbox is required)
 
 Before 0.40.0 the bundled sensor ran with `SENSOR_SANDBOX_NETWORK=auto`: on a
@@ -1292,12 +1314,12 @@ image pinned by digest. Nothing changes while the keys below are empty.
    are OCI referrers of the image digest, so copy them with the image
    (`cosign copy` or `oras cp -r`), keeping the digest. Verify against your copy
    with the same certificate identity and issuer as the original
-   (`cosign verify <your-registry>/openctem/openctem-api@sha256:...`).
+   (`cosign verify <your-registry>/openctem/openctem-server@sha256:...`).
 2. Set the keys:
 
 | Key | Effect |
 |---|---|
-| `global.imageRegistry` | Replaces the `ghcr.io/openctemio` prefix of every OpenCTEM image (`openctem-api`, `migrations`, `openctem-web`, `openctem-console`, `openctem-gateway`, `sensor`). The repository basename stays. Images whose `repository` you overrode to another host are used as written. |
+| `global.imageRegistry` | Replaces the `ghcr.io/openctemio` prefix of every OpenCTEM image (`openctem-server`, `migrations`, `openctem-web`, `openctem-console`, `openctem-gateway`, `sensor`). The repository basename stays. Images whose `repository` you overrode to another host are used as written. |
 | `api.image.digest`, `api.migrations.image.digest`, `ui.image.digest`, `console.image.digest`, `gateway.caddy.image.digest`, `sensor.image.digest` | `sha256:<64 hex>`. Rendered as `repository:tag@digest`: the tag stays for people, the runtime pulls by the digest. A malformed value fails the render. The bootstrap, enrollment and migration (up and down) Jobs use the same references as the Deployments. |
 | `imagePullSecrets` | Registry credentials, applied to every pod and Job of the chart. |
 
@@ -1883,7 +1905,7 @@ description from its `# --` comment (generated with
 | `api.httpRoute` | object | see `values.yaml` | Expose API service via gateway-api HTTPRoute |
 | `api.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `api.image.pullPolicy` | string | `"IfNotPresent"` |  |
-| `api.image.repository` | string | `"ghcr.io/openctemio/openctem-api"` | API image. Published by the openctemio/openctem monorepo from v0.9.0; releases up to v0.8.0 exist only as ghcr.io/openctemio/api, which keeps receiving identical copies for a transition window. |
+| `api.image.repository` | string | `"ghcr.io/openctemio/openctem-server"` | Server (API) image. ghcr.io/openctemio/openctem-server from OpenCTEM v0.23.0; v0.9.0 to v0.22.x are ghcr.io/openctemio/openctem-api and v0.8.0 and earlier ghcr.io/openctemio/api: set this to the old name to run such a release with this chart. |
 | `api.image.tag` | string | `""` |  |
 | `api.ingress.annotations` | object | `{}` |  |
 | `api.ingress.className` | string | `""` |  |
@@ -2056,7 +2078,7 @@ description from its `# --` comment (generated with
 | `gateway.mode` | string | `"none"` | none (default; nothing changes) \| ingress \| httpRoute \| caddy |
 | `gateway.publicUrl` | string | `""` | Public origin, used for APP_URL, CORS_ALLOWED_ORIGINS and SMTP_BASE_URL. Default: https://<host>. Set it when clients use a non-443 port (e.g. https://ctem.example.com:8443) or in caddy http mode. |
 | `gateway.trustedProxies` | list | `[]` | REQUIRED when mode != none: CIDRs/IPs the API trusts to report the client address (SERVER_TRUSTED_PROXIES). These are the hops that connect to the API: the gateway pods (or the ingress controller / Gateway pods) and the UI pods. Pod IPs change, so give the cluster's POD CIDR, e.g. kubeadm+flannel 10.244.0.0/16, k3s 10.42.0.0/16, GKE/EKS: the VPC/pod range. kubectl cluster-info dump \| grep -m1 -- --cluster-cidr Anything outside this list is recorded as its own TCP peer, so nothing can choose the IP written to the audit log or matched by IP allowlists. |
-| `global.imageRegistry` | string | `""` | Private registry or mirror for the OpenCTEM images. When set, it replaces the ghcr.io/openctemio prefix of every OpenCTEM image (api, migrations, ui, console, gateway, sensor); the repository basenames stay (openctem-api, migrations, openctem-web, openctem-console, openctem-gateway, sensor). Example: registry.example.com/openctem. It does NOT touch third-party images (postgresql and redis subcharts, busybox, rclone, postgres): override their repository keys yourself, see "Private registry / air-gapped" in the README. The mirror must hold the images AND their cosign signatures (OCI referrers). |
+| `global.imageRegistry` | string | `""` | Private registry or mirror for the OpenCTEM images. When set, it replaces the ghcr.io/openctemio prefix of every OpenCTEM image (api, migrations, ui, console, gateway, sensor); the repository basenames stay (openctem-server, migrations, openctem-web, openctem-console, openctem-gateway, sensor). Example: registry.example.com/openctem. It does NOT touch third-party images (postgresql and redis subcharts, busybox, rclone, postgres): override their repository keys yourself, see "Private registry / air-gapped" in the README. The mirror must hold the images AND their cosign signatures (OCI referrers). |
 | `global.security.allowInsecureImages` | bool | `true` | The bundled Bitnami subcharts (evaluation only) refuse images outside docker.io/bitnami unless this is true; postgresql.image and redis.image pin bitnamilegacy releases. |
 | `imagePullSecrets` | list | `[]` |  |
 | `monitoring.enabled` | bool | `false` | Turn on the API's /metrics (bearer token METRICS_TOKEN). Off: /metrics answers 404. The gateway never routes /metrics, whatever this says. |

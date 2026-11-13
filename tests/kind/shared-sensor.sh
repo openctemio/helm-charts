@@ -40,9 +40,11 @@ kubectl config use-context "kind-$cluster" >/dev/null
 kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 app="$(sed -nE 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?[[:space:]]*$/\1/p' "$chart/Chart.yaml")"
-if ! docker manifest inspect "ghcr.io/openctemio/openctem-api:$app" >/dev/null 2>&1; then
+# The chart's default server image (openctem-server from OpenCTEM v0.23.0).
+api_repo="$(sed -nE 's/^    repository: (ghcr\.io\/openctemio\/openctem-(server|api))[[:space:]]*$/\1/p' "$chart/values.yaml" | head -n 1)"
+if ! docker manifest inspect "$api_repo:$app" >/dev/null 2>&1; then
   # Enrollment needs the API and its migrations: nothing to run against.
-  echo "notice: ghcr.io/openctemio/openctem-api:$app is not published; the shared sensor run needs the API, skipped"
+  echo "notice: $api_repo:$app is not published; the shared sensor run needs the API, skipped"
   exit 0
 fi
 

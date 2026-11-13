@@ -39,6 +39,6 @@ spec:
           annotations:
             summary: Prometheus cannot scrape the OpenCTEM API
             description: The API pod is down or /metrics fails (check the pod, then the METRICS_TOKEN secret).
-            runbook_url: https://github.com/openctemio/openctem/blob/develop/api/docs/operations/monitoring.md#apidown
+            runbook_url: https://github.com/openctemio/openctem/blob/develop/server/docs/operations/monitoring.md#apidown
     {{- toYaml $groups | nindent 4 }}
 {{- end }}

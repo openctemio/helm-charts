@@ -29,9 +29,9 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "appVersion v0.22.0. The bundled sensor stays at v0.41.0 (sensor v0.41.1 and later need platform v0.22.0 or later). The vendored gateway files and the alert rules come from v0.22.0, and the runbook links point at server/docs"
+      description: "appVersion v0.22.0. The bundled sensor moves to v0.41.1 (it needs platform v0.22.0 or later, which this chart ships; the seccomp profile file is unchanged from v0.41.0). The vendored gateway files and the alert rules come from v0.22.0, and the runbook links point at server/docs"
     - kind: fixed
-      description: "The bundled sensor default tag is v0.41.0: v0.38.3 (chart 0.40.0 and 0.40.1) was a GitHub release whose image was never published to ghcr.io, so a default install failed to pull the sensor; the seccomp profile file is the v0.41.0 one"
+      description: "The bundled sensor default tag is a published release (v0.41.1): v0.38.3 (chart 0.40.0 and 0.40.1) was a GitHub release whose image was never published to ghcr.io, so a default install failed to pull the sensor; the seccomp profile file is the v0.41.1 one"
     - kind: security
       description: "BREAKING: the bundled sensor now requires its tool sandbox and per-task network confinement by default (sensor.sandbox.mode and sensor.sandbox.network default to required, were auto), so a node that cannot confine tasks fails loudly instead of running tools unconfined. Set both to auto to keep the old behaviour. The bundled sensor moves to v0.38.3"
     - kind: changed

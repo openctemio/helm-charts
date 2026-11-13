@@ -2,5 +2,5 @@
 # at this commit. Do not edit it here: change the monorepo, then run
 # scripts/sync-monitoring.sh <ref>. CI (tests/monitoring/run.sh) fails when
 # the copy differs from this commit.
-commit=590f9ac5102971dc66391840b0baf190cc903157
+commit=2dbe3a235bc343d51cd25b59ec1ec8431092c21f
 source=deploy/observability/prometheus/rules/openctem.yml

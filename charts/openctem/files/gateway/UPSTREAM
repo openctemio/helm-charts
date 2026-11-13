@@ -1,6 +1,6 @@
 # The gateway files listed below are copies of openctemio/openctem
-# api/deploy/gateway at this commit. Do not edit them here: change the
+# server/deploy/gateway at this commit. Do not edit them here: change the
 # monorepo, then run scripts/sync-gateway.sh <ref>. CI
 # (tests/gateway/upstream.sh) fails when a copy differs from this commit.
-commit=05f1cd187d1838ec529c3c84ded73cecaf49946f
+commit=2dbe3a235bc343d51cd25b59ec1ec8431092c21f
 files=Caddyfile planes.caddy entrypoint.sh servers.common sensors/off.wrappers sensors/alpn.wrappers sensors/passthrough.wrappers admin/off.site admin/off.tenant admin/on.site admin/on.tenant

@@ -42,7 +42,7 @@ api:
   replicaCount: 1
 
   image:
-    repository: ghcr.io/openctemio/openctem-api
+    repository: ghcr.io/openctemio/openctem-server
     tag: ""                     # defaults to chart appVersion
 
   auth:
@@ -61,7 +61,7 @@ api:
   # Job signer (REQUIRED in production: the API refuses to start without it).
   # The signing key is a Secret you create once, outside the chart:
   #   docker run --rm -v "$PWD:/out" --entrypoint /app/openctem-signer \
-  #     ghcr.io/openctemio/openctem-api:<tag> keygen -out /out/signer.pem
+  #     ghcr.io/openctemio/openctem-server:<tag> keygen -out /out/signer.pem
   #   kubectl create secret generic openctem-signer-key --from-file=signer.pem
   # then BACK UP signer.pem offline and delete the local copy. Alternatively
   # set key.generate=true (key created on first start into a volume).

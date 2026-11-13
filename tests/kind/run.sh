@@ -82,8 +82,10 @@ spec:
 EOF
 
 app="$(sed -nE 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?[[:space:]]*$/\1/p' "$chart/Chart.yaml")"
+# The chart's default server image (openctem-server from OpenCTEM v0.23.0).
+api_repo="$(sed -nE 's/^    repository: (ghcr\.io\/openctemio\/openctem-(server|api))[[:space:]]*$/\1/p' "$chart/values.yaml" | head -n 1)"
 published=0
-if docker manifest inspect "ghcr.io/openctemio/openctem-api:$app" >/dev/null 2>&1; then
+if docker manifest inspect "$api_repo:$app" >/dev/null 2>&1; then
   published=1
 fi
 install=(upgrade --install "$rel" "$chart" -n "$ns"
@@ -112,7 +114,7 @@ if [[ $published == 1 ]]; then
     fail "API became ready on the migrated schema"
   fi
 else
-  echo "notice: ghcr.io/openctemio/openctem-api:$app is not published; installing the platform without hooks and not waiting for the API/UI"
+  echo "notice: $api_repo:$app is not published; installing the platform without hooks and not waiting for the API/UI"
   helm "${install[@]}" --no-hooks >/dev/null
   pass "chart installed (API/UI images $app not published yet)"
 fi

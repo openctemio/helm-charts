@@ -1106,7 +1106,7 @@ backup:
     image:
       # -- Needs pg_dump of the database's major version or newer.
       repository: docker.io/library/postgres
-      tag: "17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
+      tag: "17-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065"
       pullPolicy: IfNotPresent
   database:
     # -- Optional Secret with a dedicated read-only role (member of pg_read_all_data)

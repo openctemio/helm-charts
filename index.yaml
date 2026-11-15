@@ -4,6 +4,48 @@ entries:
   - annotations:
       artifacthub.io/changes: |
         - kind: changed
+          description: "BREAKING for custom repositories: appVersion v0.23.0, and api.image.repository defaults to ghcr.io/openctemio/openctem-server (OpenCTEM publishes its server image under that name from v0.23.0; openctem-api keeps v0.9.0 to v0.22.x). Values that set the old name, and private registries (global.imageRegistry), need openctem-server; to run v0.22.x or earlier with this chart set api.image.repository=ghcr.io/openctemio/openctem-api. Kubernetes object names are unchanged"
+        - kind: security
+          description: "The backup job image (backup.dump.image) is pinned at PostgreSQL 17.12, the 2026-11-12 upstream security release (CVE-2026-6460). Upgrade your own PostgreSQL 17 server to 17.12 as well; no data migration is needed (chart 0.42.1)"
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
+    appVersion: v0.23.0
+    created: "2026-11-15T12:57:20.947748038Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.5.6
+    - condition: redis.enabled
+      name: redis
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 25.3.2
+    description: 'OpenCTEM (Continuous Threat Exposure Management) platform: the API,
+      the web console, database migrations and an optional co-located scanning sensor,
+      plus optional PostgreSQL and Redis for evaluation.'
+    digest: fb06b6fa73636e90624004aaa29f0c108da0e3b1a0c4129b753988aa3d811596
+    home: https://openctem.io
+    icon: https://docs.openctem.io/brand/app-icon.svg
+    keywords:
+    - security
+    - ctem
+    - exposure-management
+    - vulnerability-management
+    maintainers:
+    - email: info@openctem.io
+      name: OpenCTEM
+      url: https://openctem.io
+    name: openctem
+    sources:
+    - https://github.com/openctemio/helm-charts
+    - https://github.com/openctemio/openctem
+    type: application
+    urls:
+    - https://github.com/openctemio/helm-charts/releases/download/openctem-0.43.0/openctem-0.43.0.tgz
+    version: 0.43.0
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: changed
           description: "appVersion v0.22.0. The bundled sensor moves to v0.41.1 (it needs platform v0.22.0 or later, which this chart ships; the seccomp profile file is unchanged from v0.41.0). The vendored gateway files and the alert rules come from v0.22.0, and the runbook links point at server/docs"
         - kind: fixed
           description: "The bundled sensor default tag is a published release (v0.41.1): v0.38.3 (chart 0.40.0 and 0.40.1) was a GitHub release whose image was never published to ghcr.io, so a default install failed to pull the sensor; the seccomp profile file is the v0.41.1 one"
@@ -1892,4 +1934,4 @@ entries:
     urls:
     - https://github.com/openctemio/helm-charts/releases/download/openctem-0.1.1/openctem-0.1.1.tgz
     version: 0.1.1
-generated: "2026-11-14T15:26:34.195304044Z"
+generated: "2026-11-15T12:57:20.947979546Z"

@@ -30,6 +30,8 @@ annotations:
   artifacthub.io/changes: |
     - kind: changed
       description: "BREAKING for custom repositories: appVersion v0.23.0, and api.image.repository defaults to ghcr.io/openctemio/openctem-server (OpenCTEM publishes its server image under that name from v0.23.0; openctem-api keeps v0.9.0 to v0.22.x). Values that set the old name, and private registries (global.imageRegistry), need openctem-server; to run v0.22.x or earlier with this chart set api.image.repository=ghcr.io/openctemio/openctem-api. Kubernetes object names are unchanged"
+    - kind: security
+      description: "The backup job image (backup.dump.image) is pinned at PostgreSQL 17.12, the 2026-11-12 upstream security release (CVE-2026-6460). Upgrade your own PostgreSQL 17 server to 17.12 as well; no data migration is needed (chart 0.42.1)"
 
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.

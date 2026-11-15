@@ -599,6 +599,10 @@ never satisfy the production Redis boot gate.
 Subchart versions are **pinned** (Postgres 18.5.6, Redis 25.3.2) for
 reproducible builds; bump deliberately and re-run `helm dependency update`.
 
+The bundled Postgres image is `bitnamilegacy/postgresql:17.6.0-debian-12-r4`,
+which gets no security updates (it lacks the PostgreSQL 17.12 fixes): one more
+reason to run production on an external, patched PostgreSQL 17.
+
 ### Least-privilege database roles
 
 The API should never connect as the Postgres superuser. With an external
@@ -1120,6 +1124,17 @@ follows:
 - Running v0.22.x or earlier with this chart (`api.image.tag`): also set
   `api.image.repository=ghcr.io/openctemio/openctem-api`.
 - Kubernetes object names (`<release>-openctem-api-*`) do not change.
+
+## Upgrading to 0.42.1 (PostgreSQL 17.12 security release)
+
+PostgreSQL 17.12 (2026-11-12) is an upstream security release; it fixes
+CVE-2026-6460 (authenticated arbitrary code execution, CVSS 8.8) among others.
+The chart's backup job (`backup.dump.image`) now pins `postgres:17-alpine` at
+17.12. The chart does not run your production database: upgrade your managed
+or self-run PostgreSQL 17 server to 17.12 and restart it. A minor release needs
+no dump, restore or data migration; rebuild any third-party C extensions you
+have added. The bundled Bitnami database (dev/eval only) stays on 17.6, the last
+image Bitnami published under `bitnamilegacy`: do not keep data you care about in it.
 
 ## Upgrading to 0.40.0 (the sensor sandbox is required)
 
@@ -2000,7 +2015,7 @@ description from its `# --` comment (generated with
 | `backup.database.userKey` | string | `"DB_USER"` |  |
 | `backup.dump.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `backup.dump.image.repository` | string | `"docker.io/library/postgres"` | Needs pg_dump of the database's major version or newer. |
-| `backup.dump.image.tag` | string | `"17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"` |  |
+| `backup.dump.image.tag` | string | `"17-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065"` |  |
 | `backup.enabled` | bool | `false` | Create the backup CronJob. Requires `rclone.existingSecret`. |
 | `backup.nodeSelector` | object | `{}` |  |
 | `backup.path` | string | `"openctem"` | Folder inside the storage remote. |

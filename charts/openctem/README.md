@@ -42,7 +42,7 @@ that does not exist (`tests/versions/check-published.sh`).
 | 0.32.0 – 0.38.0 | v0.12.0 | same |
 | 0.39.0 – 0.40.2 | v0.19.1 | same |
 | 0.41.0 – 0.41.1 | v0.21.0 | same |
-| 0.42.0 | v0.22.0 | same |
+| 0.42.0 and 0.42.1 | v0.22.0 | same |
 | 0.43.0 and later | v0.23.0 | `ghcr.io/openctemio/openctem-server` instead of `openctem-api`; the others as before |
 
 The bundled gateway (`gateway.mode: caddy`) uses

@@ -173,7 +173,7 @@ mode: daemon
 replicaCount: 1
 image:
   repository: ghcr.io/openctemio/sensor
-  tag: v0.41.1
+  tag: v0.42.0
   digest: ""
   pullPolicy: IfNotPresent
 profile: ""

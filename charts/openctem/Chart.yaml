@@ -30,6 +30,8 @@ annotations:
   artifacthub.io/changes: |
     - kind: added
       description: "sensor.profile=relay runs the bundled sensor from the sensor's relay profile image (<tag>-relay, sensor v0.42.0 or later): no tool at all, it only relays the platform's signed feeds and reports feed.relay@1 alone, so no scan is placed on it. Needs sensor.enrollment=instance; renders SENSOR_FEED_RELAY=1. The default (empty) keeps the image tag as given"
+    - kind: changed
+      description: "The bundled sensor moves to v0.42.0, the first release that publishes the -relay image. It works each target host under a per-host budget, Standard pacing by default (20 requests per second and 8 in flight per host); set SENSOR_PACING_LEVEL=fast through sensor.extraEnv to run faster on hosts you own. The seccomp profile file is unchanged"
 
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.

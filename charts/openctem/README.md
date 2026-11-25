@@ -1070,7 +1070,7 @@ helm upgrade openctem charts/openctem -n openctem -f values.yaml \
 | Value | Default | Meaning |
 |---|---|---|
 | `sensor.mode` | `daemon` | The only mode: the sensor runs the scans the platform dispatches. The chart passes no mode flag: from sensor v0.21.0 the daemon taking platform commands is the sensor's default mode. `platform` (bootstrap-token self-registration) was removed in 0.9.0 and fails the render: no OpenCTEM API serves it. |
-| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.41.1` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. From v0.23.1 a job that carries an organization's identification (User-Agent and headers, such as a bug-bounty program's) sends it on every HTTP request, and the Tenable.sc connector is its own image (`ghcr.io/openctemio/connector-tenable`). The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). opengrep, semgrep, trivy and betterleaks run from the single-tool images (`<version>-opengrep` from v0.22.0, `-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
+| `sensor.image.repository` / `.tag` | `ghcr.io/openctemio/sensor` / `v0.42.0` | The sensor is versioned separately from the platform, so the tag does not follow `appVersion`; pin a version. From v0.23.1 a job that carries an organization's identification (User-Agent and headers, such as a bug-bounty program's) sends it on every HTTP request, and the Tenable.sc connector is its own image (`ghcr.io/openctemio/connector-tenable`). The plain tag is the default image (`<version>-default`): nuclei with a pinned nuclei-templates release baked in, and the recon tools (subfinder, dnsx, naabu, httpx, katana). opengrep, semgrep, trivy and betterleaks run from the single-tool images (`<version>-opengrep` from v0.22.0, `-semgrep`, `-trivy`, `-betterleaks`; also `-nuclei`). See the [sensor README](https://github.com/openctemio/sensor#install). |
 | `sensor.name` | empty | `SENSOR_NAME`: the name the sensor proposes when it pairs (the approving administrator may change it). Empty: the Deployment name, `<release>-openctem-sensor`. |
 | `sensor.caFingerprint` / `sensor.platformKey` | empty | Pairing pins from the platform's pairing instructions (public values): `SENSOR_CA_FINGERPRINT`, the SHA-256 of the platform CA the sensor must see in the TLS chain (needs an `https` `sensor.apiUrl` with a host name), and `SENSOR_PLATFORM_KEY`, the thumbprint of the platform's pairing key. |
 | `sensor.pairingCode` / `sensor.pairingCodeExistingSecret` / `.pairingCodeExistingSecretKey` | empty / empty / `pairing-code` | `SENSOR_PAIRING_CODE`: a single-use, 10-minute code from Sensors > Add sensor > Create a pairing code (or Re-pair... on a sensor). Not a secret, but prefer `--set`. The Secret alternative is read as an environment variable. See "Pair with a code from the console". |
@@ -1193,6 +1193,22 @@ the sensor (or refuses the task) with a clear error instead of degrading.
 - `tests/versions/check-published.sh` now warns when `appVersion` is not the
   newest platform release.
 
+## Upgrading to 0.44.0 (relay profile)
+
+- New value `sensor.profile` (default empty: the image tag as given, nothing
+  changes). `relay` runs the bundled sensor from the sensor's relay profile
+  image, `<sensor.image.tag>-relay`: no tool at all (the sensor binary on a
+  distroless static base), it only relays the platform's signed feeds and
+  reports `feed.relay@1` alone, so the platform never places a scan on it.
+  See "Feed relay" below.
+- The bundled sensor moves to v0.42.0, the first sensor release that
+  publishes the `-relay` image. Scans now work each target host under a
+  per-host budget, at the Standard pacing level by default (20 requests per
+  second and 8 in flight per host) instead of the tools' own job-wide rates;
+  a throttled host is reported as a coverage gap instead of counted as
+  covered. To run faster on hosts you own, set `SENSOR_PACING_LEVEL=fast` on
+  the sensor. The seccomp profile file is unchanged from v0.41.1.
+
 ## Upgrading to 0.38.0 (feed relay toggles)
 
 - New values: `sensor.feedRelay.enabled` (default `true`),
@@ -1218,6 +1234,16 @@ extra environment.
   renders `SENSOR_FEED_RELAY=0`: this sensor never relays. The platform never
   falls back to direct by itself, so turn feed delivery to direct in the
   console as well.
+- A relay that should not scan: `sensor.profile=relay` (with
+  `sensor.enrollment=instance` and a sensor release that publishes the image,
+  v0.42.0 or later). The chart renders the `<tag>-relay` image and
+  `SENSOR_FEED_RELAY=1` (the sensor refuses to start when it cannot relay),
+  and refuses `sensor.tools` and `sensor.feedRelay.enabled=false` with it. The
+  relay image needs about 256Mi of memory and a quarter of a CPU: lower
+  `sensor.resources`. Its only network need is HTTPS to the API and to the
+  feed origins. Run one to three relays for redundancy (one release each, or
+  the bundled scanning sensor next to one relay), and designate them under
+  Console > System > Feed delivery.
 - `feedRelay.newInstallRelay=true` makes a new database start in relay mode:
   the Job runs `bootstrap-admin sensor-token ... -feed-relay` and the bundled
   sensor that enrolls with the token becomes the relay. It is only passed when
@@ -2162,7 +2188,7 @@ description from its `# --` comment (generated with
 | `sensor.image.digest` | string | `""` | Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest is what the runtime pulls (the tag stays for people). Empty: pull by tag. |
 | `sensor.image.pullPolicy` | string | `"IfNotPresent"` |  |
 | `sensor.image.repository` | string | `"ghcr.io/openctemio/sensor"` |  |
-| `sensor.image.tag` | string | `"v0.41.1"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
+| `sensor.image.tag` | string | `"v0.42.0"` | Sensor image tag. The sensor is versioned separately from the platform, so this does NOT follow the chart appVersion. The plain tag is the default image (the same as <version>-default): nuclei with a pinned nuclei-templates release baked in, and the recon tools subfinder, dnsx, naabu, httpx and katana. Single-tool variants are <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid 1001: see podSecurityContext). Pin a version for reproducible installs. |
 | `sensor.instanceEnrollment.existingSecret` | string | `""` | Pre-created Secret holding the token (octe_ and 49 letters or digits) instead of the generated one, for GitOps. |
 | `sensor.instanceEnrollment.existingSecretKey` | string | `""` | Key within the secret. Empty: "token". |
 | `sensor.jobSigning.exporter.image` | string | see `values.yaml` | Image of the exporter: it needs sh and curl. |
@@ -2202,6 +2228,7 @@ description from its `# --` comment (generated with
 | `sensor.podAnnotations` | object | `{}` |  |
 | `sensor.podLabels` | object | `{}` |  |
 | `sensor.podSecurityContext` | object | see `values.yaml` | Pod security context. The sensor image runs as uid/gid 999 (the single-tool -nuclei/-trivy/-semgrep/-betterleaks images use 1001: set runAsUser/runAsGroup/fsGroup to 1001 for them). runAsNonRoot needs a numeric runAsUser because the image's USER is a name. Keep fsGroupChangePolicy OnRootMismatch: the kubelet then sets the group of a volume's files only while the volume's root lacks it (a new volume). With the default, Always, every mount makes each file group-readable, and the sensor refuses an identity key its group can read: a paired sensor would not start after its pod is replaced. |
+| `sensor.profile` | string | `""` | The sensor's image profile (sensor repository docs/PROFILES.md). Empty (default): the image tag as given (the standard image: scanning and, on a shared sensor, the feed relay). "relay": the relay profile image (<tag>-relay): no tool at all, it only relays the platform's signed feeds and reports feed.relay@1 alone, so the platform never places a scan on it. Use it for a platform without outbound access whose sensor should not scan. Needs sensor.enrollment=instance (a relay is a shared sensor), sensor.feedRelay.enabled=true, no sensor.tools, and a sensor release that publishes the image (v0.42.0 or later). The relay is then required (SENSOR_FEED_RELAY=1): the sensor refuses to start when it cannot relay. It needs about 256Mi and a quarter of a CPU; lower sensor.resources to match. |
 | `sensor.region` | string | `"default"` | SENSOR_REGION reported by the sensor. |
 | `sensor.replicaCount` | int | `1` |  |
 | `sensor.resources` | object | `{"limits":{"cpu":"2","memory":"2Gi"},"requests":{"cpu":"500m","memory":"1Gi"}}` | Requests and limits of the sensor pod (its scanners run in it). The default keeps a runaway scan from starving the platform on the same nodes; the values-small/medium/large presets size it to their tier. |

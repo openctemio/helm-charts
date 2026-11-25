@@ -1496,11 +1496,24 @@ sensor:
     # subfinder, dnsx, naabu, httpx and katana. Single-tool variants are
     # <version>-<variant>: -nuclei, -betterleaks, -semgrep, -trivy (uid
     # 1001: see podSecurityContext). Pin a version for reproducible installs.
-    tag: "v0.41.1"
+    tag: "v0.42.0"
     # -- Pin by digest (sha256:<64 hex>): rendered as repository:tag@digest, the digest
     # is what the runtime pulls (the tag stays for people). Empty: pull by tag.
     digest: ""
     pullPolicy: IfNotPresent
+  # -- The sensor's image profile (sensor repository docs/PROFILES.md). Empty
+  #    (default): the image tag as given (the standard image: scanning and,
+  #    on a shared sensor, the feed relay). "relay": the relay profile image
+  #    (<tag>-relay): no tool at all, it only relays the platform's signed
+  #    feeds and reports feed.relay@1 alone, so the platform never places a
+  #    scan on it. Use it for a platform without outbound access whose sensor
+  #    should not scan. Needs sensor.enrollment=instance (a relay is a shared
+  #    sensor), sensor.feedRelay.enabled=true, no sensor.tools, and a sensor
+  #    release that publishes the image (v0.42.0 or later). The relay is then
+  #    required (SENSOR_FEED_RELAY=1): the sensor refuses to start when it
+  #    cannot relay. It needs about 256Mi and a quarter of a CPU; lower
+  #    sensor.resources to match.
+  profile: ""
   # -- SENSOR_REGION reported by the sensor.
   region: default
   # -- Override the API base URL (SENSOR_API_URL). Defaults to the in-cluster API

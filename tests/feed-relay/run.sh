@@ -70,5 +70,22 @@ must_fail "comma inside one origin" "is not an https origin" "${inst[@]}" --set 
 must_fail "signer allowlist set twice" "SIGNER_FEED_ORIGINS is set in api.signer.extraEnv" "${inst[@]}" "${orig[@]}" \
   --set 'api.signer.extraEnv[0].name=SIGNER_FEED_ORIGINS' --set 'api.signer.extraEnv[0].value=https://x.example.com'
 
+# 6. sensor.profile=relay: the <tag>-relay image, the relay required.
+rel=(--set sensor.profile=relay --set sensor.image.tag=v0.42.0)
+out="$(render "${inst[@]}" "${rel[@]}" "${dep[@]}")"
+expect "relay profile: the -relay image" 'image: "ghcr.io/openctemio/sensor:v0.42.0-relay"' "$out"
+if grep -A1 'name: SENSOR_FEED_RELAY$' <<<"$out" | grep -q 'value: "1"'; then pass "relay profile: SENSOR_FEED_RELAY=1"; else fail "relay profile: SENSOR_FEED_RELAY=1"; fi
+out="$(render "${inst[@]}" --set sensor.profile=relay --set sensor.image.tag=v0.42.0-relay "${dep[@]}")"
+expect "relay profile: a -relay tag is kept as is" 'image: "ghcr.io/openctemio/sensor:v0.42.0-relay"' "$out"
+out="$(render "${inst[@]}" --set sensor.profile=relay --set sensor.image.tag=v0.43.1 --set sensor.image.digest=sha256:$(printf 'a%.0s' $(seq 64)) "${dep[@]}")"
+expect "relay profile: digest pin kept" ":v0.43.1-relay@sha256:" "$out"
+out="$(render "${inst[@]}" "${dep[@]}")"
+reject "default profile: no -relay image" '-relay"' "$out"
+must_fail "relay profile: unknown profile" "profile" "${inst[@]}" --set sensor.profile=passive
+must_fail "relay profile: organization sensor" "set sensor.enrollment=instance" --set sensor.profile=relay --set sensor.image.tag=v0.42.0
+must_fail "relay profile: relay off" "sensor.feedRelay.enabled=false would leave it nothing to do" "${inst[@]}" "${rel[@]}" --set sensor.feedRelay.enabled=false
+must_fail "relay profile: tools listed" "leave sensor.tools empty" "${inst[@]}" "${rel[@]}" --set sensor.tools=nuclei
+must_fail "relay profile: release without the image" "v0.42.0 or later" "${inst[@]}" --set sensor.profile=relay --set sensor.image.tag=v0.41.1
+
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed"; exit 1; fi
 echo "all feed-relay checks passed"

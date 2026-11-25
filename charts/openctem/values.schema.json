@@ -1700,6 +1700,11 @@
           },
           "additionalProperties": true
         },
+        "profile": {
+          "type": "string",
+          "enum": ["", "relay"],
+          "description": "Image profile: empty (the tag as given) or relay (<tag>-relay, the feed relay only)"
+        },
         "region": {
           "type": "string"
         },

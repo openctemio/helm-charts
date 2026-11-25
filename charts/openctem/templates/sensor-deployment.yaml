@@ -20,6 +20,32 @@
 {{- $js := $sensor.jobSigning | default dict -}}
 {{- $pinValues := or $js.root $js.keys -}}
 {{- $pinSigner := include "openctem.signerPublishForSensor" . -}}
+{{- /* The relay profile (sensor.profile=relay): the <tag>-relay image, the
+       feed relay only (sensor repository docs/PROFILES.md). */ -}}
+{{- $profile := $sensor.profile | default "" -}}
+{{- $relayProfile := eq $profile "relay" -}}
+{{- if not (has $profile (list "" "relay")) }}
+{{- fail (printf "\n\nsensor.profile must be empty (the image tag as given) or relay, got %q.\n" $profile) }}
+{{- end }}
+{{- $sensorImage := $sensor.image -}}
+{{- if $relayProfile }}
+{{- if not $instance }}
+{{- fail "\n\nsensor.profile=relay relays the platform's feeds, which only a shared sensor of the instance does: set sensor.enrollment=instance.\n" }}
+{{- end }}
+{{- if not (hasKey ($sensor.feedRelay | default dict) "enabled" | ternary $sensor.feedRelay.enabled true) }}
+{{- fail "\n\nsensor.profile=relay only relays feeds: sensor.feedRelay.enabled=false would leave it nothing to do.\n" }}
+{{- end }}
+{{- if $sensor.tools }}
+{{- fail "\n\nsensor.profile=relay carries no tool: leave sensor.tools empty.\n" }}
+{{- end }}
+{{- $relayTag := toString ($sensorImage.tag | default "") -}}
+{{- if and (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+$" $relayTag) (semverCompare "<0.42.0" $relayTag) }}
+{{- fail (printf "\n\nsensor.profile=relay needs a sensor release that publishes the -relay image (v0.42.0 or later); sensor.image.tag is %s.\n" $relayTag) }}
+{{- end }}
+{{- if and $relayTag (not (hasSuffix "-relay" $relayTag)) }}
+{{- $sensorImage = merge (dict "tag" (printf "%s-relay" $relayTag)) (deepCopy $sensorImage) -}}
+{{- end }}
+{{- end }}
 {{- if not (has ($sensor.enrollment | default "pairing") (list "pairing" "instance" "token")) }}
 {{- fail "\n\nsensor.enrollment must be pairing, instance or token.\n" }}
 {{- end }}
@@ -179,7 +205,7 @@ spec:
           {{- end }}
           # The sensor is versioned separately from the platform, so the tag
           # does not default to the chart appVersion (see values.yaml).
-          image: {{ include "openctem.image" (dict "image" $sensor.image "root" . "requireTag" "sensor.image.tag is required (the sensor does not follow the chart appVersion; e.g. v0.9.1)") | quote }}
+          image: {{ include "openctem.image" (dict "image" $sensorImage "root" . "requireTag" "sensor.image.tag is required (the sensor does not follow the chart appVersion; e.g. v0.9.1)") | quote }}
           imagePullPolicy: {{ $sensor.image.pullPolicy }}
           # The image entrypoint is /usr/local/bin/openctemio-sensor.
           args:
@@ -344,6 +370,12 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- $frOn := (hasKey ($sensor.feedRelay | default dict) "enabled" | ternary $sensor.feedRelay.enabled true) }}
+            {{- if $relayProfile }}
+            # sensor.profile=relay: the relay is this sensor's only job and is
+            # required (it refuses to start when it cannot relay).
+            - name: SENSOR_FEED_RELAY
+              value: "1"
+            {{- end }}
             {{- if not $frOn }}
             # sensor.feedRelay.enabled=false: this sensor never relays feeds
             # (host policy; the platform does not fall back to direct itself).

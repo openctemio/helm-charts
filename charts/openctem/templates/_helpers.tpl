@@ -176,6 +176,7 @@ image:
   tag: v0.41.1
   digest: ""
   pullPolicy: IfNotPresent
+profile: ""
 region: default
 apiUrl: ""
 name: ""

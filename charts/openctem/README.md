@@ -1193,6 +1193,15 @@ the sensor (or refuses the task) with a clear error instead of degrading.
 - `tests/versions/check-published.sh` now warns when `appVersion` is not the
   newest platform release.
 
+## Upgrading to 0.44.0 (relay profile)
+
+- New value `sensor.profile` (default empty: the image tag as given, nothing
+  changes). `relay` runs the bundled sensor from the sensor's relay profile
+  image, `<sensor.image.tag>-relay`: no tool at all (the sensor binary on a
+  distroless static base), it only relays the platform's signed feeds and
+  reports `feed.relay@1` alone, so the platform never places a scan on it.
+  See "Feed relay" below.
+
 ## Upgrading to 0.38.0 (feed relay toggles)
 
 - New values: `sensor.feedRelay.enabled` (default `true`),
@@ -1218,6 +1227,16 @@ extra environment.
   renders `SENSOR_FEED_RELAY=0`: this sensor never relays. The platform never
   falls back to direct by itself, so turn feed delivery to direct in the
   console as well.
+- A relay that should not scan: `sensor.profile=relay` (with
+  `sensor.enrollment=instance` and a sensor release that publishes the image,
+  v0.42.0 or later). The chart renders the `<tag>-relay` image and
+  `SENSOR_FEED_RELAY=1` (the sensor refuses to start when it cannot relay),
+  and refuses `sensor.tools` and `sensor.feedRelay.enabled=false` with it. The
+  relay image needs about 256Mi of memory and a quarter of a CPU: lower
+  `sensor.resources`. Its only network need is HTTPS to the API and to the
+  feed origins. Run one to three relays for redundancy (one release each, or
+  the bundled scanning sensor next to one relay), and designate them under
+  Console > System > Feed delivery.
 - `feedRelay.newInstallRelay=true` makes a new database start in relay mode:
   the Job runs `bootstrap-admin sensor-token ... -feed-relay` and the bundled
   sensor that enrolls with the token becomes the relay. It is only passed when
@@ -2202,6 +2221,7 @@ description from its `# --` comment (generated with
 | `sensor.podAnnotations` | object | `{}` |  |
 | `sensor.podLabels` | object | `{}` |  |
 | `sensor.podSecurityContext` | object | see `values.yaml` | Pod security context. The sensor image runs as uid/gid 999 (the single-tool -nuclei/-trivy/-semgrep/-betterleaks images use 1001: set runAsUser/runAsGroup/fsGroup to 1001 for them). runAsNonRoot needs a numeric runAsUser because the image's USER is a name. Keep fsGroupChangePolicy OnRootMismatch: the kubelet then sets the group of a volume's files only while the volume's root lacks it (a new volume). With the default, Always, every mount makes each file group-readable, and the sensor refuses an identity key its group can read: a paired sensor would not start after its pod is replaced. |
+| `sensor.profile` | string | `""` | The sensor's image profile (sensor repository docs/PROFILES.md). Empty (default): the image tag as given (the standard image: scanning and, on a shared sensor, the feed relay). "relay": the relay profile image (<tag>-relay): no tool at all, it only relays the platform's signed feeds and reports feed.relay@1 alone, so the platform never places a scan on it. Use it for a platform without outbound access whose sensor should not scan. Needs sensor.enrollment=instance (a relay is a shared sensor), sensor.feedRelay.enabled=true, no sensor.tools, and a sensor release that publishes the image (v0.42.0 or later). The relay is then required (SENSOR_FEED_RELAY=1): the sensor refuses to start when it cannot relay. It needs about 256Mi and a quarter of a CPU; lower sensor.resources to match. |
 | `sensor.region` | string | `"default"` | SENSOR_REGION reported by the sensor. |
 | `sensor.replicaCount` | int | `1` |  |
 | `sensor.resources` | object | `{"limits":{"cpu":"2","memory":"2Gi"},"requests":{"cpu":"500m","memory":"1Gi"}}` | Requests and limits of the sensor pod (its scanners run in it). The default keeps a runaway scan from starving the platform on the same nodes; the values-small/medium/large presets size it to their tier. |
